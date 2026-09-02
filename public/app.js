@@ -73,8 +73,13 @@ function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.
 
 qs("#loginForm").addEventListener("submit",async e=>{
   e.preventDefault();const err=qs("#loginError");err.textContent="";
-  try{const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({identifier:qs("#identifier").value.trim()})});state.me=d.player;setPlayerNav();go("dashboard")}
-  catch(ex){err.textContent=ex.message}
+  const identifier=qs("#identifier").value.trim();
+  const password=qs("#password").value;
+  if(!identifier||!password){err.textContent="Preencha login e senha.";return}
+  try{
+    const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({identifier,password})});
+    state.me=d.player;setPlayerNav();go("dashboard");
+  }catch(ex){err.textContent=ex.message}
 });
 
 async function adminApi(url,options={}){options.headers={...(options.headers||{}),"x-admin-key":state.adminKey};return api(url,options)}
@@ -90,7 +95,7 @@ async function initAdmin(){
 }
 
 function renderAdminStats(ov){
-  const cards=[["👥","Jogadores",ov.players],["🏰","Casas",ov.houses],["📰","Notícias",ov.news],["📖","Edições",ov.editions],["🪙","Yuls em circulação",money(ov.yuls)]];
+  const cards=[["👥","Jogadores",ov.players],["🏰","Casas",ov.houses],["📰","Notícias",ov.news],["📖","Edições",ov.editions],["🪙","Yuls em circulação",money(ov.yuls)],["🔐","Sem senha",ov.withoutPassword]];
   qs("#adminStats").innerHTML=cards.map(c=>`<div class="admin-stat"><span>${c[0]} ${c[1]}</span><b>${c[2]}</b></div>`).join("");
 }
 
@@ -98,7 +103,7 @@ function renderAdminList(players,term){
   const t=String(term||"").trim().toLowerCase();
   const filtered=players.filter(p=>`${p.nick} ${p.number} ${p.identifier} ${p.house}`.toLowerCase().includes(t));
   qs("#playerCountLabel").textContent=`${filtered.length} visíveis`;
-  qs("#adminPlayerList").innerHTML=filtered.map(p=>`<button class="admin-player ${state.selectedPlayer?.id===p.id?"selected":""}" data-player-id="${p.id}" type="button"><span><b>${escapeHtml(p.nick)}${escapeHtml(p.number)}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent)}</small></span><span class="player-yuls">🪙 ${money(p.yuls)}</span></button>`).join("")||`<div style="padding:30px;text-align:center;color:#888;font-size:11px">Nenhum jogador encontrado.</div>`;
+  qs("#adminPlayerList").innerHTML=filtered.map(p=>`<button class="admin-player ${state.selectedPlayer?.id===p.id?"selected":""}" data-player-id="${p.id}" type="button"><span><b>${escapeHtml(p.nick)}${escapeHtml(p.number)}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent)} · ${p.has_password?"🔐 senha definida":"⚠️ sem senha"}</small></span><span class="player-yuls">🪙 ${money(p.yuls)}</span></button>`).join("")||`<div style="padding:30px;text-align:center;color:#888;font-size:11px">Nenhum jogador encontrado.</div>`;
   qsa(".admin-player").forEach(b=>b.addEventListener("click",()=>selectAdminPlayer(Number(b.dataset.playerId))));
 }
 
@@ -114,7 +119,7 @@ function renderEditor(p){
   const hist=(p.history||[]).map(h=>`<div class="history-row"><span>${escapeHtml(h.reason||"Movimentação")}<br><small>${escapeHtml(h.created_at||"")}</small></span><b class="${h.amount>=0?"plus":"minus"}">${h.amount>=0?"+":""}${money(h.amount)} → ${money(h.balance_after)}</b></div>`).join("")||`<div style="font-size:10px;color:#888;padding:8px 0">Nenhuma movimentação registrada.</div>`;
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">EDITANDO JOGADOR</p><h3>${escapeHtml(p.nick)}${escapeHtml(p.number)}</h3><p>${escapeHtml(p.identifier)}</p></div><button class="icon-button" type="button" id="closeEditor">×</button></div>
   <form id="editPlayerForm"><div class="form-grid">
-  ${field("Nick","nick",p.nick)}${field("Número","number",p.number)}${field("Casa","house",p.house)}${field("Patente","patent",p.patent)}${field("Cargo","role",p.role)}${field("Grimório","grimoire",p.grimoire)}
+  ${field("Nick","nick",p.nick)}${field("Número","number",p.number)}${field("Nova senha","password","","password")}${field("Casa","house",p.house)}${field("Patente","patent",p.patent)}${field("Cargo","role",p.role)}${field("Grimório","grimoire",p.grimoire)}
   ${field("❤️ HP","hp",p.hp,"number")}${field("♦️ Mana","mana",p.mana,"number")}${field("🪙 Yuls","yuls",p.yuls,"number")}${field("📋 Missões","missions",p.missions,"number")}${field("🏆 Conquistas","achievements",p.achievements,"number")}${field("Ranking","ranking",p.ranking,"number")}
   <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
   </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">Excluir jogador</button></div><div class="error" id="editError"></div></form>
@@ -158,7 +163,7 @@ function openNewPlayer(){
   state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">NOVO CADASTRO</p><h3>Novo jogador</h3><p>Crie o acesso usando Nick + número.</p></div><button class="icon-button" id="closeEditor" type="button">×</button></div>
   <form id="newAdminPlayerForm"><div class="form-grid">
-  ${field("Nick","nick","")}${field("Número","number","01")}${field("Casa","house","")}${field("Patente","patent","Cavaleiro Mágico Junior")}${field("Cargo","role","")}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking","ranking",0,"number")}
+  ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${field("Patente","patent","Cavaleiro Mágico Junior")}${field("Cargo","role","")}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking","ranking",0,"number")}
   </div><div class="editor-actions"><button class="gold" type="submit">Cadastrar jogador</button></div><div class="error" id="newPlayerError"></div></form>`;
   qs("#closeEditor").addEventListener("click",()=>renderEditor({nick:"",number:"",history:[],public_profile:1}));
   qs("#newAdminPlayerForm").addEventListener("submit",async e=>{
