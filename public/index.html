@@ -28,7 +28,29 @@
 <section class="page" id="jogadores"><div class="subhero"><p class="eyebrow">COMUNIDADE</p><h1>Jogadores do <em>Reino.</em></h1><p>Consulte os perfis públicos cadastrados no portal.</p></div><div class="content"><input class="search" id="playerSearch" placeholder="Pesquisar jogador ou Casa"><div id="playerGrid" class="player-grid"></div></div></section>
 <section class="page" id="casas"><div class="subhero"><p class="eyebrow">GRANDES CASAS</p><h1>As Casas de <em>Spade.</em></h1><p>Desempenho, membros e atividade das Casas cadastradas.</p></div><div class="content"><div id="houseGrid" class="house-grid"></div></div></section>
 <section class="page" id="ranking"><div class="subhero"><p class="eyebrow">PLACAR DO REINO</p><h1>Ranking <em>geral.</em></h1><p>Classificação baseada nos dados cadastrados no sistema.</p></div><div class="content"><div class="panel table-wrap"><table><thead><tr><th>#</th><th>Jogador</th><th>Casa</th><th>Missões</th><th>Yuls</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div></section>
-<section class="page" id="login"><div class="login-wrap"><div class="seal big">♠<small>SPADE</small></div><p class="eyebrow">PORTAL DO JOGADOR</p><h1>Entrar no Reino</h1><p>Use seu identificador formado pelo nick + número.</p><form id="loginForm"><label for="identifier">Identificador</label><input id="identifier" autocomplete="username" placeholder="Ex.: Mattiel01" maxlength="50" required><button class="gold full">Entrar</button><div class="error" id="loginError" aria-live="polite"></div></form></div></section>
+<section class="page" id="login">
+<div class="login-wrap">
+  <div class="seal big">♠<small>SPADE</small></div>
+  <p class="eyebrow">PORTAL DO JOGADOR</p>
+  <h1>Entrar no Reino</h1>
+  <p>Use seu login e sua senha cadastrados pela administração.</p>
+
+  <form id="loginForm">
+    <label for="identifier">Login</label>
+    <input id="identifier" autocomplete="username" placeholder="Ex.: MATTIEL00000001" maxlength="80" required>
+
+    <label for="password" style="margin-top:14px">Senha</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="Digite sua senha" maxlength="100" required>
+
+    <button class="gold full">Entrar</button>
+    <div class="error" id="loginError" aria-live="polite"></div>
+  </form>
+
+  <p style="margin-top:18px;font-size:10px;color:#777">
+    Esqueceu a senha? Procure a administração do RPG.
+  </p>
+</div>
+</section>
 <section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p>Acompanhe sua jornada, seus dados e sua posição no Reino.</p></div><div class="content"><div id="dash"></div><div class="player-yuls-section"><div class="panel player-yuls-card"><div class="player-yuls-head"><div><p class="eyebrow">BANCO DE YULS</p><h3>Meu saldo</h3></div><strong id="playerYulsBalance">🪙 0</strong></div><div id="playerYulsHistory" class="player-yuls-history"><p>Carregando histórico...</p></div></div></div><div class="player-missions-section"><div class="panel player-missions-card"><div class="player-missions-head"><div><p class="eyebrow">ATIVIDADE</p><h3>Minhas missões</h3></div><strong id="playerMissionCount">0 missões</strong></div><div id="playerMissionHistory" class="player-mission-history"><p>Carregando missões...</p></div></div></div></div></section>
 <section class="page" id="my-yuls"><div class="subhero compact"><p class="eyebrow">ECONOMIA DO JOGADOR</p><h1>Meu <em>Banco de Yuls.</em></h1><p>Consulte seu saldo e acompanhe todas as movimentações registradas pela administração.</p></div><div class="content"><div id="myYuls"></div></div></section>
 <section class="page" id="admin"><div class="subhero compact"><div class="admin-title-line"><div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Painel do <em>Reino.</em></h1><p>Controle central de jogadores, Yuls, jornal e dados do RPG.</p></div><span class="admin-lock">♛ ADMIN</span></div></div>
@@ -46,7 +68,7 @@
     </div>
   </div>
   <div class="admin-grid-2">
-    <div class="panel"><p class="eyebrow">PUBLICAR NOTÍCIA</p><form id="newsForm" class="admin-form"><input name="title" placeholder="Título" required><input name="category" value="RPG" placeholder="Categoria"><input name="excerpt" placeholder="Resumo"><textarea name="body" placeholder="Texto completo"></textarea><button class="gold">Publicar notícia</button></form></div>
+    <div class="panel"><p class="eyebrow">PUBLICAR NOTÍCIA</p><form id="newsForm" class="admin-form"><input name="title" placeholder="Títul o"required><input name="category" value="RPG" placeholder="Categoria"><input name="excerpt" placeholder="Resumo"><textarea name="body" placeholder="Texto completo"></textarea><button class="gold">Publicar notícia</button></form></div>
     <div class="panel"><p class="eyebrow">PUBLICAR EDIÇÃO</p><form id="editionForm" class="admin-form"><input name="title" placeholder="Título da edição" required><input name="edition" placeholder="Ex.: EDIÇÃO 02"><input name="description" placeholder="Descrição"><input name="pdf_url" placeholder="Link do PDF"><button class="gold">Publicar edição</button></form></div>
   </div>
   <div class="admin-danger"><button class="outline danger" id="logoutAdminBtn">Sair da administração</button></div>
