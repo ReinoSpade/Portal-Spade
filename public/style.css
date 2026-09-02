@@ -55,3 +55,15 @@
 .admin-house-item-actions{display:flex;gap:5px}.admin-house-item-actions button{height:34px;min-width:34px;border:1px solid #d2cabc;background:#fff;border-radius:7px;cursor:pointer}.admin-house-item-actions .delete{color:#8b5050}
 @media(max-width:900px){.house-grid{grid-template-columns:1fr 1fr}.admin-house-layout{grid-template-columns:1fr}}
 @media(max-width:520px){.house-grid{grid-template-columns:1fr}.house-detail-head{flex-direction:column}.house-stats{grid-template-columns:1fr}.admin-house-form{grid-template-columns:1fr}.admin-house-form textarea,.admin-house-form .editor-actions{grid-column:auto}}
+
+.ranking-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.ranking-tab{border:1px solid #d3cbbc;background:#fff;color:#5d584f;border-radius:9px;padding:11px 14px;font:800 10px Inter;letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+.ranking-tab:hover,.ranking-tab.active{background:#c6a45d;color:#111;border-color:#c6a45d}
+.ranking-explainer{font-size:11px;color:#777;margin:0 0 10px;padding:0 2px}
+.ranking-panel{padding:12px}
+.ranking-table th,.ranking-table td{vertical-align:middle}
+.rank-number{font:700 18px Cinzel;color:#9a7738}
+.rank-main{font:600 13px Cinzel}.rank-main small{display:block;font:400 9px Inter;color:#888;margin-top:3px}
+.rank-secondary{font-weight:700;color:#4f4b44}
+.rank-house{font-size:10px;color:#777}
+.house-rank-main{display:flex;gap:10px;align-items:center}.house-rank-emblem{width:34px;height:34px;border-radius:8px;background:#17181b;color:#c6a45d;display:grid;place-items:center;font-size:17px}
