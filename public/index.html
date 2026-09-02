@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Portal Spade — The King Magazine</title>
+<meta name="description" content="Portal oficial do RPG — Reino Spade">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+<header class="top">
+  <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
+  <button class="hamb" id="hamb">☰</button>
+  <nav id="nav">
+    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button>
+    <button data-page="login" id="loginNav">Entrar</button>
+  </nav>
+</header>
+
+<main>
+<section class="page active" id="home">
+  <div class="hero">
+    <div><p class="eyebrow">PORTAL OFICIAL DO REINO SPADE</p><h1>A história do RPG<br><em>vive aqui.</em></h1><p class="lead">Jornal, jogadores, Casas, rankings e os grandes acontecimentos do Reino em um só lugar.</p><div class="actions"><button class="gold" data-page="jornal">Ler o jornal</button><button class="outline" data-page="login">Entrar como jogador</button></div></div>
+    <div class="seal">♠<small>REINO SPADE<br>PORTAL OFICIAL</small></div>
+  </div>
+  <div class="content"><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
+  <div class="split"><div class="panel"><p class="eyebrow">EDIÇÃO ATUAL</p><h3 id="editionTitle">Carregando...</h3><p id="editionDesc"></p><button class="gold small" data-page="jornal">Abrir jornal</button></div><div class="panel"><p class="eyebrow">REINO</p><h3>O portal está vivo.</h3><p>As páginas públicas serão alimentadas pelos dados que você cadastrar no painel administrativo.</p></div></div>
+  </div>
+</section>
+
+<section class="page" id="jornal"><div class="subhero"><p class="eyebrow">THE KING MAGAZINE</p><h1>O jornal do <em>Reino Spade.</em></h1><p>Edite as edições pelo painel administrativo e disponibilize os PDFs aos jogadores.</p></div><div class="content"><div id="editions" class="edition-grid"></div></div></section>
+
+<section class="page" id="jogadores"><div class="subhero"><p class="eyebrow">COMUNIDADE</p><h1>Jogadores do <em>Reino.</em></h1><p>Consulte os perfis públicos cadastrados no portal.</p></div><div class="content"><input class="search" id="playerSearch" placeholder="Pesquisar jogador ou Casa"><div id="playerGrid" class="player-grid"></div></div></section>
+
+<section class="page" id="casas"><div class="subhero"><p class="eyebrow">GRANDES CASAS</p><h1>As Casas de <em>Spade.</em></h1><p>Desempenho, membros e atividade das Casas cadastradas.</p></div><div class="content"><div id="houseGrid" class="house-grid"></div></div></section>
+
+<section class="page" id="ranking"><div class="subhero"><p class="eyebrow">PLACAR DO REINO</p><h1>Ranking <em>geral.</em></h1><p>Classificação baseada nos dados cadastrados no sistema.</p></div><div class="content"><div class="panel table-wrap"><table><thead><tr><th>#</th><th>Jogador</th><th>Casa</th><th>Missões</th><th>Yuls</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div></section>
+
+<section class="page" id="login"><div class="login-wrap"><div class="seal big">♠<small>SPADE</small></div><p class="eyebrow">PORTAL DO JOGADOR</p><h1>Entrar no Reino</h1><p>Use seu identificador formado pelo nick + número.</p><form id="loginForm"><label for="identifier">Identificador</label><input id="identifier" autocomplete="username" placeholder="Ex.: Mattiel01" maxlength="50" required><button class="gold full">Entrar</button><div class="error" id="loginError" aria-live="polite"></div></form></div></section>
+
+<section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p>Acompanhe sua jornada, seus dados e sua posição no Reino.</p></div><div class="content"><div id="dash"></div></div></section>
+
+<section class="page" id="admin"><div class="subhero compact"><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Painel do <em>Reino.</em></h1><p>Gerencie jogadores, notícias e edições.</p></div><div class="content"><div class="admin-actions"><button class="gold" id="seedBtn">Criar dados iniciais</button><button class="outline" id="logoutBtn">Sair do jogador</button></div><div class="admin-grid"><div class="panel"><p class="eyebrow">CRIAR JOGADOR</p><form id="playerForm" class="admin-form"><input name="nick" placeholder="Nick" required><input name="number" placeholder="Número (ex. 01)" required><input name="house" placeholder="Casa"><input name="patent" placeholder="Patente"><input name="role" placeholder="Cargo"><input name="grimoire" placeholder="Grimório"><input name="hp" type="number" value="200" placeholder="HP"><input name="mana" type="number" value="400" placeholder="Mana"><input name="yuls" type="number" value="0" placeholder="Yuls"><input name="missions" type="number" value="0" placeholder="Missões"><input name="achievements" type="number" value="0" placeholder="Conquistas"><input name="ranking" type="number" value="0" placeholder="Ranking"><button class="gold">Cadastrar jogador</button><div class="error" id="playerError"></div></form></div><div class="panel"><p class="eyebrow">PUBLICAR NOTÍCIA</p><form id="newsForm" class="admin-form"><input name="title" placeholder="Título" required><input name="category" placeholder="Categoria" value="RPG"><input name="excerpt" placeholder="Resumo"><textarea name="body" placeholder="Texto completo"></textarea><button class="gold">Publicar notícia</button></form><div class="line"></div><p class="eyebrow">PUBLICAR EDIÇÃO</p><form id="editionForm" class="admin-form"><input name="title" placeholder="Título da edição" required><input name="edition" placeholder="Ex.: EDIÇÃO 02"><input name="description" placeholder="Descrição"><input name="pdf_url" placeholder="Link do PDF"><button class="gold">Publicar edição</button></form></div></div><div class="panel"><p class="eyebrow">JOGADORES CADASTRADOS</p><div class="table-wrap"><table><thead><tr><th>Jogador</th><th>Identificador</th><th>Casa</th><th>Yuls</th><th>Missões</th></tr></thead><tbody id="adminPlayers"></tbody></table></div></div></div></section>
+</main>
+<footer><span>♠ THE KING MAGAZINE</span><small>Portal oficial do Reino Spade • 2026</small></footer>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
