@@ -15,10 +15,7 @@ function go(page){
   if(page==="jogadores") loadPlayers();
   if(page==="casas") loadHouses();
   if(page==="ranking") loadRanking();
-  if(page==="dashboard") {
-    if(state.me) renderDashboard();
-    else go("login");
-  }
+  if(page==="dashboard"){ if(state.me) renderDashboard(); else refreshDashboard(); }
   if(page==="admin" && state.admin) initAdmin();
 }
 
@@ -26,6 +23,7 @@ qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.pag
 qs("#hamb").addEventListener("click",()=>qs("#nav").classList.toggle("open"));
 
 async function api(url,options={}){
+  options.credentials="same-origin";
   const r=await fetch(url,options);let d={};
   try{d=await r.json()}catch{}
   if(!r.ok)throw new Error(d.error||"Ocorreu um erro.");
@@ -61,6 +59,35 @@ async function loadRanking(){
 }
 
 
+async function loadPlayerYuls(){
+  const balanceEl=qs("#playerYulsBalance");
+  const historyEl=qs("#playerYulsHistory");
+  if(!balanceEl||!historyEl)return;
+
+  balanceEl.textContent=`🪙 ${money(state.me?.yuls||0)}`;
+  historyEl.innerHTML="<p>Carregando histórico...</p>";
+
+  try{
+    const d=await api("/api/me/yuls-history");
+    balanceEl.textContent=`🪙 ${money(d.balance)}`;
+
+    historyEl.innerHTML=d.history.length
+      ? d.history.map(h=>`<div class="player-yuls-row">
+          <div class="reason">
+            <b>${escapeHtml(h.reason||"Movimentação")}</b>
+            <small>${escapeHtml(new Date(h.created_at).toLocaleString("pt-BR"))}</small>
+          </div>
+          <div class="change ${h.amount>=0?"plus":"minus"}">
+            ${h.amount>=0?"+":""}${money(h.amount)}
+            <small>Saldo: ${money(h.balance_after)}</small>
+          </div>
+        </div>`).join("")
+      : `<div class="yuls-empty">Nenhuma movimentação de Yuls registrada.</div>`;
+  }catch(e){
+    historyEl.innerHTML=`<div class="yuls-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
 async function loadPlayerMissions(){
   const countEl=qs("#playerMissionCount");
   const historyEl=qs("#playerMissionHistory");
@@ -89,14 +116,11 @@ async function refreshDashboard(){
     const d=await api("/api/me");
     state.me=d.player;
     setPlayerNav();
-    if(state.page==="dashboard") renderDashboard();
+    renderDashboard();
   }catch(e){
-    // Keep the current local session state. A temporary /api/me failure
-    // must not throw a player back to the login screen.
-    if(!state.me) {
-      setLoginNav();
-      go("login");
-    }
+    state.me=null;
+    setLoginNav();
+    go("login");
   }
 }
 
@@ -123,7 +147,7 @@ qs("#loginForm").addEventListener("submit",async e=>{
   if(!identifier||!password){err.textContent="Preencha login e senha.";return}
   try{
     const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({identifier,password})});
-    state.me=d.player;setPlayerNav();go("dashboard");refreshDashboard();
+    state.me=d.player;setPlayerNav();go("dashboard");
   }catch(ex){err.textContent=ex.message}
 });
 
@@ -266,5 +290,3 @@ async function tryAdminHash(){
 }
 
 loadHome();tryMe();tryAdminHash();
-
-setTimeout(()=>refreshDashboard(),200);
