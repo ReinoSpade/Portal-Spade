@@ -12,3 +12,46 @@
 
 .player-missions-section{margin-top:12px}.player-missions-card{background:#fff}.player-missions-head{display:flex;justify-content:space-between;align-items:end;gap:15px;border-bottom:1px solid #e5ddd1;padding-bottom:15px}.player-missions-head h3{margin:0;font:600 25px Cinzel}.player-missions-head>strong{font:600 16px Cinzel;color:#9a7738;white-space:nowrap}.player-mission-history{max-height:420px;overflow:auto;margin-top:8px}.player-mission-row{padding:14px 0;border-top:1px solid #eee6da}.player-mission-top{display:flex;justify-content:space-between;gap:12px;align-items:start}.player-mission-title{font:600 16px Cinzel}.player-mission-meta{font-size:9px;color:#777;margin-top:4px;line-height:1.5}.mission-status{font-size:8px;text-transform:uppercase;letter-spacing:.11em;border:1px solid #cfc4ae;border-radius:99px;padding:5px 8px;white-space:nowrap}.mission-status.done{color:#557050;border-color:#9cad97}.mission-status.fail{color:#8a5050;border-color:#c5a1a1}.mission-status.cancel{color:#856f4a;border-color:#cbb891}.mission-reward{font-size:10px;color:#9a7738;font-weight:800;margin-top:7px}.mission-notes{font-size:10px;color:#777;line-height:1.6;margin-top:6px}.admin-mission-box{margin-top:20px;background:#f7f2e9;border:1px solid #e0d7c9;border-radius:10px;padding:15px}.admin-mission-box h4{font:600 17px Cinzel;margin:0 0 12px}.mission-form-grid{display:grid;grid-template-columns:1.3fr .7fr .7fr;gap:8px}.mission-form-grid input,.mission-form-grid select{height:42px;border:1px solid #cec5b7;border-radius:8px;padding:0 10px;background:#fff;font-size:11px}.mission-form-grid .wide{grid-column:1/-1}.mission-form-grid textarea{min-height:70px;border:1px solid #cec5b7;border-radius:8px;padding:10px;background:#fff;font-size:11px;resize:vertical}.mission-form-actions{display:flex;gap:8px;align-items:center;margin-top:9px}.admin-mission-history{max-height:220px;overflow:auto;margin-top:12px}.admin-mission-row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e3dbd0;padding:9px 0;font-size:10px}.admin-mission-row button{background:none;border:0;color:#8a5050;font-size:10px;cursor:pointer}.admin-mission-row span{color:#555}.admin-mission-row small{display:block;color:#999;margin-top:3px}
 @media(max-width:900px){.mission-form-grid{grid-template-columns:1fr 1fr}}@media(max-width:430px){.player-missions-head{align-items:start;flex-direction:column}.mission-form-grid{grid-template-columns:1fr}.mission-form-grid .wide{grid-column:auto}}
+
+.house-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.house-public-card{background:#fff;border:1px solid #dcd5c8;border-radius:12px;padding:20px;cursor:pointer;text-align:left;transition:.18s}
+.house-public-card:hover{border-color:#aa8a50;transform:translateY(-1px)}
+.house-public-card.selected{border-color:#aa8a50;background:#f8f1e5}
+.house-emblem{width:54px;height:54px;border-radius:12px;background:#15161a;color:#c6a45d;border:1px solid #685536;display:grid;place-items:center;font-size:27px;margin-bottom:14px}
+.house-public-card h3{font:600 20px Cinzel;margin:0 0 6px}
+.house-public-card p{font-size:11px;color:#777;line-height:1.55;margin:0 0 12px}
+.house-meta{display:flex;gap:12px;flex-wrap:wrap;color:#6f6b63;font-size:9px;text-transform:uppercase;letter-spacing:.08em}
+.house-detail-wrap{margin-top:18px}
+.house-detail{background:#111216;color:#fff;border:1px solid #35363b;border-radius:14px;padding:26px}
+.house-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:1px solid #303137;padding-bottom:20px}
+.house-detail-ident{display:flex;gap:15px;align-items:center}
+.house-detail-ident .house-emblem{margin:0;width:66px;height:66px;font-size:34px}
+.house-detail h2{font:600 28px Cinzel;margin:0 0 5px}
+.house-detail .lead-house{color:#9c9a95;font-size:11px;line-height:1.6;max-width:620px;margin:0}
+.house-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:17px 0}
+.house-stat{background:#18191d;border:1px solid #2e3035;border-radius:9px;padding:13px}
+.house-stat small{display:block;color:#777;font-size:8px;text-transform:uppercase;letter-spacing:.12em}
+.house-stat b{display:block;font:600 20px Cinzel;margin-top:6px;color:#e3c37d}
+.house-members{margin-top:20px}
+.house-members h3{font:600 19px Cinzel;margin:0 0 9px}
+.house-member-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:11px 0;border-top:1px solid #292a2f}
+.house-member-row .member-main b{display:block;font:600 13px Cinzel}
+.house-member-row .member-main small{display:block;color:#888;font-size:9px;margin-top:3px}
+.house-member-row .member-values{text-align:right;color:#bcb9b2;font-size:10px}
+.house-member-row .member-values span{display:block}
+.house-back{margin-bottom:12px}
+.house-back button{background:none;border:0;color:#9c9a95;font-size:10px;cursor:pointer}
+.house-empty{padding:36px;text-align:center;color:#888;font-size:11px;background:#fff;border:1px solid #dcd5c8;border-radius:12px}
+.admin-house-panel{margin-top:12px}
+.admin-house-layout{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.admin-house-form{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.admin-house-form input,.admin-house-form textarea{width:100%;padding:12px 13px;border:1px solid #cfc7bb;border-radius:8px;background:#fff;font-size:12px}
+.admin-house-form textarea{min-height:92px;resize:vertical;grid-column:1/-1}
+.admin-house-form .editor-actions{grid-column:1/-1}
+.admin-house-list{display:grid;gap:7px;max-height:330px;overflow:auto}
+.admin-house-item{background:#faf8f3;border:1px solid #e0d8cc;border-radius:9px;padding:12px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.admin-house-item b{font:600 14px Cinzel}
+.admin-house-item small{display:block;color:#777;font-size:9px;margin-top:3px}
+.admin-house-item-actions{display:flex;gap:5px}.admin-house-item-actions button{height:34px;min-width:34px;border:1px solid #d2cabc;background:#fff;border-radius:7px;cursor:pointer}.admin-house-item-actions .delete{color:#8b5050}
+@media(max-width:900px){.house-grid{grid-template-columns:1fr 1fr}.admin-house-layout{grid-template-columns:1fr}}
+@media(max-width:520px){.house-grid{grid-template-columns:1fr}.house-detail-head{flex-direction:column}.house-stats{grid-template-columns:1fr}.admin-house-form{grid-template-columns:1fr}.admin-house-form textarea,.admin-house-form .editor-actions{grid-column:auto}}
