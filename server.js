@@ -1,6 +1,7 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const path = require("path");
 const { Pool } = require("pg");
 
@@ -51,7 +52,7 @@ function readPlayerToken(req) {
 function publicPlayer(row) {
   if (!row) return null;
   return {
-    id: row.id,
+    id: Number(row.id),
     nick: row.nick,
     number: row.number,
     identifier: row.identifier,
@@ -80,6 +81,10 @@ function positiveInt(v, fallback = 0) {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : fallback;
 }
 
+function normalizeIdentifier(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS players (
@@ -87,6 +92,7 @@ async function initDatabase() {
       nick TEXT NOT NULL,
       number TEXT NOT NULL,
       identifier TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL DEFAULT '',
       house TEXT DEFAULT '',
       patent TEXT DEFAULT 'Cavaleiro Mágico Junior',
       role TEXT DEFAULT '',
@@ -101,6 +107,8 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS news (
       id BIGSERIAL PRIMARY KEY,
@@ -136,7 +144,6 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_yuls_history_player ON yuls_history(player_id, id DESC);
   `);
 
-  // Helpful first-run content only; never duplicates on later restarts.
   const newsCount = await pool.query("SELECT COUNT(*)::int AS c FROM news");
   if (newsCount.rows[0].c === 0) {
     await pool.query(
@@ -170,16 +177,23 @@ app.get("/api/health", async (req, res) => {
 
 app.post("/api/login", async (req, res) => {
   const identifier = String(req.body.identifier || "").trim();
-  if (!identifier || !/\d$/.test(identifier)) {
-    return res.status(400).json({ error: "Informe um identificador válido, como Mattiel01." });
-  }
+  const password = String(req.body.password || "");
+  if (!identifier) return res.status(400).json({ error: "Informe seu login." });
+  if (!password) return res.status(400).json({ error: "Informe sua senha." });
+
   try {
     const result = await pool.query(
       "SELECT * FROM players WHERE lower(identifier)=lower($1) AND public_profile=1 LIMIT 1",
       [identifier]
     );
     const player = result.rows[0];
-    if (!player) return res.status(401).json({ error: "Jogador não encontrado. Confira o nick e o número." });
+    if (!player) return res.status(401).json({ error: "Login ou senha incorretos." });
+    if (!player.password_hash) {
+      return res.status(403).json({ error: "Sua senha ainda não foi cadastrada. Procure a administração do RPG." });
+    }
+
+    const valid = await bcrypt.compare(password, player.password_hash);
+    if (!valid) return res.status(401).json({ error: "Login ou senha incorretos." });
 
     res.cookie("spade_player", makePlayerToken(Number(player.id)), {
       httpOnly: true,
@@ -226,7 +240,7 @@ app.get("/api/home", async (req, res) => {
     res.json({
       news: news.rows,
       editions: editions.rows,
-      houses: houses.rows.map(x => ({...x, missions: Number(x.missions)})),
+      houses: houses.rows.map(x => ({ ...x, missions: Number(x.missions) })),
       ranking: ranking.rows
     });
   } catch (e) {
@@ -241,7 +255,11 @@ app.get("/api/ranking", async (req, res) => {
       `SELECT nick,identifier,house,missions,yuls,ranking
        FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 75`
     );
-    res.json({ ranking: result.rows.map(x => ({...x, yuls: Number(x.yuls), missions: Number(x.missions), ranking: Number(x.ranking)})) });
+    res.json({
+      ranking: result.rows.map(x => ({
+        ...x, yuls: Number(x.yuls), missions: Number(x.missions), ranking: Number(x.ranking)
+      }))
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar ranking." });
@@ -263,19 +281,21 @@ app.get("/api/players", async (req, res) => {
 
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
   try {
-    const [players, houses, news, editions, yuls] = await Promise.all([
+    const [players, houses, news, editions, yuls, withoutPassword] = await Promise.all([
       pool.query("SELECT COUNT(*)::int AS c FROM players"),
       pool.query("SELECT COUNT(DISTINCT house)::int AS c FROM players WHERE house<>''"),
       pool.query("SELECT COUNT(*)::int AS c FROM news WHERE published=1"),
       pool.query("SELECT COUNT(*)::int AS c FROM editions WHERE published=1"),
-      pool.query("SELECT COALESCE(SUM(yuls),0)::bigint AS s FROM players")
+      pool.query("SELECT COALESCE(SUM(yuls),0)::bigint AS s FROM players"),
+      pool.query("SELECT COUNT(*)::int AS c FROM players WHERE password_hash=''")
     ]);
     res.json({
       players: players.rows[0].c,
       houses: houses.rows[0].c,
       news: news.rows[0].c,
       editions: editions.rows[0].c,
-      yuls: Number(yuls.rows[0].s)
+      yuls: Number(yuls.rows[0].s),
+      withoutPassword: withoutPassword.rows[0].c
     });
   } catch (e) {
     console.error(e);
@@ -286,12 +306,15 @@ app.get("/api/admin/overview", requireAdmin, async (req, res) => {
 app.get("/api/admin/players", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM players ORDER BY nick COLLATE \"C\" ASC");
-    res.json({ players: result.rows.map(r => ({
-      ...publicPlayer(r),
-      public_profile: Number(r.public_profile),
-      created_at: r.created_at,
-      updated_at: r.updated_at
-    }))});
+    res.json({
+      players: result.rows.map(r => ({
+        ...publicPlayer(r),
+        public_profile: Number(r.public_profile),
+        has_password: Boolean(r.password_hash),
+        created_at: r.created_at,
+        updated_at: r.updated_at
+      }))
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar jogadores administrativos." });
@@ -300,7 +323,7 @@ app.get("/api/admin/players", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({error:"Jogador inválido."});
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   try {
     const [playerResult, historyResult] = await Promise.all([
       pool.query("SELECT * FROM players WHERE id=$1", [id]),
@@ -313,72 +336,98 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
     const player = playerResult.rows[0];
     if (!player) return res.status(404).json({ error: "Jogador não encontrado." });
     res.json({
-      player: {...publicPlayer(player), public_profile: Number(player.public_profile), created_at: player.created_at, updated_at: player.updated_at},
-      history: historyResult.rows.map(h => ({...h, amount:Number(h.amount), balance_after:Number(h.balance_after)}))
+      player: {
+        ...publicPlayer(player),
+        public_profile: Number(player.public_profile),
+        has_password: Boolean(player.password_hash),
+        created_at: player.created_at,
+        updated_at: player.updated_at
+      },
+      history: historyResult.rows.map(h => ({
+        ...h, amount: Number(h.amount), balance_after: Number(h.balance_after)
+      }))
     });
-  } catch(e) {
+  } catch (e) {
     console.error(e);
-    res.status(500).json({error:"Erro ao carregar jogador."});
+    res.status(500).json({ error: "Erro ao carregar jogador." });
   }
 });
+
+async function validateNewPassword(password) {
+  const value = String(password || "");
+  if (value.length < 6) throw new Error("A senha precisa ter pelo menos 6 caracteres.");
+  if (value.length > 100) throw new Error("A senha é muito longa.");
+  return bcrypt.hash(value, 12);
+}
 
 app.post("/api/admin/players", requireAdmin, async (req, res) => {
   const b = req.body || {};
   const nick = String(b.nick || "").trim();
   const number = String(b.number || "").trim();
+  const password = String(b.password || "");
+
   if (!nick || !number || !/^\d+$/.test(number)) {
     return res.status(400).json({ error: "Nick e número são obrigatórios." });
   }
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Defina uma senha com pelo menos 6 caracteres." });
+  }
+
   const identifier = `${nick}${number}`;
-  const values = [
-    nick, number, identifier,
-    String(b.house || ""), String(b.patent || "Cavaleiro Mágico Junior"),
-    String(b.role || ""), String(b.grimoire || ""),
-    positiveInt(b.hp,200), positiveInt(b.mana,400), positiveInt(b.yuls,0),
-    positiveInt(b.missions,0), positiveInt(b.achievements,0), positiveInt(b.ranking,0),
-    Number(b.public_profile ?? 1) ? 1 : 0
-  ];
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    const result = await client.query(
+    const passwordHash = await validateNewPassword(password);
+    const result = await pool.query(
       `INSERT INTO players
-       (nick,number,identifier,house,patent,role,grimoire,hp,mana,yuls,missions,achievements,ranking,public_profile)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       (nick,number,identifier,password_hash,house,patent,role,grimoire,hp,mana,yuls,missions,achievements,ranking,public_profile)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
-      values
+      [
+        nick, number, identifier, passwordHash,
+        String(b.house || ""), String(b.patent || "Cavaleiro Mágico Junior"),
+        String(b.role || ""), String(b.grimoire || ""),
+        positiveInt(b.hp, 200), positiveInt(b.mana, 400), positiveInt(b.yuls, 0),
+        positiveInt(b.missions, 0), positiveInt(b.achievements, 0), positiveInt(b.ranking, 0),
+        Number(b.public_profile ?? 1) ? 1 : 0
+      ]
     );
     const player = result.rows[0];
     if (Number(player.yuls) !== 0) {
-      await client.query(
+      await pool.query(
         `INSERT INTO yuls_history(player_id,amount,reason,balance_after)
          VALUES ($1,$2,$3,$4)`,
         [player.id, Number(player.yuls), "Saldo inicial", Number(player.yuls)]
       );
     }
-    await client.query("COMMIT");
-    res.json({ player: {...publicPlayer(player), public_profile:Number(player.public_profile)} });
-  } catch(e) {
-    await client.query("ROLLBACK");
+    res.json({ player: { ...publicPlayer(player), public_profile: Number(player.public_profile), has_password: true } });
+  } catch (e) {
     console.error(e);
-    if (e.code === "23505") return res.status(400).json({error:"Não foi possível criar. O identificador já existe."});
-    res.status(500).json({ error:"Erro ao criar jogador." });
-  } finally {
-    client.release();
+    if (e.code === "23505") return res.status(400).json({ error: "Não foi possível criar. O identificador já existe." });
+    if (e.message?.includes("Senha")) return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: "Erro ao criar jogador." });
   }
 });
 
 app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({error:"Jogador inválido."});
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   const b = req.body || {};
   const currentResult = await pool.query("SELECT * FROM players WHERE id=$1", [id]);
   const current = currentResult.rows[0];
-  if (!current) return res.status(404).json({error:"Jogador não encontrado."});
+  if (!current) return res.status(404).json({ error: "Jogador não encontrado." });
 
   const nick = String(b.nick ?? current.nick).trim();
   const number = String(b.number ?? current.number).trim();
-  if (!nick || !number || !/^\d+$/.test(number)) return res.status(400).json({error:"Nick e número são obrigatórios."});
+  if (!nick || !number || !/^\d+$/.test(number)) {
+    return res.status(400).json({ error: "Nick e número são obrigatórios." });
+  }
+
+  let passwordHash = current.password_hash || "";
+  if (String(b.password || "").length > 0) {
+    if (String(b.password).length < 6) {
+      return res.status(400).json({ error: "A nova senha precisa ter pelo menos 6 caracteres." });
+    }
+    passwordHash = await bcrypt.hash(String(b.password), 12);
+  }
 
   const newYuls = positiveInt(b.yuls, Number(current.yuls));
   const client = await pool.connect();
@@ -386,17 +435,17 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
     await client.query("BEGIN");
     const result = await client.query(
       `UPDATE players
-       SET nick=$1, number=$2, identifier=$3, house=$4, patent=$5, role=$6, grimoire=$7,
-           hp=$8, mana=$9, yuls=$10, missions=$11, achievements=$12, ranking=$13,
-           public_profile=$14, updated_at=NOW()
-       WHERE id=$15
+       SET nick=$1, number=$2, identifier=$3, password_hash=$4, house=$5, patent=$6, role=$7, grimoire=$8,
+           hp=$9, mana=$10, yuls=$11, missions=$12, achievements=$13, ranking=$14,
+           public_profile=$15, updated_at=NOW()
+       WHERE id=$16
        RETURNING *`,
       [
-        nick, number, `${nick}${number}`,
-String(b.house ?? current.house ?? ""),
-String(b.patent ?? current.patent ?? ""),
-String(b.role ?? current.role ?? ""),
-String(b.grimoire ?? current.grimoire ?? ""),
+        nick, number, `${nick}${number}`, passwordHash,
+        String(b.house ?? current.house ?? ""),
+        String(b.patent ?? current.patent ?? ""),
+        String(b.role ?? current.role ?? ""),
+        String(b.grimoire ?? current.grimoire ?? ""),
         positiveInt(b.hp, Number(current.hp)),
         positiveInt(b.mana, Number(current.mana)),
         newYuls,
@@ -413,16 +462,22 @@ String(b.grimoire ?? current.grimoire ?? ""),
       await client.query(
         `INSERT INTO yuls_history(player_id,amount,reason,balance_after)
          VALUES ($1,$2,$3,$4)`,
-        [id,diff,String(b.yuls_reason || "Ajuste administrativo"),newYuls]
+        [id, diff, String(b.yuls_reason || "Ajuste administrativo"), newYuls]
       );
     }
     await client.query("COMMIT");
-    res.json({ player: {...publicPlayer(updated), public_profile:Number(updated.public_profile)} });
-  } catch(e) {
+    res.json({
+      player: {
+        ...publicPlayer(updated),
+        public_profile: Number(updated.public_profile),
+        has_password: Boolean(updated.password_hash)
+      }
+    });
+  } catch (e) {
     await client.query("ROLLBACK");
     console.error(e);
-    if(e.code === "23505") return res.status(400).json({error:"Não foi possível salvar. O identificador já está em uso."});
-    res.status(500).json({error:"Erro ao atualizar jogador."});
+    if (e.code === "23505") return res.status(400).json({ error: "Não foi possível salvar. O identificador já está em uso." });
+    res.status(500).json({ error: "Erro ao atualizar jogador." });
   } finally {
     client.release();
   }
@@ -432,32 +487,39 @@ app.post("/api/admin/players/:id/yuls", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const amount = Math.round(Number(req.body?.amount || 0));
   const reason = String(req.body?.reason || "Movimentação administrativa").trim();
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({error:"Jogador inválido."});
-  if (!Number.isFinite(amount) || amount === 0) return res.status(400).json({error:"Informe uma quantidade diferente de zero."});
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
+  if (!Number.isFinite(amount) || amount === 0) return res.status(400).json({ error: "Informe uma quantidade diferente de zero." });
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query("SELECT yuls FROM players WHERE id=$1 FOR UPDATE",[id]);
+    const result = await client.query("SELECT yuls FROM players WHERE id=$1 FOR UPDATE", [id]);
     const player = result.rows[0];
-    if(!player) { await client.query("ROLLBACK"); return res.status(404).json({error:"Jogador não encontrado."}); }
-    const newBalance = Number(player.yuls) + amount;
-    if(newBalance < 0) { await client.query("ROLLBACK"); return res.status(400).json({error:"O saldo de Yuls não pode ficar negativo."}); }
+    if (!player) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Jogador não encontrado." });
+    }
 
-    await client.query("UPDATE players SET yuls=$1,updated_at=NOW() WHERE id=$2",[newBalance,id]);
+    const newBalance = Number(player.yuls) + amount;
+    if (newBalance < 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "O saldo de Yuls não pode ficar negativo." });
+    }
+
+    await client.query("UPDATE players SET yuls=$1,updated_at=NOW() WHERE id=$2", [newBalance, id]);
     await client.query(
       `INSERT INTO yuls_history(player_id,amount,reason,balance_after)
        VALUES ($1,$2,$3,$4)`,
-      [id,amount,reason,newBalance]
+      [id, amount, reason, newBalance]
     );
     await client.query("COMMIT");
 
-    const updated=await pool.query("SELECT * FROM players WHERE id=$1",[id]);
-    res.json({player:publicPlayer(updated.rows[0])});
-  } catch(e) {
+    const updated = await pool.query("SELECT * FROM players WHERE id=$1", [id]);
+    res.json({ player: publicPlayer(updated.rows[0]) });
+  } catch (e) {
     await client.query("ROLLBACK");
     console.error(e);
-    res.status(500).json({error:"Erro ao lançar movimentação de Yuls."});
+    res.status(500).json({ error: "Erro ao lançar movimentação de Yuls." });
   } finally {
     client.release();
   }
@@ -465,80 +527,53 @@ app.post("/api/admin/players/:id/yuls", requireAdmin, async (req, res) => {
 
 app.delete("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({error:"Jogador inválido."});
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   try {
-    await pool.query("DELETE FROM players WHERE id=$1",[id]);
-    res.json({ok:true});
-  } catch(e) {
+    await pool.query("DELETE FROM players WHERE id=$1", [id]);
+    res.json({ ok: true });
+  } catch (e) {
     console.error(e);
-    res.status(500).json({error:"Erro ao excluir jogador."});
+    res.status(500).json({ error: "Erro ao excluir jogador." });
   }
 });
 
 app.post("/api/admin/news", requireAdmin, async (req, res) => {
-  const b=req.body||{};
-  if(!String(b.title||"").trim()) return res.status(400).json({error:"Título obrigatório."});
+  const b = req.body || {};
+  if (!String(b.title || "").trim()) return res.status(400).json({ error: "Título obrigatório." });
   try {
-    const result=await pool.query(
+    const result = await pool.query(
       `INSERT INTO news(title,category,excerpt,body,date,published) VALUES ($1,$2,$3,$4,$5,1) RETURNING *`,
-      [String(b.title),String(b.category||"RPG"),String(b.excerpt||""),String(b.body||""),String(b.date||new Date().toISOString().slice(0,10))]
+      [
+        String(b.title), String(b.category || "RPG"), String(b.excerpt || ""),
+        String(b.body || ""), String(b.date || new Date().toISOString().slice(0, 10))
+      ]
     );
-    res.json({news:result.rows[0]});
-  } catch(e){console.error(e);res.status(500).json({error:"Erro ao publicar notícia."});}
+    res.json({ news: result.rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao publicar notícia." });
+  }
 });
 
 app.post("/api/admin/editions", requireAdmin, async (req, res) => {
-  const b=req.body||{};
-  if(!String(b.title||"").trim()) return res.status(400).json({error:"Título obrigatório."});
+  const b = req.body || {};
+  if (!String(b.title || "").trim()) return res.status(400).json({ error: "Título obrigatório." });
   try {
-    const result=await pool.query(
+    const result = await pool.query(
       `INSERT INTO editions(title,edition,description,pdf_url,date,published) VALUES ($1,$2,$3,$4,$5,1) RETURNING *`,
-      [String(b.title),String(b.edition||""),String(b.description||""),String(b.pdf_url||""),String(b.date||new Date().toISOString().slice(0,10))]
+      [
+        String(b.title), String(b.edition || ""), String(b.description || ""),
+        String(b.pdf_url || ""), String(b.date || new Date().toISOString().slice(0, 10))
+      ]
     );
-    res.json({edition:result.rows[0]});
-  } catch(e){console.error(e);res.status(500).json({error:"Erro ao publicar edição."});}
+    res.json({ edition: result.rows[0] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao publicar edição." });
+  }
 });
 
-app.post("/api/admin/seed", requireAdmin, async (req, res) => {
-  try {
-    const countResult=await pool.query("SELECT COUNT(*)::int AS c FROM players");
-    if(countResult.rows[0].c>0) return res.json({ok:true,seeded:false});
-
-    const seed=[
-      ["Mattiel","01","Novachrono","Senior","Rei","Toxina",1000,2000,0,0,0,0],
-      ["Wesyx","02","Novachrono","Cavaleiro Mágico Junior","","",200,400,0,0,0,0],
-      ["Bananinha","03","Mars","Cavaleiro Mágico Junior","","",200,400,0,0,0,0],
-      ["Killer","04","Voltia","Cavaleiro Mágico Junior","","",200,400,0,0,0,0]
-    ];
-
-    const client=await pool.connect();
-    try{
-      await client.query("BEGIN");
-      for(const x of seed){
-        await client.query(
-          `INSERT INTO players(nick,number,identifier,house,patent,role,grimoire,hp,mana,yuls,missions,achievements,ranking)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-          [x[0],x[1],`${x[0]}${x[1]}`,x[2],x[3],x[4],x[5],x[6],x[7],x[8],x[9],x[10],x[11]]
-        );
-      }
-      await client.query(
-        `INSERT INTO news(title,category,excerpt,body) VALUES ($1,$2,$3,$4)`,
-        ["O Portal Spade está oficialmente aberto","REINO SPADE","O centro digital do RPG começa uma nova fase.","Esta é uma notícia inicial de teste. Substitua pelo comunicado oficial."]
-      );
-      await client.query(
-        `INSERT INTO editions(title,edition,description) VALUES ($1,$2,$3)`,
-        ["The King Magazine — Setembro 2026","EDIÇÃO 01","A edição de estreia do novo ciclo de Spade."]
-      );
-      await client.query("COMMIT");
-      res.json({ok:true,seeded:true});
-    }catch(e){
-      await client.query("ROLLBACK");
-      throw e;
-    }finally{client.release();}
-  }catch(e){console.error(e);res.status(500).json({error:"Erro ao criar dados iniciais."});}
-});
-
-app.get(/.*/, (req,res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
