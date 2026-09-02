@@ -139,9 +139,23 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS missions (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      mission_type TEXT DEFAULT 'Missão',
+      mission_rank TEXT DEFAULT '',
+      status TEXT DEFAULT 'Concluída',
+      reward_yuls BIGINT DEFAULT 0 CHECK (reward_yuls >= 0),
+      notes TEXT DEFAULT '',
+      completed_at DATE DEFAULT CURRENT_DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_players_identifier ON players(identifier);
     CREATE INDEX IF NOT EXISTS idx_players_nick ON players(nick);
     CREATE INDEX IF NOT EXISTS idx_yuls_history_player ON yuls_history(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
   `);
 
   const newsCount = await pool.query("SELECT COUNT(*)::int AS c FROM news");
@@ -227,25 +241,22 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
-app.get("/api/me/yuls", async (req, res) => {
+app.get("/api/me/yuls-history", async (req, res) => {
   const id = readPlayerToken(req);
   if (!id) return res.status(401).json({ error: "Não autenticado." });
   try {
     const [playerResult, historyResult] = await Promise.all([
       pool.query("SELECT yuls FROM players WHERE id=$1", [id]),
       pool.query(
-        `SELECT id, amount, reason, balance_after, created_at
-         FROM yuls_history
-         WHERE player_id=$1
-         ORDER BY id DESC
-         LIMIT 50`,
+        `SELECT id,amount,reason,balance_after,created_at
+         FROM yuls_history WHERE player_id=$1 ORDER BY id DESC LIMIT 50`,
         [id]
       )
     ]);
     const player = playerResult.rows[0];
-    if (!player) return res.status(404).json({ error: "Jogador não encontrado." });
+    if (!player) return res.status(401).json({ error: "Sessão inválida." });
     res.json({
-      balance: Number(player.yuls),
+      balance: Number(player.yuls || 0),
       history: historyResult.rows.map(h => ({
         id: Number(h.id),
         amount: Number(h.amount),
@@ -257,6 +268,24 @@ app.get("/api/me/yuls", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar histórico de Yuls." });
+  }
+});
+
+app.get("/api/me/missions", async (req, res) => {
+  const id = readPlayerToken(req);
+  if (!id) return res.status(401).json({ error: "Não autenticado." });
+  try {
+    const result = await pool.query(
+      `SELECT id,title,mission_type,mission_rank,status,reward_yuls,notes,completed_at,created_at
+       FROM missions WHERE player_id=$1 ORDER BY id DESC LIMIT 100`,
+      [id]
+    );
+    res.json({ missions: result.rows.map(m => ({
+      id:Number(m.id), title:m.title, mission_type:m.mission_type||"", mission_rank:m.mission_rank||"",
+      status:m.status||"", reward_yuls:Number(m.reward_yuls||0), notes:m.notes||"", completed_at:m.completed_at, created_at:m.created_at
+    })) });
+  } catch (e) {
+    console.error(e); res.status(500).json({ error:"Erro ao carregar missões." });
   }
 });
 
@@ -384,6 +413,100 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar jogador." });
   }
+});
+
+app.get("/api/admin/players/:id/missions", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
+  try {
+    const result = await pool.query(
+      `SELECT id,title,mission_type,mission_rank,status,reward_yuls,notes,completed_at,created_at
+       FROM missions WHERE player_id=$1 ORDER BY id DESC LIMIT 100`, [id]
+    );
+    res.json({ missions: result.rows.map(m => ({
+      id:Number(m.id), title:m.title, mission_type:m.mission_type||"", mission_rank:m.mission_rank||"",
+      status:m.status||"", reward_yuls:Number(m.reward_yuls||0), notes:m.notes||"", completed_at:m.completed_at, created_at:m.created_at
+    })) });
+  } catch (e) {
+    console.error(e); res.status(500).json({ error:"Erro ao carregar histórico de missões." });
+  }
+});
+
+app.post("/api/admin/players/:id/missions", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const b = req.body || {};
+  const title = String(b.title||"").trim();
+  const missionType = String(b.mission_type||"Missão").trim();
+  const missionRank = String(b.mission_rank||"").trim();
+  const status = String(b.status||"Concluída").trim();
+  const rewardYuls = Math.max(0, Math.round(Number(b.reward_yuls||0)));
+  const notes = String(b.notes||"").trim();
+  const completedAt = String(b.completed_at || new Date().toISOString().slice(0,10)).trim();
+
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({error:"Jogador inválido."});
+  if (!title) return res.status(400).json({error:"Informe o nome da missão."});
+  if (!['Concluída','Falha','Cancelada','Em andamento'].includes(status)) return res.status(400).json({error:"Status inválido."});
+  if (!Number.isFinite(rewardYuls) || rewardYuls < 0) return res.status(400).json({error:"Recompensa inválida."});
+
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const pr=await client.query('SELECT * FROM players WHERE id=$1 FOR UPDATE',[id]);
+    const player=pr.rows[0];
+    if(!player){await client.query('ROLLBACK');return res.status(404).json({error:'Jogador não encontrado.'});}
+
+    const mr=await client.query(
+      `INSERT INTO missions(player_id,title,mission_type,mission_rank,status,reward_yuls,notes,completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [id,title,missionType,missionRank,status,rewardYuls,notes,completedAt]
+    );
+
+    let newMissionCount=Number(player.missions||0);
+    let newYuls=Number(player.yuls||0);
+    if(status==='Concluída'){
+      newMissionCount+=1;
+      newYuls+=rewardYuls;
+      await client.query('UPDATE players SET missions=$1,yuls=$2,updated_at=NOW() WHERE id=$3',[newMissionCount,newYuls,id]);
+      if(rewardYuls>0){
+        await client.query(
+          `INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES ($1,$2,$3,$4)`,
+          [id,rewardYuls,`Recompensa da missão: ${title}`,newYuls]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    const updated=await pool.query('SELECT * FROM players WHERE id=$1',[id]);
+    res.json({player:publicPlayer(updated.rows[0]),mission:mr.rows[0]});
+  } catch(e) {
+    await client.query('ROLLBACK'); console.error(e); res.status(500).json({error:'Erro ao registrar missão.'});
+  } finally { client.release(); }
+});
+
+app.delete("/api/admin/missions/:id", requireAdmin, async (req, res) => {
+  const missionId=Number(req.params.id);
+  if(!Number.isInteger(missionId)||missionId<=0) return res.status(400).json({error:'Missão inválida.'});
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const mr=await client.query('SELECT * FROM missions WHERE id=$1 FOR UPDATE',[missionId]);
+    const mission=mr.rows[0];
+    if(!mission){await client.query('ROLLBACK');return res.status(404).json({error:'Missão não encontrada.'});}
+    if(mission.status==='Concluída'){
+      const pr=await client.query('SELECT * FROM players WHERE id=$1 FOR UPDATE',[mission.player_id]);
+      const player=pr.rows[0];
+      if(player){
+        const newMissionCount=Math.max(0,Number(player.missions||0)-1);
+        const newYuls=Math.max(0,Number(player.yuls||0)-Number(mission.reward_yuls||0));
+        await client.query('UPDATE players SET missions=$1,yuls=$2,updated_at=NOW() WHERE id=$3',[newMissionCount,newYuls,mission.player_id]);
+      }
+    }
+    await client.query('DELETE FROM missions WHERE id=$1',[missionId]);
+    await client.query('COMMIT');
+    res.json({ok:true});
+  } catch(e) {
+    await client.query('ROLLBACK'); console.error(e); res.status(500).json({error:'Erro ao excluir missão.'});
+  } finally { client.release(); }
 });
 
 async function validateNewPassword(password) {
