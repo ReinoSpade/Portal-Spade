@@ -15,7 +15,10 @@ function go(page){
   if(page==="jogadores") loadPlayers();
   if(page==="casas") loadHouses();
   if(page==="ranking") loadRanking();
-  if(page==="dashboard") { refreshDashboard(); }
+  if(page==="dashboard") {
+    if(state.me) renderDashboard();
+    else go("login");
+  }
   if(page==="admin" && state.admin) initAdmin();
 }
 
@@ -86,11 +89,14 @@ async function refreshDashboard(){
     const d=await api("/api/me");
     state.me=d.player;
     setPlayerNav();
-    renderDashboard();
+    if(state.page==="dashboard") renderDashboard();
   }catch(e){
-    state.me=null;
-    setLoginNav();
-    go("login");
+    // Keep the current local session state. A temporary /api/me failure
+    // must not throw a player back to the login screen.
+    if(!state.me) {
+      setLoginNav();
+      go("login");
+    }
   }
 }
 
@@ -117,7 +123,7 @@ qs("#loginForm").addEventListener("submit",async e=>{
   if(!identifier||!password){err.textContent="Preencha login e senha.";return}
   try{
     const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({identifier,password})});
-    state.me=d.player;setPlayerNav();go("dashboard");
+    state.me=d.player;setPlayerNav();go("dashboard");refreshDashboard();
   }catch(ex){err.textContent=ex.message}
 });
 
@@ -260,3 +266,5 @@ async function tryAdminHash(){
 }
 
 loadHome();tryMe();tryAdminHash();
+
+setTimeout(()=>refreshDashboard(),200);
