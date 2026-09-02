@@ -102,8 +102,63 @@ async function openHouse(id){
     detail.innerHTML=`<div class="house-empty">${escapeHtml(e.message)}</div>`;
   }
 }
+let rankingData={force:[],activity:[],missions:[],wealth:[],houses:[]};
+let activeRanking="force";
+
 async function loadRanking(){
-  const d=await api("/api/ranking");qs("#rankingBody").innerHTML=d.ranking.map((x,i)=>`<tr><td>${x.ranking||i+1}</td><td><b>${escapeHtml(x.nick)}</b></td><td>${escapeHtml(x.house||"—")}</td><td>${x.missions}</td><td>🪙 ${money(x.yuls)}</td></tr>`).join("")||`<tr><td colspan="5">Nenhum ranking cadastrado.</td></tr>`;
+  try{
+    const d=await api("/api/rankings");
+    rankingData=d;
+    renderRanking(activeRanking);
+    qsa(".ranking-tab").forEach(b=>{
+      b.onclick=()=>{activeRanking=b.dataset.rankingTab;renderRanking(activeRanking)};
+    });
+  }catch(e){
+    qs("#rankingBody").innerHTML=`<tr><td colspan="5">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderRanking(type){
+  const body=qs("#rankingBody"), info=qs("#rankingExplainer");
+  if(!body)return;
+  qsa(".ranking-tab").forEach(b=>b.classList.toggle("active",b.dataset.rankingTab===type));
+
+  const descriptions={
+    force:"Força é definida pelo atributo de poder cadastrado no perfil do jogador.",
+    activity:"Atividade considera missões e conquistas registradas no sistema.",
+    missions:"Classificação pela quantidade de missões concluídas.",
+    wealth:"Classificação pelo saldo atual de Yuls.",
+    houses:"Classificação das Casas pelo poder somado dos seus membros."
+  };
+  info.textContent=descriptions[type]||"";
+
+  if(type==="houses"){
+    const rows=rankingData.houses||[];
+    body.innerHTML=rows.length?rows.map((h,i)=>`<tr>
+      <td><span class="rank-number">${i+1}</span></td>
+      <td><div class="house-rank-main"><span class="house-rank-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="rank-main">${escapeHtml(h.name)}<small>${h.members} membros</small></span></div></td>
+      <td class="rank-house">${h.leader?`Líder: ${escapeHtml(h.leader)}`:"Sem líder definida"}</td>
+      <td class="rank-secondary">⚔️ ${h.power.toLocaleString("pt-BR")}</td>
+      <td class="rank-secondary">📋 ${h.missions}</td>
+    </tr>`).join(""):`<tr><td colspan="5">Nenhuma Casa cadastrada.</td></tr>`;
+    return;
+  }
+
+  const rows=rankingData[type]||[];
+  body.innerHTML=rows.length?rows.map((p,i)=>{
+    let main="",secondary="";
+    if(type==="force"){main=`⚔️ ${p.power.toLocaleString("pt-BR")}`;secondary=`📋 ${p.missions} missões`}
+    if(type==="activity"){main=`⭐ ${(p.missions + p.achievements*3).toLocaleString("pt-BR")}`;secondary=`🏆 ${p.achievements} conquistas`}
+    if(type==="missions"){main=`📋 ${p.missions}`;secondary=`🪙 ${money(p.yuls)} Yuls`}
+    if(type==="wealth"){main=`🪙 ${money(p.yuls)}`;secondary=`📋 ${p.missions} missões`}
+    return `<tr>
+      <td><span class="rank-number">${i+1}</span></td>
+      <td><div class="rank-main">${escapeHtml(p.nick)}${escapeHtml(p.number)}<small>${escapeHtml(p.identifier)}</small></div></td>
+      <td class="rank-house">${escapeHtml(p.house||"Sem Casa")}</td>
+      <td class="rank-secondary">${main}</td>
+      <td class="rank-secondary">${secondary}</td>
+    </tr>`;
+  }).join(""):`<tr><td colspan="5">Nenhum jogador disponível.</td></tr>`;
 }
 
 
@@ -347,7 +402,7 @@ function openNewPlayer(){
   state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">NOVO CADASTRO</p><h3>Novo jogador</h3><p>Crie o acesso usando Nick + número.</p></div><button class="icon-button" id="closeEditor" type="button">×</button></div>
   <form id="newAdminPlayerForm"><div class="form-grid">
-  ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${field("Patente","patent","Cavaleiro Mágico Junior")}${field("Cargo","role","")}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking","ranking",0,"number")}
+  ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${field("Patente","patent","Cavaleiro Mágico Junior")}${field("Cargo","role","")}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking manual","ranking",0,"number")}${field("⚔️ Força","power",0,"number")}
   </div><div class="editor-actions"><button class="gold" type="submit">Cadastrar jogador</button></div><div class="error" id="newPlayerError"></div></form>`;
   qs("#closeEditor").addEventListener("click",()=>renderEditor({nick:"",number:"",history:[],missions:[],public_profile:1}));
   qs("#newAdminPlayerForm").addEventListener("submit",async e=>{
