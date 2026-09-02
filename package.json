@@ -1,6 +1,6 @@
 {
   "name": "portal-spade-rpg",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": true,
   "description": "Portal oficial do RPG - Reino Spade",
   "main": "server.js",
@@ -10,6 +10,7 @@
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "bcryptjs": "^3.0.2"
   }
 }
