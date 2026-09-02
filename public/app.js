@@ -57,19 +57,20 @@ async function loadRanking(){
   const d=await api("/api/ranking");qs("#rankingBody").innerHTML=d.ranking.map((x,i)=>`<tr><td>${x.ranking||i+1}</td><td><b>${escapeHtml(x.nick)}</b></td><td>${escapeHtml(x.house||"—")}</td><td>${x.missions}</td><td>🪙 ${money(x.yuls)}</td></tr>`).join("")||`<tr><td colspan="5">Nenhum ranking cadastrado.</td></tr>`;
 }
 
-async function loadPlayerYuls(){
-  const balanceEl=qs("#playerYulsBalance");
-  const historyEl=qs("#playerYulsHistory");
-  if(!balanceEl||!historyEl)return;
+
+async function loadPlayerMissions(){
+  const countEl=qs("#playerMissionCount");
+  const historyEl=qs("#playerMissionHistory");
+  if(!countEl||!historyEl)return;
   try{
-    const d=await api("/api/me/yuls");
-    balanceEl.textContent=`🪙 ${money(d.balance)}`;
-    historyEl.innerHTML=d.history.length
-      ? d.history.map(h=>`<div class="player-yuls-row"><div class="reason"><b>${escapeHtml(h.reason||"Movimentação")}</b><small>${new Date(h.created_at).toLocaleString("pt-BR")}</small></div><div class="change ${h.amount>=0?"plus":"minus"}">${h.amount>=0?"+":""}${money(h.amount)}<small>Saldo: ${money(h.balance_after)}</small></div></div>`).join("")
-      : `<div class="yuls-empty">Nenhuma movimentação registrada.</div>`;
-  }catch(e){
-    historyEl.innerHTML=`<div class="yuls-empty">${escapeHtml(e.message)}</div>`;
-  }
+    const d=await api("/api/me/missions");
+    const completed=d.missions.filter(m=>m.status==="Concluída").length;
+    countEl.textContent=`${completed} ${completed===1?"missão":"missões"} concluídas`;
+    historyEl.innerHTML=d.missions.length?d.missions.map(m=>{
+      const cls=m.status==="Concluída"?"done":m.status==="Falha"?"fail":"cancel";
+      return `<div class="player-mission-row"><div class="player-mission-top"><div><div class="player-mission-title">${escapeHtml(m.title)}</div><div class="player-mission-meta">${escapeHtml(m.mission_type)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""} • ${escapeHtml(String(m.completed_at||""))}</div></div><span class="mission-status ${cls}">${escapeHtml(m.status)}</span></div>${m.reward_yuls>0?`<div class="mission-reward">🪙 +${money(m.reward_yuls)} Yuls</div>`:""}${m.notes?`<div class="mission-notes">${escapeHtml(m.notes)}</div>`:""}</div>`;
+    }).join(""):"<div class=\"yuls-empty\">Nenhuma missão registrada.</div>";
+  }catch(e){historyEl.innerHTML=`<div class=\"yuls-empty\">${escapeHtml(e.message)}</div>`}
 }
 
 function renderDashboard(){
@@ -77,6 +78,7 @@ function renderDashboard(){
  qs("#dashName").textContent=`Bem-vindo, ${state.me.nick}.`;
  qs("#dash").innerHTML=`<div class="dash-grid"><div class="dash-main"><div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(state.me.nick)}${escapeHtml(state.me.number)}</h2><p>${escapeHtml(state.me.patent)} • ${escapeHtml(state.me.house||"Casa não definida")}</p></div></div><div class="profile-lines"><div><small>Cargo</small><b>${escapeHtml(state.me.role||"Não definido")}</b></div><div><small>Grimório</small><b>${escapeHtml(state.me.grimoire||"Não definido")}</b></div></div><div class="profile-lines"><div><small>Casa</small><b>${escapeHtml(state.me.house||"Não definida")}</b></div><div><small>Ranking</small><b>${state.me.ranking||"—"}</b></div></div></div><div class="dash-status"><p class="eyebrow">STATUS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${state.me.hp}</b></div><div class="stat"><small>♦️ Mana</small><b>${state.me.mana}</b></div><div class="stat"><small>📋 Missões</small><b>${state.me.missions}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(state.me.yuls)}</b></div></div></div></div><div class="panel" style="margin-top:12px"><p class="eyebrow">CONQUISTAS</p><h3>${state.me.achievements} conquistas registradas</h3><p>Os dados serão atualizados pela administração do RPG.</p></div>`;
  loadPlayerYuls();
+ loadPlayerMissions();
 }
 
 async function tryMe(){
@@ -125,7 +127,8 @@ function renderAdminList(players,term){
 
 async function selectAdminPlayer(id){
   try{
-    const d=await adminApi(`/api/admin/players/${id}`);state.selectedPlayer={...d.player,history:d.history};
+    const [d,m]=await Promise.all([adminApi(`/api/admin/players/${id}`),adminApi(`/api/admin/players/${id}/missions`)]);
+    state.selectedPlayer={...d.player,history:d.history,missions:m.missions};
     renderAdminList(state.players,qs("#adminSearch").value);
     renderEditor(state.selectedPlayer);
   }catch(e){alert(e.message)}
@@ -139,11 +142,14 @@ function renderEditor(p){
   ${field("❤️ HP","hp",p.hp,"number")}${field("♦️ Mana","mana",p.mana,"number")}${field("🪙 Yuls","yuls",p.yuls,"number")}${field("📋 Missões","missions",p.missions,"number")}${field("🏆 Conquistas","achievements",p.achievements,"number")}${field("Ranking","ranking",p.ranking,"number")}
   <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
   </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">Excluir jogador</button></div><div class="error" id="editError"></div></form>
-  <div class="yuls-box"><h4>🪙 Movimentação de Yuls</h4><p style="font-size:10px;color:#777;margin:0 0 12px">Use valor positivo para crédito e negativo para débito.</p><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><div class="history">${hist}</div></div>`;
+  <div class="yuls-box"><h4>🪙 Movimentação de Yuls</h4><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><div class="history">${hist}</div></div>
+  <div class="admin-mission-box"><h4>⚔️ Registrar missão</h4><div class="mission-form-grid"><input id="missionTitle" class="wide" placeholder="Nome da missão"><input id="missionType" placeholder="Tipo (Missão, Evento...)"><input id="missionRank" placeholder="Rank"><select id="missionStatus"><option>Concluída</option><option>Falha</option><option>Cancelada</option><option>Em andamento</option></select><input id="missionReward" type="number" min="0" step="1" placeholder="Recompensa em Yuls"><input id="missionDate" type="date" value="${new Date().toISOString().slice(0,10)}"><textarea id="missionNotes" class="wide" placeholder="Observações (opcional)"></textarea></div><div class="mission-form-actions"><button class="gold" id="missionBtn" type="button">Registrar missão</button></div><div class="history"><div class="eyebrow" style="margin-top:15px">HISTÓRICO DE MISSÕES</div><div class="admin-mission-history">${(p.missions||[]).map(m=>`<div class="admin-mission-row"><span><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.status)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""} • ${escapeHtml(String(m.completed_at||""))}</small></span><button type="button" data-mission-delete="${m.id}">Excluir</button></div>`).join("")||"<div style='font-size:10px;color:#888'>Nenhuma missão registrada.</div>"}</div></div></div>`;
   qs("#closeEditor").addEventListener("click",()=>{state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);qs("#adminEditor").innerHTML=`<div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados ou lançar uma movimentação de Yuls.</p></div>`});
   qs("#editPlayerForm").addEventListener("submit",savePlayer);
   qs("#deletePlayerBtn").addEventListener("click",deleteSelectedPlayer);
   qs("#yulsBtn").addEventListener("click",launchYuls);
+  qs("#missionBtn").addEventListener("click",launchMission);
+  qsa("[data-mission-delete]").forEach(b=>b.addEventListener("click",()=>deleteMission(Number(b.dataset.missionDelete))));
 }
 function field(label,name,value,type="text"){
   return `<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${escapeHtml(value??"")}"></div>`;
@@ -162,9 +168,33 @@ async function launchYuls(){
   if(!Number.isFinite(amount)||amount===0){alert("Informe uma quantidade diferente de zero.");return}
   try{
     await adminApi(`/api/admin/players/${state.selectedPlayer.id}/yuls`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,reason})});
-    await selectAdminPlayer(state.selectedPlayer.id);alert("Movimentação registrada."); if(state.me && Number(state.me.id)===Number(state.selectedPlayer.id)){ await tryMe(); if(state.page==="dashboard") loadPlayerYuls(); }
+    await selectAdminPlayer(state.selectedPlayer.id);alert("Movimentação registrada.");
   }catch(ex){alert(ex.message)}
 }
+async function launchMission(){
+  if(!state.selectedPlayer)return;
+  const title=qs("#missionTitle").value.trim();
+  const mission_type=qs("#missionType").value.trim()||"Missão";
+  const mission_rank=qs("#missionRank").value.trim();
+  const status=qs("#missionStatus").value;
+  const reward_yuls=Number(qs("#missionReward").value||0);
+  const completed_at=qs("#missionDate").value;
+  const notes=qs("#missionNotes").value.trim();
+  if(!title){alert("Informe o nome da missão.");return}
+  if(!Number.isFinite(reward_yuls)||reward_yuls<0){alert("Recompensa inválida.");return}
+  try{
+    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/missions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,mission_type,mission_rank,status,reward_yuls,completed_at,notes})});
+    await selectAdminPlayer(state.selectedPlayer.id);
+    alert(status==="Concluída"?"Missão registrada e contagem atualizada.":"Missão registrada.");
+    if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await tryMe();if(state.page==="dashboard"){loadPlayerYuls();loadPlayerMissions();}}
+  }catch(ex){alert(ex.message)}
+}
+
+async function deleteMission(missionId){
+  if(!confirm("Excluir esta missão? Se ela estiver concluída, a contagem e a recompensa serão desfeitas."))return;
+  try{await adminApi(`/api/admin/missions/${missionId}`,{method:"DELETE"});await selectAdminPlayer(state.selectedPlayer.id);alert("Missão excluída.");if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await tryMe();if(state.page==="dashboard"){loadPlayerYuls();loadPlayerMissions();}}}catch(ex){alert(ex.message)}
+}
+
 async function deleteSelectedPlayer(){
   if(!state.selectedPlayer)return;
   if(!confirm(`Excluir ${state.selectedPlayer.nick}${state.selectedPlayer.number}? Esta ação não pode ser desfeita.`))return;
@@ -181,7 +211,7 @@ function openNewPlayer(){
   <form id="newAdminPlayerForm"><div class="form-grid">
   ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${field("Patente","patent","Cavaleiro Mágico Junior")}${field("Cargo","role","")}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking","ranking",0,"number")}
   </div><div class="editor-actions"><button class="gold" type="submit">Cadastrar jogador</button></div><div class="error" id="newPlayerError"></div></form>`;
-  qs("#closeEditor").addEventListener("click",()=>renderEditor({nick:"",number:"",history:[],public_profile:1}));
+  qs("#closeEditor").addEventListener("click",()=>renderEditor({nick:"",number:"",history:[],missions:[],public_profile:1}));
   qs("#newAdminPlayerForm").addEventListener("submit",async e=>{
     e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
     try{const d=await adminApi("/api/admin/players",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});await initAdmin();await selectAdminPlayer(d.player.id);alert("Jogador cadastrado.");}
