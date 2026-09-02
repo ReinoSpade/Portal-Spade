@@ -227,6 +227,39 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
+app.get("/api/me/yuls", async (req, res) => {
+  const id = readPlayerToken(req);
+  if (!id) return res.status(401).json({ error: "Não autenticado." });
+  try {
+    const [playerResult, historyResult] = await Promise.all([
+      pool.query("SELECT yuls FROM players WHERE id=$1", [id]),
+      pool.query(
+        `SELECT id, amount, reason, balance_after, created_at
+         FROM yuls_history
+         WHERE player_id=$1
+         ORDER BY id DESC
+         LIMIT 50`,
+        [id]
+      )
+    ]);
+    const player = playerResult.rows[0];
+    if (!player) return res.status(404).json({ error: "Jogador não encontrado." });
+    res.json({
+      balance: Number(player.yuls),
+      history: historyResult.rows.map(h => ({
+        id: Number(h.id),
+        amount: Number(h.amount),
+        reason: h.reason || "",
+        balance_after: Number(h.balance_after),
+        created_at: h.created_at
+      }))
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao carregar histórico de Yuls." });
+  }
+});
+
 app.get("/api/home", async (req, res) => {
   try {
     const [news, editions, houses, ranking] = await Promise.all([
