@@ -14,7 +14,7 @@
   <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
   <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
   <nav id="nav">
-    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button>
+    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="hierarquia">Cargos & Patentes</button>
     <button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
@@ -24,7 +24,21 @@
   <div class="content"><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
   <div class="split"><div class="panel"><p class="eyebrow">EDIÇÃO ATUAL</p><h3 id="editionTitle">Carregando...</h3><p id="editionDesc"></p><button class="gold small" data-page="jornal">Abrir jornal</button></div><div class="panel"><p class="eyebrow">REINO</p><h3>O portal está vivo.</h3><p>As páginas públicas serão alimentadas pelos dados que você cadastrar no painel administrativo.</p></div></div></div>
 </section>
-<section class="page" id="jornal"><div class="subhero"><p class="eyebrow">THE KING MAGAZINE</p><h1>O jornal do <em>Reino Spade.</em></h1><p>Edite as edições pelo painel administrativo e disponibilize os PDFs aos jogadores.</p></div><div class="content"><div id="editions" class="edition-grid"></div></div></section>
+<section class="page" id="jornal">
+      <div class="subhero">
+        <p class="eyebrow">THE KING MAGAZINE</p>
+        <h1>O jornal do <em>Reino Spade.</em></h1>
+        <p>As principais notícias, comunicados e edições oficiais do Reino reunidas em um só lugar.</p>
+      </div>
+      <div class="content">
+        <div class="journal-feature" id="journalFeature"></div>
+        <div class="section-head journal-section-head"><div><p class="eyebrow">ARQUIVO</p><h2>Edições</h2></div></div>
+        <div id="editions" class="edition-grid"></div>
+
+        <div class="section-head journal-section-head" style="margin-top:50px"><div><p class="eyebrow">NOTÍCIAS</p><h2>Últimos acontecimentos</h2></div></div>
+        <div id="journalNews" class="news-grid journal-news-grid"></div>
+      </div>
+    </section>
 <section class="page" id="jogadores"><div class="subhero"><p class="eyebrow">COMUNIDADE</p><h1>Jogadores do <em>Reino.</em></h1><p>Consulte os perfis públicos cadastrados no portal.</p></div><div class="content"><input class="search" id="playerSearch" placeholder="Pesquisar jogador ou Casa"><div id="playerGrid" class="player-grid"></div></div></section>
 <section class="page" id="casas">
       <div class="subhero"><p class="eyebrow">GRANDES CASAS</p><h1>As Casas de <em>Spade.</em></h1><p>Conheça as Casas, seus membros, sua atividade e suas conquistas no Reino.</p></div>
@@ -49,6 +63,15 @@
         <thead><tr><th>#</th><th>Jogador / Casa</th><th>Casa</th><th>Principal</th><th>Secundário</th></tr></thead>
         <tbody id="rankingBody"></tbody>
       </table></div>
+    </div>
+  </div>
+</section>
+<section class="page" id="hierarquia">
+  <div class="subhero"><p class="eyebrow">HIERARQUIA DO REINO</p><h1>Cargos & <em>Patentes.</em></h1><p>Consulte a estrutura oficial cadastrada pela administração do Reino Spade.</p></div>
+  <div class="content">
+    <div class="hierarchy-public-grid">
+      <div class="panel"><p class="eyebrow">PATENTES</p><div id="publicPatents"></div></div>
+      <div class="panel"><p class="eyebrow">CARGOS</p><div id="publicRoles"></div></div>
     </div>
   </div>
 </section>
@@ -103,15 +126,67 @@
       <div id="adminHouseList" class="admin-house-list"></div>
     </div>
   </div>
+  <div class="admin-hierarchy-panel panel">
+    <div class="panel-head"><div><p class="eyebrow">ESTRUTURA OFICIAL</p><h3>Cargos & Patentes</h3></div><span>Cadastre e organize a hierarquia</span></div>
+    <div class="hierarchy-admin-grid">
+      <div>
+        <p class="eyebrow">PATENTES</p>
+        <form id="patentForm" class="hier-form">
+          <input type="hidden" name="id" id="patentId">
+          <input name="name" id="patentName" placeholder="Nome da patente" required>
+          <input name="sort_order" id="patentOrder" type="number" value="0" placeholder="Ordem">
+          <textarea name="description" id="patentDescription" placeholder="Descrição"></textarea>
+          <div class="editor-actions"><button class="gold" type="submit" id="patentSaveBtn">Criar patente</button><button class="outline dark-outline" type="button" id="patentCancelBtn">Limpar</button></div>
+          <div class="error" id="patentError"></div>
+        </form>
+        <div id="adminPatentList" class="hier-list"></div>
+      </div>
+      <div>
+        <p class="eyebrow">CARGOS</p>
+        <form id="roleForm" class="hier-form">
+          <input type="hidden" name="id" id="roleId">
+          <input name="name" id="roleName" placeholder="Nome do cargo" required>
+          <input name="salary" id="roleSalary" type="number" min="0" value="0" placeholder="Salário / remuneração">
+          <input name="sort_order" id="roleOrder" type="number" value="0" placeholder="Ordem">
+          <textarea name="description" id="roleDescription" placeholder="Descrição"></textarea>
+          <div class="editor-actions"><button class="gold" type="submit" id="roleSaveBtn">Criar cargo</button><button class="outline dark-outline" type="button" id="roleCancelBtn">Limpar</button></div>
+          <div class="error" id="roleError"></div>
+        </form>
+        <div id="adminRoleList" class="hier-list"></div>
+      </div>
+    </div>
+  </div>
   <div class="admin-grid-2">
-    <div class="panel"><p class="eyebrow">PUBLICAR NOTÍCIA</p><form id="newsForm" class="admin-form"><input name="title" placeholder="Título" required><input name="category" value="RPG" placeholder="Categoria"><input name="excerpt" placeholder="Resumo"><textarea name="body" placeholder="Texto completo"></textarea><button class="gold">Publicar notícia</button></form></div>
-    <div class="panel"><p class="eyebrow">PUBLICAR EDIÇÃO</p><form id="editionForm" class="admin-form"><input name="title" placeholder="Título da edição" required><input name="edition" placeholder="Ex.: EDIÇÃO 02"><input name="description" placeholder="Descrição"><input name="pdf_url" placeholder="Link do PDF"><button class="gold">Publicar edição</button></form></div>
+    <div class="panel editorial-admin-card">
+      <div class="panel-head"><div><p class="eyebrow">JORNAL</p><h3>Nova notícia</h3></div></div>
+      <form id="newsForm" class="admin-form">
+        <input name="title" placeholder="Título" required>
+        <input name="category" value="RPG" placeholder="Categoria">
+        <input name="excerpt" placeholder="Resumo">
+        <input name="image_url" placeholder="URL da imagem (opcional)">
+        <textarea name="body" placeholder="Texto completo"></textarea>
+        <button class="gold">Publicar notícia</button>
+      </form>
+      <div id="adminNewsList" class="editorial-list"></div>
+    </div>
+    <div class="panel editorial-admin-card">
+      <div class="panel-head"><div><p class="eyebrow">THE KING MAGAZINE</p><h3>Nova edição</h3></div></div>
+      <form id="editionForm" class="admin-form">
+        <input name="title" placeholder="Título da edição" required>
+        <input name="edition" placeholder="Ex.: EDIÇÃO 02">
+        <input name="description" placeholder="Descrição">
+        <input name="cover_url" placeholder="URL da capa (opcional)">
+        <input name="pdf_url" placeholder="Link do PDF">
+        <button class="gold">Publicar edição</button>
+      </form>
+      <div id="adminEditionList" class="editorial-list"></div>
+    </div>
   </div>
   <div class="admin-danger"><button class="outline danger" id="logoutAdminBtn">Sair da administração</button></div>
 </div></section>
 </main>
 <footer><span>♠ THE KING MAGAZINE</span><small>Portal oficial do Reino Spade • 2026</small></footer>
 </div>
-<script src="/app.js?v=10"></script>
+<script src="/app.js?v=13"></script>
 </body>
 </html>
