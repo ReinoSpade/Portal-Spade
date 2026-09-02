@@ -57,10 +57,26 @@ async function loadRanking(){
   const d=await api("/api/ranking");qs("#rankingBody").innerHTML=d.ranking.map((x,i)=>`<tr><td>${x.ranking||i+1}</td><td><b>${escapeHtml(x.nick)}</b></td><td>${escapeHtml(x.house||"—")}</td><td>${x.missions}</td><td>🪙 ${money(x.yuls)}</td></tr>`).join("")||`<tr><td colspan="5">Nenhum ranking cadastrado.</td></tr>`;
 }
 
+async function loadPlayerYuls(){
+  const balanceEl=qs("#playerYulsBalance");
+  const historyEl=qs("#playerYulsHistory");
+  if(!balanceEl||!historyEl)return;
+  try{
+    const d=await api("/api/me/yuls");
+    balanceEl.textContent=`🪙 ${money(d.balance)}`;
+    historyEl.innerHTML=d.history.length
+      ? d.history.map(h=>`<div class="player-yuls-row"><div class="reason"><b>${escapeHtml(h.reason||"Movimentação")}</b><small>${new Date(h.created_at).toLocaleString("pt-BR")}</small></div><div class="change ${h.amount>=0?"plus":"minus"}">${h.amount>=0?"+":""}${money(h.amount)}<small>Saldo: ${money(h.balance_after)}</small></div></div>`).join("")
+      : `<div class="yuls-empty">Nenhuma movimentação registrada.</div>`;
+  }catch(e){
+    historyEl.innerHTML=`<div class="yuls-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+
 function renderDashboard(){
  if(!state.me)return go("login");
  qs("#dashName").textContent=`Bem-vindo, ${state.me.nick}.`;
  qs("#dash").innerHTML=`<div class="dash-grid"><div class="dash-main"><div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(state.me.nick)}${escapeHtml(state.me.number)}</h2><p>${escapeHtml(state.me.patent)} • ${escapeHtml(state.me.house||"Casa não definida")}</p></div></div><div class="profile-lines"><div><small>Cargo</small><b>${escapeHtml(state.me.role||"Não definido")}</b></div><div><small>Grimório</small><b>${escapeHtml(state.me.grimoire||"Não definido")}</b></div></div><div class="profile-lines"><div><small>Casa</small><b>${escapeHtml(state.me.house||"Não definida")}</b></div><div><small>Ranking</small><b>${state.me.ranking||"—"}</b></div></div></div><div class="dash-status"><p class="eyebrow">STATUS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${state.me.hp}</b></div><div class="stat"><small>♦️ Mana</small><b>${state.me.mana}</b></div><div class="stat"><small>📋 Missões</small><b>${state.me.missions}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(state.me.yuls)}</b></div></div></div></div><div class="panel" style="margin-top:12px"><p class="eyebrow">CONQUISTAS</p><h3>${state.me.achievements} conquistas registradas</h3><p>Os dados serão atualizados pela administração do RPG.</p></div>`;
+ loadPlayerYuls();
 }
 
 async function tryMe(){
@@ -123,7 +139,7 @@ function renderEditor(p){
   ${field("❤️ HP","hp",p.hp,"number")}${field("♦️ Mana","mana",p.mana,"number")}${field("🪙 Yuls","yuls",p.yuls,"number")}${field("📋 Missões","missions",p.missions,"number")}${field("🏆 Conquistas","achievements",p.achievements,"number")}${field("Ranking","ranking",p.ranking,"number")}
   <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
   </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">Excluir jogador</button></div><div class="error" id="editError"></div></form>
-  <div class="yuls-box"><h4>🪙 Movimentação de Yuls</h4><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><div class="history">${hist}</div></div>`;
+  <div class="yuls-box"><h4>🪙 Movimentação de Yuls</h4><p style="font-size:10px;color:#777;margin:0 0 12px">Use valor positivo para crédito e negativo para débito.</p><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><div class="history">${hist}</div></div>`;
   qs("#closeEditor").addEventListener("click",()=>{state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);qs("#adminEditor").innerHTML=`<div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados ou lançar uma movimentação de Yuls.</p></div>`});
   qs("#editPlayerForm").addEventListener("submit",savePlayer);
   qs("#deletePlayerBtn").addEventListener("click",deleteSelectedPlayer);
@@ -146,7 +162,7 @@ async function launchYuls(){
   if(!Number.isFinite(amount)||amount===0){alert("Informe uma quantidade diferente de zero.");return}
   try{
     await adminApi(`/api/admin/players/${state.selectedPlayer.id}/yuls`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,reason})});
-    await selectAdminPlayer(state.selectedPlayer.id);alert("Movimentação registrada.");
+    await selectAdminPlayer(state.selectedPlayer.id);alert("Movimentação registrada."); if(state.me && Number(state.me.id)===Number(state.selectedPlayer.id)){ await tryMe(); if(state.page==="dashboard") loadPlayerYuls(); }
   }catch(ex){alert(ex.message)}
 }
 async function deleteSelectedPlayer(){
