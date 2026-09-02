@@ -66,7 +66,8 @@ function publicPlayer(row) {
     missions: Number(row.missions || 0),
     achievements: Number(row.achievements || 0),
     ranking: Number(row.ranking || 0),
-    power: Number(row.power || 0)
+    power: Number(row.power || 0),
+    roles: row.roles || []
   };
 }
 
@@ -112,6 +113,9 @@ async function initDatabase() {
 
     ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
     ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
+    ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
+    ALTER TABLE news ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
+    
 
     CREATE TABLE IF NOT EXISTS news (
       id BIGSERIAL PRIMARY KEY,
@@ -166,12 +170,64 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS patents (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS roles (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT DEFAULT '',
+      salary BIGINT DEFAULT 0 CHECK (salary >= 0),
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+
+    CREATE TABLE IF NOT EXISTS player_roles (
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      assigned_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (player_id, role_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_players_identifier ON players(identifier);
     CREATE INDEX IF NOT EXISTS idx_players_nick ON players(nick);
     CREATE INDEX IF NOT EXISTS idx_yuls_history_player ON yuls_history(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_player_roles_role ON player_roles(role_id);
     CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
   `);
 
+
+  // Migração de players.role para a relação muitos-para-muitos.
+  await pool.query(`
+    INSERT INTO player_roles(player_id, role_id)
+    SELECT p.id, r.id
+    FROM players p
+    JOIN roles r ON lower(trim(p.role))=lower(trim(r.name))
+    LEFT JOIN player_roles pr ON pr.player_id=p.id AND pr.role_id=r.id
+    WHERE trim(COALESCE(p.role,'')) <> ''
+      AND pr.player_id IS NULL
+  `);
+
+  const defaultPatents = [
+    "Cavaleiro Mágico Junior",
+    "Cavaleiro Mágico",
+    "Cavaleiro Mágico Sênior",
+    "Senior"
+  ];
+  for (const name of defaultPatents) {
+    await pool.query(
+      `INSERT INTO patents(name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [name]
+    );
+  }
 
   const defaultHouses = [
     "Casa Mars",
@@ -241,6 +297,7 @@ app.post("/api/login", async (req, res) => {
 
     const valid = await bcrypt.compare(password, player.password_hash);
     if (!valid) return res.status(401).json({ error: "Login ou senha incorretos." });
+    player.roles=await getPlayerRoles(player.id);
 
     res.cookie("spade_player", makePlayerToken(Number(player.id)), {
       httpOnly: true,
@@ -267,6 +324,7 @@ app.get("/api/me", async (req, res) => {
     const result = await pool.query("SELECT * FROM players WHERE id=$1", [id]);
     const player = result.rows[0];
     if (!player) return res.status(401).json({ error: "Sessão inválida." });
+    player.roles=await getPlayerRoles(id);
     res.json({ player: publicPlayer(player) });
   } catch (e) {
     console.error(e);
@@ -325,8 +383,8 @@ app.get("/api/me/missions", async (req, res) => {
 app.get("/api/home", async (req, res) => {
   try {
     const [news, editions, houses, ranking] = await Promise.all([
-      pool.query("SELECT id,title,category,excerpt,date FROM news WHERE published=1 ORDER BY id DESC LIMIT 6"),
-      pool.query("SELECT id,title,edition,description,pdf_url,date FROM editions WHERE published=1 ORDER BY id DESC LIMIT 6"),
+      pool.query("SELECT id,title,category,excerpt,body,image_url,date FROM news WHERE published=1 ORDER BY id DESC LIMIT 6"),
+      pool.query("SELECT id,title,edition,description,pdf_url,cover_url,date FROM editions WHERE published=1 ORDER BY id DESC LIMIT 6"),
       pool.query(`SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
                          COUNT(p.id)::int AS count,
                          COALESCE(SUM(p.missions),0)::bigint AS missions
@@ -437,6 +495,27 @@ app.get("/api/houses/:id", async (req, res) => {
 });
 
 
+
+app.get("/api/hierarchy", async (req, res) => {
+  try {
+    const [patents, roles] = await Promise.all([
+      pool.query(`SELECT id,name,description,sort_order FROM patents ORDER BY sort_order ASC,name COLLATE "C" ASC`),
+      pool.query(`SELECT id,name,description,salary,sort_order FROM roles ORDER BY sort_order ASC,name COLLATE "C" ASC`)
+    ]);
+    res.json({
+      patents: patents.rows.map(x => ({
+        id:Number(x.id), name:x.name, description:x.description||"", sort_order:Number(x.sort_order||0)
+      })),
+      roles: roles.rows.map(x => ({
+        id:Number(x.id), name:x.name, description:x.description||"", salary:Number(x.salary||0), sort_order:Number(x.sort_order||0)
+      }))
+    });
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar cargos e patentes."});
+  }
+});
+
 app.get("/api/rankings", async (req, res) => {
   try {
     const [powerResult, missionsResult, wealthResult, activityResult, houseResult] = await Promise.all([
@@ -545,6 +624,71 @@ app.get("/api/players", async (req, res) => {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar jogadores." });
   }
+});
+
+
+app.get("/api/admin/news", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT id,title,category,excerpt,body,image_url,date,published
+                              FROM news ORDER BY id DESC LIMIT 100`);
+    res.json({news:r.rows.map(n=>({...n,published:Number(n.published)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar notícias."});}
+});
+
+app.put("/api/admin/news/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id),b=req.body||{};
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Notícia inválida."});
+  if(!String(b.title||"").trim())return res.status(400).json({error:"Título obrigatório."});
+  try{
+    const r=await pool.query(
+      `UPDATE news
+       SET title=$1,category=$2,excerpt=$3,body=$4,image_url=$5,date=$6,published=$7
+       WHERE id=$8 RETURNING *`,
+      [String(b.title).trim(),String(b.category||"RPG").trim(),String(b.excerpt||"").trim(),
+       String(b.body||""),String(b.image_url||"").trim(),String(b.date||new Date().toISOString().slice(0,10)),
+       Number(b.published??1)?1:0,id]
+    );
+    if(!r.rows[0])return res.status(404).json({error:"Notícia não encontrada."});
+    res.json({news:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar notícia."});}
+});
+
+app.delete("/api/admin/news/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  try{await pool.query("DELETE FROM news WHERE id=$1",[id]);res.json({ok:true})}
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir notícia."});}
+});
+
+app.get("/api/admin/editions", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT id,title,edition,description,pdf_url,cover_url,date,published
+                              FROM editions ORDER BY id DESC LIMIT 100`);
+    res.json({editions:r.rows.map(e=>({...e,published:Number(e.published)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar edições."});}
+});
+
+app.put("/api/admin/editions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id),b=req.body||{};
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Edição inválida."});
+  if(!String(b.title||"").trim())return res.status(400).json({error:"Título obrigatório."});
+  try{
+    const r=await pool.query(
+      `UPDATE editions
+       SET title=$1,edition=$2,description=$3,pdf_url=$4,cover_url=$5,date=$6,published=$7
+       WHERE id=$8 RETURNING *`,
+      [String(b.title).trim(),String(b.edition||"").trim(),String(b.description||"").trim(),
+       String(b.pdf_url||"").trim(),String(b.cover_url||"").trim(),
+       String(b.date||new Date().toISOString().slice(0,10)),Number(b.published??1)?1:0,id]
+    );
+    if(!r.rows[0])return res.status(404).json({error:"Edição não encontrada."});
+    res.json({edition:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar edição."});}
+});
+
+app.delete("/api/admin/editions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  try{await pool.query("DELETE FROM editions WHERE id=$1",[id]);res.json({ok:true})}
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir edição."});}
 });
 
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
@@ -673,21 +817,123 @@ app.delete("/api/admin/houses/:id", requireAdmin, async (req,res) => {
   } finally { client.release(); }
 });
 
+
+app.get("/api/admin/hierarchy", requireAdmin, async (req,res) => {
+  try {
+    const [patents,roles]=await Promise.all([
+      pool.query(`SELECT id,name,description,sort_order FROM patents ORDER BY sort_order ASC,name COLLATE "C" ASC`),
+      pool.query(`SELECT id,name,description,salary,sort_order FROM roles ORDER BY sort_order ASC,name COLLATE "C" ASC`)
+    ]);
+    res.json({
+      patents:patents.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",sort_order:Number(x.sort_order||0)})),
+      roles:roles.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",salary:Number(x.salary||0),sort_order:Number(x.sort_order||0)}))
+    });
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar hierarquia administrativa."});}
+});
+
+app.post("/api/admin/patents", requireAdmin, async (req,res) => {
+  const b=req.body||{},name=String(b.name||"").trim();
+  if(!name)return res.status(400).json({error:"Nome da patente é obrigatório."});
+  try {
+    const r=await pool.query(
+      `INSERT INTO patents(name,description,sort_order) VALUES ($1,$2,$3) RETURNING *`,
+      [name,String(b.description||"").trim(),Number(b.sort_order||0)]
+    );
+    res.json({patent:r.rows[0]});
+  } catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Essa patente já existe."});res.status(500).json({error:"Erro ao criar patente."});}
+});
+
+app.put("/api/admin/patents/:id", requireAdmin, async (req,res) => {
+  const id=Number(req.params.id),b=req.body||{},name=String(b.name||"").trim();
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Patente inválida."});
+  if(!name)return res.status(400).json({error:"Nome da patente é obrigatório."});
+  try {
+    const r=await pool.query(
+      `UPDATE patents SET name=$1,description=$2,sort_order=$3,updated_at=NOW() WHERE id=$4 RETURNING *`,
+      [name,String(b.description||"").trim(),Number(b.sort_order||0),id]
+    );
+    if(!r.rows[0])return res.status(404).json({error:"Patente não encontrada."});
+    res.json({patent:r.rows[0]});
+  } catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Essa patente já existe."});res.status(500).json({error:"Erro ao atualizar patente."});}
+});
+
+app.delete("/api/admin/patents/:id", requireAdmin, async (req,res) => {
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Patente inválida."});
+  try {
+    const r=await pool.query("SELECT name FROM patents WHERE id=$1",[id]);
+    const p=r.rows[0]; if(!p)return res.status(404).json({error:"Patente não encontrada."});
+    const used=await pool.query(`SELECT COUNT(*)::int AS c FROM players WHERE lower(trim(patent))=lower(trim($1))`,[p.name]);
+    if(used.rows[0].c>0)return res.status(400).json({error:"Essa patente está atribuída a jogadores. Altere as patentes desses jogadores antes de excluir."});
+    await pool.query("DELETE FROM patents WHERE id=$1",[id]);
+    res.json({ok:true});
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir patente."});}
+});
+
+app.post("/api/admin/roles", requireAdmin, async (req,res) => {
+  const b=req.body||{},name=String(b.name||"").trim();
+  if(!name)return res.status(400).json({error:"Nome do cargo é obrigatório."});
+  try {
+    const r=await pool.query(
+      `INSERT INTO roles(name,description,salary,sort_order) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [name,String(b.description||"").trim(),Math.max(0,Math.round(Number(b.salary||0))),Number(b.sort_order||0)]
+    );
+    res.json({role:r.rows[0]});
+  } catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse cargo já existe."});res.status(500).json({error:"Erro ao criar cargo."});}
+});
+
+app.put("/api/admin/roles/:id", requireAdmin, async (req,res) => {
+  const id=Number(req.params.id),b=req.body||{},name=String(b.name||"").trim();
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Cargo inválido."});
+  if(!name)return res.status(400).json({error:"Nome do cargo é obrigatório."});
+  try {
+    const r=await pool.query(
+      `UPDATE roles SET name=$1,description=$2,salary=$3,sort_order=$4,updated_at=NOW() WHERE id=$5 RETURNING *`,
+      [name,String(b.description||"").trim(),Math.max(0,Math.round(Number(b.salary||0))),Number(b.sort_order||0),id]
+    );
+    if(!r.rows[0])return res.status(404).json({error:"Cargo não encontrado."});
+    res.json({role:r.rows[0]});
+  } catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse cargo já existe."});res.status(500).json({error:"Erro ao atualizar cargo."});}
+});
+
+app.delete("/api/admin/roles/:id", requireAdmin, async (req,res) => {
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Cargo inválido."});
+  try {
+    const r=await pool.query("SELECT name FROM roles WHERE id=$1",[id]);
+    const role=r.rows[0]; if(!role)return res.status(404).json({error:"Cargo não encontrado."});
+    const used=await pool.query(`SELECT COUNT(*)::int AS c FROM player_roles WHERE role_id=$1`,[id]);
+    if(used.rows[0].c>0)return res.status(400).json({error:"Esse cargo está atribuído a jogadores. Remova o cargo desses jogadores antes de excluir."});
+    await pool.query("DELETE FROM roles WHERE id=$1",[id]);
+    res.json({ok:true});
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir cargo."});}
+});
+
 app.get("/api/admin/players", requireAdmin, async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM players ORDER BY nick COLLATE \"C\" ASC");
-    res.json({
-      players: result.rows.map(r => ({
-        ...publicPlayer(r),
-        public_profile: Number(r.public_profile),
-        has_password: Boolean(r.password_hash),
-        created_at: r.created_at,
-        updated_at: r.updated_at
-      }))
-    });
-  } catch (e) {
+    const result=await pool.query(`
+      SELECT p.*,
+             COALESCE(json_agg(json_build_object(
+               'id',r.id,'name',r.name,'description',r.description,
+               'salary',r.salary,'sort_order',r.sort_order
+             ) ORDER BY r.sort_order,r.name) FILTER (WHERE r.id IS NOT NULL),'[]'::json) AS roles
+      FROM players p
+      LEFT JOIN player_roles pr ON pr.player_id=p.id
+      LEFT JOIN roles r ON r.id=pr.role_id
+      GROUP BY p.id
+      ORDER BY p.nick COLLATE "C" ASC
+    `);
+    res.json({players:result.rows.map(r=>({
+      ...publicPlayer(r),
+      roles:r.roles||[],
+      public_profile:Number(r.public_profile),
+      has_password:Boolean(r.password_hash),
+      created_at:r.created_at,
+      updated_at:r.updated_at
+    }))});
+  } catch(e) {
     console.error(e);
-    res.status(500).json({ error: "Erro ao carregar jogadores administrativos." });
+    res.status(500).json({error:"Erro ao carregar jogadores administrativos."});
   }
 });
 
@@ -705,9 +951,11 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
     ]);
     const player = playerResult.rows[0];
     if (!player) return res.status(404).json({ error: "Jogador não encontrado." });
+    const roles=await getPlayerRoles(id);
     res.json({
       player: {
         ...publicPlayer(player),
+        roles,
         public_profile: Number(player.public_profile),
         has_password: Boolean(player.password_hash),
         created_at: player.created_at,
@@ -817,6 +1065,29 @@ app.delete("/api/admin/missions/:id", requireAdmin, async (req, res) => {
   } finally { client.release(); }
 });
 
+async function getPlayerRoles(playerId){
+  const result=await pool.query(
+    `SELECT r.id,r.name,r.description,r.salary,r.sort_order
+     FROM roles r
+     JOIN player_roles pr ON pr.role_id=r.id
+     WHERE pr.player_id=$1
+     ORDER BY r.sort_order,r.name COLLATE "C" ASC`,
+    [playerId]
+  );
+  return result.rows.map(r=>({
+    id:Number(r.id),name:r.name,description:r.description||"",
+    salary:Number(r.salary||0),sort_order:Number(r.sort_order||0)
+  }));
+}
+
+async function normalizeRoleIds(roleIds){
+  const ids=[...new Set((Array.isArray(roleIds)?roleIds:[])
+    .map(Number).filter(x=>Number.isInteger(x)&&x>0))];
+  if(!ids.length)return [];
+  const result=await pool.query(`SELECT id FROM roles WHERE id=ANY($1::bigint[])`,[ids]);
+  return result.rows.map(r=>Number(r.id));
+}
+
 async function validateNewPassword(password) {
   const value = String(password || "");
   if (value.length < 6) throw new Error("A senha precisa ter pelo menos 6 caracteres.");
@@ -837,6 +1108,7 @@ app.post("/api/admin/players", requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "Defina uma senha com pelo menos 6 caracteres." });
   }
 
+  const roleIds=await normalizeRoleIds(b.role_ids);
   const identifier = `${nick}${number}`;
   try {
     const passwordHash = await validateNewPassword(password);
@@ -855,6 +1127,9 @@ app.post("/api/admin/players", requireAdmin, async (req, res) => {
       ]
     );
     const player = result.rows[0];
+    for(const roleId of roleIds){
+      await pool.query(`INSERT INTO player_roles(player_id,role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,[player.id,roleId]);
+    }
     if (Number(player.yuls) !== 0) {
       await pool.query(
         `INSERT INTO yuls_history(player_id,amount,reason,balance_after)
@@ -885,6 +1160,7 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "Nick e número são obrigatórios." });
   }
 
+  const roleIds=await normalizeRoleIds(b.role_ids);
   let passwordHash = current.password_hash || "";
   if (String(b.password || "").length > 0) {
     if (String(b.password).length < 6) {
@@ -922,6 +1198,10 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
       ]
     );
     const updated = result.rows[0];
+    await client.query("DELETE FROM player_roles WHERE player_id=$1",[id]);
+    for(const roleId of roleIds){
+      await client.query(`INSERT INTO player_roles(player_id,role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,[id,roleId]);
+    }
     const diff = newYuls - Number(current.yuls);
     if (diff !== 0) {
       await client.query(
@@ -1007,10 +1287,11 @@ app.post("/api/admin/news", requireAdmin, async (req, res) => {
   if (!String(b.title || "").trim()) return res.status(400).json({ error: "Título obrigatório." });
   try {
     const result = await pool.query(
-      `INSERT INTO news(title,category,excerpt,body,date,published) VALUES ($1,$2,$3,$4,$5,1) RETURNING *`,
+      `INSERT INTO news(title,category,excerpt,body,image_url,date,published) VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`,
       [
         String(b.title), String(b.category || "RPG"), String(b.excerpt || ""),
-        String(b.body || ""), String(b.date || new Date().toISOString().slice(0, 10))
+        String(b.body || ""), String(b.image_url || ""),
+        String(b.date || new Date().toISOString().slice(0, 10))
       ]
     );
     res.json({ news: result.rows[0] });
@@ -1025,10 +1306,11 @@ app.post("/api/admin/editions", requireAdmin, async (req, res) => {
   if (!String(b.title || "").trim()) return res.status(400).json({ error: "Título obrigatório." });
   try {
     const result = await pool.query(
-      `INSERT INTO editions(title,edition,description,pdf_url,date,published) VALUES ($1,$2,$3,$4,$5,1) RETURNING *`,
+      `INSERT INTO editions(title,edition,description,pdf_url,cover_url,date,published) VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`,
       [
         String(b.title), String(b.edition || ""), String(b.description || ""),
-        String(b.pdf_url || ""), String(b.date || new Date().toISOString().slice(0, 10))
+        String(b.pdf_url || ""), String(b.cover_url || ""),
+        String(b.date || new Date().toISOString().slice(0, 10))
       ]
     );
     res.json({ edition: result.rows[0] });
