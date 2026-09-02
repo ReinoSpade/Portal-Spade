@@ -51,8 +51,56 @@ function renderPlayers(term){
   qs("#playerGrid").innerHTML=p.map(x=>`<article class="player-card"><h3>${escapeHtml(x.nick)}${escapeHtml(x.number)}</h3><p><b>Casa:</b> ${escapeHtml(x.house||"—")}<br><b>Patente:</b> ${escapeHtml(x.patent)}<br><b>Missões:</b> ${x.missions}<br><b>Yuls:</b> 🪙 ${money(x.yuls)}</p></article>`).join("")||`<div class="panel"><h3>Nenhum jogador encontrado.</h3></div>`;
 }
 async function loadHouses(){
-  const d=state.data||await api("/api/home");state.data=d;
-  qs("#houseGrid").innerHTML=d.houses.length?d.houses.map(h=>`<article class="house-card"><h3>🏰 ${escapeHtml(h.house)}</h3><p><b>${h.count}</b> jogadores cadastrados<br><b>${h.missions}</b> missões somadas</p></article>`).join(""):`<div class="panel"><h3>Nenhuma Casa cadastrada.</h3></div>`;
+  try{
+    const d=await api("/api/houses");
+    state.houses=d.houses||[];
+    renderHouses(state.houses);
+  }catch(e){
+    qs("#houseGrid").innerHTML=`<div class="house-empty">${escapeHtml(e.message)}</div>`;
+  }
+}
+function renderHouses(houses){
+  const grid=qs("#houseGrid");
+  const detail=qs("#houseDetail");
+  if(!grid||!detail)return;
+  grid.innerHTML=houses.length
+    ? houses.map(h=>`<button type="button" class="house-public-card" data-house-id="${h.id}">
+        <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
+        <h3>${escapeHtml(h.name)}</h3>
+        <p>${escapeHtml(h.description||"Casa do Reino Spade.")}</p>
+        <div class="house-meta"><span>${h.count} membros</span><span>${h.missions} missões</span><span>🪙 ${money(h.yuls)}</span></div>
+      </button>`).join("")
+    : `<div class="house-empty">Nenhuma Casa cadastrada.</div>`;
+  qsa("[data-house-id]").forEach(b=>b.addEventListener("click",()=>openHouse(Number(b.dataset.houseId))));
+  detail.innerHTML="";
+}
+
+async function openHouse(id){
+  const detail=qs("#houseDetail");
+  if(!detail)return;
+  detail.innerHTML=`<div class="house-detail"><p class="eyebrow">CARREGANDO CASA</p><h2>Consultando os registros...</h2></div>`;
+  try{
+    const d=await api(`/api/houses/${id}`),h=d.house;
+    qsa(".house-public-card").forEach(x=>x.classList.toggle("selected",Number(x.dataset.houseId)===id));
+    detail.innerHTML=`<div class="house-detail">
+      <div class="house-back"><button type="button" id="closeHouse">← Voltar para Casas</button></div>
+      <div class="house-detail-head">
+        <div class="house-detail-ident">
+          <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
+          <div><p class="eyebrow">CASA</p><h2>${escapeHtml(h.name)}</h2><p class="lead-house">${escapeHtml(h.description||"")}</p></div>
+        </div>
+        <div style="text-align:right"><small style="color:#777;font-size:8px;letter-spacing:.12em;text-transform:uppercase">Liderança</small><div style="font-size:11px;margin-top:6px">${escapeHtml(h.leader||"Não definida")}</div><div style="color:#888;font-size:10px;margin-top:3px">${h.vice_leader?`Vice: ${escapeHtml(h.vice_leader)}`:"Vice-liderança não definida"}</div></div>
+      </div>
+      <div class="house-stats"><div class="house-stat"><small>Membros</small><b>${h.count}</b></div><div class="house-stat"><small>Missões</small><b>${h.missions}</b></div><div class="house-stat"><small>Yuls somados</small><b>🪙 ${money(h.yuls)}</b></div></div>
+      <div class="house-members"><h3>Membros da Casa</h3>
+        ${h.members.length?h.members.map(p=>`<div class="house-member-row"><div class="member-main"><b>${escapeHtml(p.nick)}${escapeHtml(p.number)}</b><small>${escapeHtml(p.patent||"")} ${p.role?`• ${escapeHtml(p.role)}`:""}</small></div><div class="member-values"><span>📋 ${p.missions} missões</span><span>🪙 ${money(p.yuls)} Yuls ${p.ranking>0?`• #${p.ranking}`:""}</span></div></div>`).join(""):`<div style="color:#888;font-size:11px;padding:10px 0">Nenhum membro público cadastrado.</div>`}
+      </div>
+    </div>`;
+    qs("#closeHouse").addEventListener("click",()=>{detail.innerHTML="";qsa(".house-public-card").forEach(x=>x.classList.remove("selected"));});
+    detail.scrollIntoView({behavior:"smooth",block:"start"});
+  }catch(e){
+    detail.innerHTML=`<div class="house-empty">${escapeHtml(e.message)}</div>`;
+  }
 }
 async function loadRanking(){
   const d=await api("/api/ranking");qs("#rankingBody").innerHTML=d.ranking.map((x,i)=>`<tr><td>${x.ranking||i+1}</td><td><b>${escapeHtml(x.nick)}</b></td><td>${escapeHtml(x.house||"—")}</td><td>${x.missions}</td><td>🪙 ${money(x.yuls)}</td></tr>`).join("")||`<tr><td colspan="5">Nenhum ranking cadastrado.</td></tr>`;
@@ -152,6 +200,44 @@ qs("#loginForm").addEventListener("submit",async e=>{
 });
 
 async function adminApi(url,options={}){options.headers={...(options.headers||{}),"x-admin-key":state.adminKey};return api(url,options)}
+
+async function loadAdminHouses(){
+  try{
+    const d=await adminApi("/api/admin/houses");
+    state.adminHouses=d.houses||[];
+    const list=qs("#adminHouseList");
+    if(!list)return;
+    list.innerHTML=state.adminHouses.map(h=>`<div class="admin-house-item">
+      <div><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><small>${h.count} membros • ${h.missions} missões • 🪙 ${money(h.yuls)}${h.leader?` • Líder: ${escapeHtml(h.leader)}`:""}</small></div>
+      <div class="admin-house-item-actions"><button type="button" data-house-edit="${h.id}" title="Editar">✎</button><button type="button" class="delete" data-house-delete="${h.id}" title="Excluir">×</button></div>
+    </div>`).join("")||`<div style="color:#888;font-size:10px;padding:10px">Nenhuma Casa.</div>`;
+    qsa("[data-house-edit]").forEach(b=>b.addEventListener("click",()=>editHouseForm(Number(b.dataset.houseEdit))));
+    qsa("[data-house-delete]").forEach(b=>b.addEventListener("click",()=>deleteHouse(Number(b.dataset.houseDelete))));
+  }catch(e){
+    const list=qs("#adminHouseList");if(list)list.innerHTML=`<div style="color:#8b5050;font-size:10px;padding:10px">${escapeHtml(e.message)}</div>`;
+  }
+}
+function resetHouseForm(){
+  const form=qs("#houseForm");if(!form)return;
+  form.reset();qs("#houseId").value="";qs("#houseEmblem").value="♜";
+  qs("#houseSaveBtn").textContent="Criar Casa";qs("#houseError").textContent="";
+}
+function editHouseForm(id){
+  const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
+  qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseEmblem").value=h.emblem||"♜";
+  qs("#houseLeader").value=h.leader||"";qs("#houseVice").value=h.vice_leader||"";qs("#houseDescription").value=h.description||"";
+  qs("#houseSaveBtn").textContent="Salvar Casa";qs("#houseError").textContent="";
+  qs("#houseName").focus();
+}
+async function deleteHouse(id){
+  const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
+  if(!confirm(`Excluir ${h.name}? Os jogadores dessa Casa ficarão sem Casa.`))return;
+  try{
+    await adminApi(`/api/admin/houses/${id}`,{method:"DELETE"});
+    if(Number(qs("#houseId").value)===id)resetHouseForm();
+    await loadAdminHouses();await loadHouses();alert("Casa excluída.");
+  }catch(e){alert(e.message)}
+}
 
 async function initAdmin(){
   if(!state.admin)return;
@@ -277,6 +363,20 @@ qs("#refreshAdminBtn").addEventListener("click",initAdmin);
 qs("#newsForm").addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");loadHome();}catch(ex){alert(ex.message)}});
 qs("#editionForm").addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");loadEditions();}catch(ex){alert(ex.message)}});
 qs("#logoutAdminBtn").addEventListener("click",()=>{state.admin=false;state.adminKey=null;state.selectedPlayer=null;go("home")});
+
+qs("#houseForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const b=Object.fromEntries(new FormData(e.target).entries());
+  try{
+    if(b.id){
+      await adminApi(`/api/admin/houses/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    }else{
+      await adminApi("/api/admin/houses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    }
+    resetHouseForm();await loadAdminHouses();await loadHouses();alert("Casa salva com sucesso.");
+  }catch(ex){qs("#houseError").textContent=ex.message}
+});
+qs("#houseCancelBtn").addEventListener("click",resetHouseForm);
 
 async function tryAdminHash(){
   if(location.hash!=="#admin")return;
