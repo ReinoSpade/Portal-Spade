@@ -15,6 +15,7 @@ function go(page){
   if(page==="jogadores") loadPlayers();
   if(page==="casas") loadHouses();
   if(page==="ranking") loadRanking();
+  if(page==="hierarquia") loadHierarchy();
   if(page==="dashboard"){ if(state.me) renderDashboard(); else refreshDashboard(); }
   if(page==="admin" && state.admin) initAdmin();
 }
@@ -33,14 +34,62 @@ async function api(url,options={}){
 async function loadHome(){
   try{
     const d=await api("/api/home");state.data=d;
-    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art">${i===0?"♠":"◆"}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
+    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
     const e=d.editions[0];qs("#editionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
 }
 
 async function loadEditions(){
-  const d=state.data||await api("/api/home");const el=qs("#editions");
-  el.innerHTML=d.editions.length?d.editions.map(e=>`<article class="edition"><div class="edition-cover"><span>♠</span><small>${escapeHtml(e.edition||"EDIÇÃO")}</small><b>SPADE</b><em>${escapeHtml(e.date||"")}</em></div><h3>${escapeHtml(e.title)}</h3><p>${escapeHtml(e.description)}</p>${e.pdf_url?`<a class="gold small" href="${escapeHtml(e.pdf_url)}" target="_blank" rel="noopener">Abrir PDF</a>`:`<span class="tag">PDF AINDA NÃO ADICIONADO</span>`}</article>`).join(""):`<div class="panel"><h3>Sem edições</h3><p>Publique a primeira pelo painel.</p></div>`;
+  try{
+    const d=state.data||await api("/api/home");
+    state.data=d;
+    renderJournal(d.editions||[],d.news||[]);
+  }catch(e){
+    const el=qs("#editions");if(el)el.innerHTML=`<div class="panel"><h3>Erro ao carregar o jornal</h3><p>${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function renderJournal(editions,news){
+  const feature=qs("#journalFeature");
+  const editionEl=qs("#editions");
+  const newsEl=qs("#journalNews");
+  const latest=editions?.[0];
+
+  if(feature){
+    feature.innerHTML=latest
+      ? `<div class="journal-feature-cover ${latest.cover_url?"":"fallback"}" ${latest.cover_url?`style="background-image:url('${escapeHtml(latest.cover_url)}')"`:""}>${latest.cover_url?"":`<div class="cover-fallback"><span style="font-size:65px">♠</span><b>SPADE</b><small>${escapeHtml(latest.edition||"EDIÇÃO")}</small></div>`}</div>
+         <div class="journal-feature-info">
+           <div class="journal-feature-meta">${escapeHtml(latest.edition||"EDIÇÃO")} • ${escapeHtml(String(latest.date||""))}</div>
+           <h2>${escapeHtml(latest.title)}</h2>
+           <p>${escapeHtml(latest.description||"")}</p>
+           <div class="actions">${latest.pdf_url?`<a class="gold" href="${escapeHtml(latest.pdf_url)}" target="_blank" rel="noopener">📄 Abrir PDF</a>`:""}<button class="outline" data-journal-scroll>Ver todas as edições</button></div>
+         </div>`
+      : `<div class="panel"><h3>O jornal ainda não possui uma edição.</h3><p>As próximas edições serão publicadas pela administração.</p></div>`;
+    const scroll=feature.querySelector("[data-journal-scroll]");
+    if(scroll)scroll.onclick=()=>editionEl?.scrollIntoView({behavior:"smooth",block:"start"});
+  }
+
+  if(editionEl){
+    editionEl.innerHTML=editions?.length
+      ? editions.map(e=>`<article class="edition">
+          <div class="edition-cover ${e.cover_url?"has-image":""}" ${e.cover_url?`style="background-image:url('${escapeHtml(e.cover_url)}')"`:""}>
+            ${e.cover_url?"":`<span>♠</span><small>${escapeHtml(e.edition||"EDIÇÃO")}</small><b>SPADE</b><em>${escapeHtml(String(e.date||""))}</em>`}
+          </div>
+          <h3>${escapeHtml(e.title)}</h3>
+          <p>${escapeHtml(e.description||"")}</p>
+          <div class="actions">${e.pdf_url?`<a class="gold small" href="${escapeHtml(e.pdf_url)}" target="_blank" rel="noopener">📄 PDF</a>`:`<span class="tag">PDF NÃO DISPONÍVEL</span>`}</div>
+        </article>`).join("")
+      : `<div class="panel"><h3>Nenhuma edição publicada.</h3></div>`;
+  }
+
+  if(newsEl){
+    newsEl.innerHTML=news?.length
+      ? news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}">
+          <div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div>
+          <div><span class="tag">${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt||"")}</p></div>
+        </article>`).join("")
+      : `<div class="panel"><h3>Nenhuma notícia publicada.</h3></div>`;
+  }
 }
 async function loadPlayers(){
   const d=await api("/api/players");state.players=d.players;renderPlayers("");
@@ -48,7 +97,7 @@ async function loadPlayers(){
 }
 function renderPlayers(term){
   const t=term.trim().toLowerCase();const p=(state.players||[]).filter(x=>`${x.nick} ${x.identifier} ${x.house}`.toLowerCase().includes(t));
-  qs("#playerGrid").innerHTML=p.map(x=>`<article class="player-card"><h3>${escapeHtml(x.nick)}${escapeHtml(x.number)}</h3><p><b>Casa:</b> ${escapeHtml(x.house||"—")}<br><b>Patente:</b> ${escapeHtml(x.patent)}<br><b>Missões:</b> ${x.missions}<br><b>Yuls:</b> 🪙 ${money(x.yuls)}</p></article>`).join("")||`<div class="panel"><h3>Nenhum jogador encontrado.</h3></div>`;
+  qs("#playerGrid").innerHTML=p.map(x=>`<article class="player-card"><h3>${escapeHtml(x.nick)}${escapeHtml(x.number)}</h3><p><b>Casa:</b> ${escapeHtml(x.house||"—")}<br><b>Patente:</b> ${escapeHtml(x.patent)}</p><div class="public-role-chips">${(x.roles||[]).map(r=>`<span class="public-role-chip">${escapeHtml(r.name)}</span>`).join("")||`<span class="tag">Nenhum cargo</span>`}</div><p><b>Missões:</b> ${x.missions}<br><b>Yuls:</b> 🪙 ${money(x.yuls)}</p></article>`).join("")||`<div class="panel"><h3>Nenhum jogador encontrado.</h3></div>`;
 }
 async function loadHouses(){
   try{
@@ -104,6 +153,75 @@ async function openHouse(id){
 }
 let rankingData={force:[],activity:[],missions:[],wealth:[],houses:[]};
 let activeRanking="force";
+
+async function loadHierarchy(){
+  try{
+    const d=await api("/api/hierarchy");
+    renderPublicHierarchy(d);
+    state.hierarchy=d;
+  }catch(e){
+    const p=qs("#publicPatents"),r=qs("#publicRoles");
+    if(p)p.innerHTML=`<div class="hierarchy-item"><p>${escapeHtml(e.message)}</p></div>`;
+    if(r)r.innerHTML=`<div class="hierarchy-item"><p>${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function renderPublicHierarchy(d){
+  const p=qs("#publicPatents"),r=qs("#publicRoles");
+  if(p)p.innerHTML=(d.patents||[]).map(x=>`<div class="hierarchy-item"><h4>${escapeHtml(x.name)}</h4><p>${escapeHtml(x.description||"")}</p></div>`).join("")||`<div class="hierarchy-item"><p>Nenhuma patente cadastrada.</p></div>`;
+  if(r)r.innerHTML=(d.roles||[]).map(x=>`<div class="hierarchy-item"><h4>${escapeHtml(x.name)}</h4><div class="hierarchy-salary">${x.salary>0?`🪙 ${money(x.salary)}`:"Remuneração não informada"}</div><p>${escapeHtml(x.description||"")}</p></div>`).join("")||`<div class="hierarchy-item"><p>Nenhum cargo cadastrado.</p></div>`;
+}
+
+async function loadAdminHierarchy(){
+  try{
+    const d=await adminApi("/api/admin/hierarchy");
+    state.adminHierarchy=d;
+    renderAdminHierarchy(d);
+    return d;
+  }catch(e){console.error(e);return null}
+}
+
+function renderAdminHierarchy(d){
+  const patentList=qs("#adminPatentList"),roleList=qs("#adminRoleList");
+  if(patentList)patentList.innerHTML=(d.patents||[]).map(x=>`<div class="hier-list-item"><div><b>🎖️ ${escapeHtml(x.name)}</b><small>Ordem: ${x.sort_order}${x.description?` • ${escapeHtml(x.description)}`:""}</small></div><div class="hier-actions"><button type="button" data-patent-edit="${x.id}">✎</button><button type="button" class="delete" data-patent-delete="${x.id}">×</button></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma patente cadastrada.</div>`;
+  if(roleList)roleList.innerHTML=(d.roles||[]).map(x=>`<div class="hier-list-item"><div><b>👑 ${escapeHtml(x.name)}</b><small>🪙 ${money(x.salary)} • Ordem: ${x.sort_order}${x.description?` • ${escapeHtml(x.description)}`:""}</small></div><div class="hier-actions"><button type="button" data-role-edit="${x.id}">✎</button><button type="button" class="delete" data-role-delete="${x.id}">×</button></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhum cargo cadastrado.</div>`;
+
+  qsa("[data-patent-edit]").forEach(b=>b.onclick=()=>editPatent(Number(b.dataset.patentEdit)));
+  qsa("[data-patent-delete]").forEach(b=>b.onclick=()=>deletePatent(Number(b.dataset.patentDelete)));
+  qsa("[data-role-edit]").forEach(b=>b.onclick=()=>editRole(Number(b.dataset.roleEdit)));
+  qsa("[data-role-delete]").forEach(b=>b.onclick=()=>deleteRole(Number(b.dataset.roleDelete)));
+}
+
+function resetPatentForm(){
+  const f=qs("#patentForm");if(!f)return;
+  f.reset();qs("#patentId").value="";qs("#patentOrder").value="0";
+  qs("#patentSaveBtn").textContent="Criar patente";qs("#patentError").textContent="";
+}
+function resetRoleForm(){
+  const f=qs("#roleForm");if(!f)return;
+  f.reset();qs("#roleId").value="";qs("#roleSalary").value="0";qs("#roleOrder").value="0";
+  qs("#roleSaveBtn").textContent="Criar cargo";qs("#roleError").textContent="";
+}
+function editPatent(id){
+  const x=(state.adminHierarchy?.patents||[]).find(a=>Number(a.id)===id);if(!x)return;
+  qs("#patentId").value=x.id;qs("#patentName").value=x.name;qs("#patentOrder").value=x.sort_order;qs("#patentDescription").value=x.description||"";
+  qs("#patentSaveBtn").textContent="Salvar patente";qs("#patentError").textContent="";qs("#patentName").focus();
+}
+function editRole(id){
+  const x=(state.adminHierarchy?.roles||[]).find(a=>Number(a.id)===id);if(!x)return;
+  qs("#roleId").value=x.id;qs("#roleName").value=x.name;qs("#roleSalary").value=x.salary;qs("#roleOrder").value=x.sort_order;qs("#roleDescription").value=x.description||"";
+  qs("#roleSaveBtn").textContent="Salvar cargo";qs("#roleError").textContent="";qs("#roleName").focus();
+}
+async function deletePatent(id){
+  const x=(state.adminHierarchy?.patents||[]).find(a=>Number(a.id)===id);if(!x)return;
+  if(!confirm(`Excluir a patente ${x.name}?`))return;
+  try{await adminApi(`/api/admin/patents/${id}`,{method:"DELETE"});await loadAdminHierarchy();await loadAdminEditorial();await loadHierarchy();alert("Patente excluída.")}catch(e){alert(e.message)}
+}
+async function deleteRole(id){
+  const x=(state.adminHierarchy?.roles||[]).find(a=>Number(a.id)===id);if(!x)return;
+  if(!confirm(`Excluir o cargo ${x.name}?`))return;
+  try{await adminApi(`/api/admin/roles/${id}`,{method:"DELETE"});await loadAdminHierarchy();await loadHierarchy();alert("Cargo excluído.")}catch(e){alert(e.message)}
+}
 
 async function loadRanking(){
   try{
@@ -230,7 +348,7 @@ async function refreshDashboard(){
 function renderDashboard(){
  if(!state.me)return go("login");
  qs("#dashName").textContent=`Bem-vindo, ${state.me.nick}.`;
- qs("#dash").innerHTML=`<div class="dash-grid"><div class="dash-main"><div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(state.me.nick)}${escapeHtml(state.me.number)}</h2><p>${escapeHtml(state.me.patent)} • ${escapeHtml(state.me.house||"Casa não definida")}</p></div></div><div class="profile-lines"><div><small>Cargo</small><b>${escapeHtml(state.me.role||"Não definido")}</b></div><div><small>Grimório</small><b>${escapeHtml(state.me.grimoire||"Não definido")}</b></div></div><div class="profile-lines"><div><small>Casa</small><b>${escapeHtml(state.me.house||"Não definida")}</b></div><div><small>Ranking</small><b>${state.me.ranking||"—"}</b></div></div></div><div class="dash-status"><p class="eyebrow">STATUS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${state.me.hp}</b></div><div class="stat"><small>♦️ Mana</small><b>${state.me.mana}</b></div><div class="stat"><small>📋 Missões</small><b>${state.me.missions}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(state.me.yuls)}</b></div></div></div></div><div class="panel" style="margin-top:12px"><p class="eyebrow">CONQUISTAS</p><h3>${state.me.achievements} conquistas registradas</h3><p>Os dados serão atualizados pela administração do RPG.</p></div>`;
+ qs("#dash").innerHTML=`<div class="dash-grid"><div class="dash-main"><div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(state.me.nick)}${escapeHtml(state.me.number)}</h2><p>${escapeHtml(state.me.patent)} • ${escapeHtml(state.me.house||"Casa não definida")}</p></div></div><div class="profile-lines"><div><small>Cargos</small><b>${state.me.roles?.length?state.me.roles.map(r=>escapeHtml(r.name)).join(" • "):"Não definido"}</b></div><div><small>Grimório</small><b>${escapeHtml(state.me.grimoire||"Não definido")}</b></div></div><div class="profile-lines"><div><small>Casa</small><b>${escapeHtml(state.me.house||"Não definida")}</b></div><div><small>Ranking</small><b>${state.me.ranking||"—"}</b></div></div></div><div class="dash-status"><p class="eyebrow">STATUS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${state.me.hp}</b></div><div class="stat"><small>♦️ Mana</small><b>${state.me.mana}</b></div><div class="stat"><small>📋 Missões</small><b>${state.me.missions}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(state.me.yuls)}</b></div></div></div></div><div class="panel" style="margin-top:12px"><p class="eyebrow">CONQUISTAS</p><h3>${state.me.achievements} conquistas registradas</h3><p>Os dados serão atualizados pela administração do RPG.</p></div>`;
  loadPlayerYuls();
  loadPlayerMissions();
 }
@@ -313,7 +431,7 @@ function renderAdminList(players,term){
   const t=String(term||"").trim().toLowerCase();
   const filtered=players.filter(p=>`${p.nick} ${p.number} ${p.identifier} ${p.house}`.toLowerCase().includes(t));
   qs("#playerCountLabel").textContent=`${filtered.length} visíveis`;
-  qs("#adminPlayerList").innerHTML=filtered.map(p=>`<button class="admin-player ${state.selectedPlayer?.id===p.id?"selected":""}" data-player-id="${p.id}" type="button"><span><b>${escapeHtml(p.nick)}${escapeHtml(p.number)}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent)} · ${p.has_password?"🔐 senha definida":"⚠️ sem senha"}</small></span><span class="player-yuls">🪙 ${money(p.yuls)}</span></button>`).join("")||`<div style="padding:30px;text-align:center;color:#888;font-size:11px">Nenhum jogador encontrado.</div>`;
+  qs("#adminPlayerList").innerHTML=filtered.map(p=>`<button class="admin-player ${state.selectedPlayer?.id===p.id?"selected":""}" data-player-id="${p.id}" type="button"><span><b>${escapeHtml(p.nick)}${escapeHtml(p.number)}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent)} · ${(p.roles||[]).map(r=>escapeHtml(r.name)).join(", ")||"sem cargos"} · ${p.has_password?"🔐 senha definida":"⚠️ sem senha"}</small></span><span class="player-yuls">🪙 ${money(p.yuls)}</span></button>`).join("")||`<div style="padding:30px;text-align:center;color:#888;font-size:11px">Nenhum jogador encontrado.</div>`;
   qsa(".admin-player").forEach(b=>b.addEventListener("click",()=>selectAdminPlayer(Number(b.dataset.playerId))));
 }
 
@@ -330,7 +448,7 @@ function renderEditor(p){
   const hist=(p.history||[]).map(h=>`<div class="history-row"><span>${escapeHtml(h.reason||"Movimentação")}<br><small>${escapeHtml(h.created_at||"")}</small></span><b class="${h.amount>=0?"plus":"minus"}">${h.amount>=0?"+":""}${money(h.amount)} → ${money(h.balance_after)}</b></div>`).join("")||`<div style="font-size:10px;color:#888;padding:8px 0">Nenhuma movimentação registrada.</div>`;
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">EDITANDO JOGADOR</p><h3>${escapeHtml(p.nick)}${escapeHtml(p.number)}</h3><p>${escapeHtml(p.identifier)}</p></div><button class="icon-button" type="button" id="closeEditor">×</button></div>
   <form id="editPlayerForm"><div class="form-grid">
-  ${field("Nick","nick",p.nick)}${field("Número","number",p.number)}${field("Nova senha","password","","password")}${field("Casa","house",p.house)}${field("Patente","patent",p.patent)}${field("Cargo","role",p.role)}${field("Grimório","grimoire",p.grimoire)}
+  ${field("Nick","nick",p.nick)}${field("Número","number",p.number)}${field("Nova senha","password","","password")}${field("Casa","house",p.house)}${selectField("Patente","patent",p.patent,state.adminHierarchy?.patents||[], "name")}${rolesMultiField(p.roles||[],state.adminHierarchy?.roles||[])}${field("Grimório","grimoire",p.grimoire)}
   ${field("❤️ HP","hp",p.hp,"number")}${field("♦️ Mana","mana",p.mana,"number")}${field("🪙 Yuls","yuls",p.yuls,"number")}${field("📋 Missões","missions",p.missions,"number")}${field("🏆 Conquistas","achievements",p.achievements,"number")}${field("Ranking","ranking",p.ranking,"number")}
   <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
   </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">Excluir jogador</button></div><div class="error" id="editError"></div></form>
@@ -343,11 +461,21 @@ function renderEditor(p){
   qs("#missionBtn").addEventListener("click",launchMission);
   qsa("[data-mission-delete]").forEach(b=>b.addEventListener("click",()=>deleteMission(Number(b.dataset.missionDelete))));
 }
+function rolesMultiField(selected,items){
+  const ids=new Set((selected||[]).map(x=>String(typeof x==="object"?x.id:x)));
+  const options=(items||[]).map(x=>`<label class="role-option"><input type="checkbox" name="role_ids" value="${escapeHtml(x.id)}" ${ids.has(String(x.id))?"checked":""}><span><b>${escapeHtml(x.name)}</b><small>${x.salary>0?`🪙 ${money(x.salary)}`:"Remuneração não informada"}</small></span></label>`).join("");
+  return `<div class="field full"><label>Cargos (pode selecionar vários)</label><div class="roles-editor"><div class="roles-editor-title">Selecione todos os cargos do jogador</div><div class="roles-picker">${options||`<span style="font-size:10px;color:#888">Nenhum cargo cadastrado.</span>`}</div></div></div>`;
+}
+function selectField(label,name,value,items,key){
+  const options=(items||[]).map(x=>`<option value="${escapeHtml(x[key]||"")}" ${String(x[key]||"")===String(value||"")?"selected":""}>${escapeHtml(x.name||x[key]||"")}</option>`).join("");
+  return `<div class="field"><label>${label}</label><select name="${name}"><option value="">Não definido</option>${options}</select></div>`;
+}
 function field(label,name,value,type="text"){
   return `<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${escapeHtml(value??"")}"></div>`;
 }
 async function savePlayer(e){
   e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
+  b.role_ids=[...e.target.querySelectorAll('input[name="role_ids"]:checked')].map(x=>Number(x.value));
   try{
     const d=await adminApi(`/api/admin/players/${state.selectedPlayer.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
     state.selectedPlayer={...d.player,history:state.selectedPlayer.history};
@@ -402,11 +530,12 @@ function openNewPlayer(){
   state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">NOVO CADASTRO</p><h3>Novo jogador</h3><p>Crie o acesso usando Nick + número.</p></div><button class="icon-button" id="closeEditor" type="button">×</button></div>
   <form id="newAdminPlayerForm"><div class="form-grid">
-  ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${field("Patente","patent","Cavaleiro Mágico Junior")}${field("Cargo","role","")}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking manual","ranking",0,"number")}${field("⚔️ Força","power",0,"number")}
+  ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${selectField("Patente","patent","Cavaleiro Mágico Junior",state.adminHierarchy?.patents||[], "name")}${rolesMultiField([],state.adminHierarchy?.roles||[])}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking manual","ranking",0,"number")}${field("⚔️ Força","power",0,"number")}
   </div><div class="editor-actions"><button class="gold" type="submit">Cadastrar jogador</button></div><div class="error" id="newPlayerError"></div></form>`;
   qs("#closeEditor").addEventListener("click",()=>renderEditor({nick:"",number:"",history:[],missions:[],public_profile:1}));
   qs("#newAdminPlayerForm").addEventListener("submit",async e=>{
     e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
+    b.role_ids=[...e.target.querySelectorAll('input[name="role_ids"]:checked')].map(x=>Number(x.value));
     try{const d=await adminApi("/api/admin/players",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});await initAdmin();await selectAdminPlayer(d.player.id);alert("Jogador cadastrado.");}
     catch(ex){qs("#newPlayerError").textContent=ex.message}
   });
@@ -415,8 +544,8 @@ function openNewPlayer(){
 qs("#adminSearch").addEventListener("input",e=>renderAdminList(state.players,e.target.value));
 qs("#newPlayerBtn").addEventListener("click",openNewPlayer);
 qs("#refreshAdminBtn").addEventListener("click",initAdmin);
-qs("#newsForm").addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");loadHome();}catch(ex){alert(ex.message)}});
-qs("#editionForm").addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");loadEditions();}catch(ex){alert(ex.message)}});
+qs("#newsForm").addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
+qs("#editionForm").addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
 qs("#logoutAdminBtn").addEventListener("click",()=>{state.admin=false;state.adminKey=null;state.selectedPlayer=null;go("home")});
 
 qs("#houseForm").addEventListener("submit",async e=>{
@@ -432,6 +561,53 @@ qs("#houseForm").addEventListener("submit",async e=>{
   }catch(ex){qs("#houseError").textContent=ex.message}
 });
 qs("#houseCancelBtn").addEventListener("click",resetHouseForm);
+
+qs("#patentForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const b=Object.fromEntries(new FormData(e.target).entries());
+  try{
+    if(b.id) await adminApi(`/api/admin/patents/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    else await adminApi("/api/admin/patents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    resetPatentForm();await loadAdminHierarchy();await loadHierarchy();alert("Patente salva com sucesso.");
+  }catch(ex){qs("#patentError").textContent=ex.message}
+});
+qs("#patentCancelBtn").addEventListener("click",resetPatentForm);
+
+qs("#roleForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const b=Object.fromEntries(new FormData(e.target).entries());
+  try{
+    if(b.id) await adminApi(`/api/admin/roles/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    else await adminApi("/api/admin/roles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    resetRoleForm();await loadAdminHierarchy();await loadHierarchy();alert("Cargo salvo com sucesso.");
+  }catch(ex){qs("#roleError").textContent=ex.message}
+});
+qs("#roleCancelBtn").addEventListener("click",resetRoleForm);
+
+async function loadAdminEditorial(){
+  try{
+    const [n,e]=await Promise.all([adminApi("/api/admin/news"),adminApi("/api/admin/editions")]);
+    state.adminNews=n.news||[];state.adminEditions=e.editions||[];
+    renderAdminEditorial();
+  }catch(err){console.error(err)}
+}
+
+function renderAdminEditorial(){
+  const nl=qs("#adminNewsList"),el=qs("#adminEditionList");
+  if(nl)nl.innerHTML=(state.adminNews||[]).map(n=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}${n.published?"":" • Rascunho"}</small></div><div class="editorial-actions"><button type="button" data-news-delete="${n.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma notícia.</div>`;
+  if(el)el.innerHTML=(state.adminEditions||[]).map(x=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.edition||"Edição")} • ${escapeHtml(String(x.date||""))}${x.pdf_url?" • PDF":" • sem PDF"}</small></div><div class="editorial-actions"><button type="button" data-edition-delete="${x.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição.</div>`;
+  qsa("[data-news-delete]").forEach(b=>b.onclick=()=>deleteNews(Number(b.dataset.newsDelete)));
+  qsa("[data-edition-delete]").forEach(b=>b.onclick=()=>deleteEdition(Number(b.dataset.editionDelete)));
+}
+
+async function deleteNews(id){
+  if(!confirm("Excluir esta notícia?"))return;
+  try{await adminApi(`/api/admin/news/${id}`,{method:"DELETE"});await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();alert("Notícia excluída.")}catch(e){alert(e.message)}
+}
+async function deleteEdition(id){
+  if(!confirm("Excluir esta edição?"))return;
+  try{await adminApi(`/api/admin/editions/${id}`,{method:"DELETE"});await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();alert("Edição excluída.")}catch(e){alert(e.message)}
+}
 
 async function tryAdminHash(){
   if(location.hash!=="#admin")return;
