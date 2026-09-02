@@ -247,6 +247,20 @@ async function initDatabase() {
     );
   }
 
+  const announcementCount = await pool.query("SELECT COUNT(*)::int AS c FROM announcements");
+  if (announcementCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO announcements(title,category,priority,body,featured,published)
+       VALUES ($1,$2,$3,$4,1,1)`,
+      [
+        "Bem-vindos ao Portal Spade",
+        "REINO SPADE",
+        "INFORMATIVO",
+        "Este espaço será usado para os comunicados oficiais do Reino."
+      ]
+    );
+  }
+
   const newsCount = await pool.query("SELECT COUNT(*)::int AS c FROM news");
   if (newsCount.rows[0].c === 0) {
     await pool.query(
@@ -380,9 +394,61 @@ app.get("/api/me/missions", async (req, res) => {
   }
 });
 
+app.get("/api/announcements", async (req,res)=>{
+  try{
+    const r=await pool.query(
+      `SELECT id,title,category,priority,body,date,featured
+       FROM announcements
+       WHERE published=1
+       ORDER BY featured DESC,
+         CASE priority WHEN 'URGENTE' THEN 1 WHEN 'IMPORTANTE' THEN 2 ELSE 3 END,
+         id DESC
+       LIMIT 100`
+    );
+    res.json({announcements:r.rows.map(a=>({
+      id:Number(a.id),title:a.title,category:a.category||"INFORMATIVO",
+      priority:a.priority||"INFORMATIVO",body:a.body||"",date:a.date,
+      featured:Boolean(a.featured)
+    }))});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar comunicados."});
+  }
+});
+
+app.get("/api/me/alerts", async (req,res)=>{
+  const id=readPlayerToken(req);
+  if(!id)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const r=await pool.query(
+      `SELECT id,title,category,priority,body,date,featured
+       FROM announcements
+       WHERE published=1
+         AND priority IN ('URGENTE','IMPORTANTE')
+       ORDER BY CASE priority WHEN 'URGENTE' THEN 1 WHEN 'IMPORTANTE' THEN 2 ELSE 3 END,
+                featured DESC,id DESC
+       LIMIT 20`
+    );
+    res.json({
+      alerts:r.rows.map(a=>({
+        id:Number(a.id),
+        title:a.title,
+        category:a.category||"INFORMATIVO",
+        priority:a.priority||"INFORMATIVO",
+        body:a.body||"",
+        date:a.date,
+        featured:Boolean(a.featured)
+      }))
+    });
+  }catch(e){
+    console.error("Erro em /api/me/alerts:",e);
+    res.status(500).json({error:"Erro ao carregar avisos."});
+  }
+});
+
 app.get("/api/home", async (req, res) => {
   try {
-    const [news, editions, houses, ranking] = await Promise.all([
+    const [news, editions, houses, ranking, announcements] = await Promise.all([
       pool.query("SELECT id,title,category,excerpt,body,image_url,date FROM news WHERE published=1 ORDER BY id DESC LIMIT 6"),
       pool.query("SELECT id,title,edition,description,pdf_url,cover_url,date FROM editions WHERE published=1 ORDER BY id DESC LIMIT 6"),
       pool.query(`SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
@@ -394,13 +460,24 @@ app.get("/api/home", async (req, res) => {
                   ORDER BY missions DESC, h.name ASC
                   LIMIT 20`),
       pool.query(`SELECT nick,identifier,house,missions,ranking
-                  FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 10`)
+                  FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 10`),
+      pool.query(`SELECT id,title,category,priority,body,date,featured
+                  FROM announcements
+                  WHERE published=1
+                  ORDER BY featured DESC,
+                    CASE priority WHEN 'URGENTE' THEN 1 WHEN 'IMPORTANTE' THEN 2 ELSE 3 END,
+                    id DESC
+                  LIMIT 5`)
     ]);
     res.json({
       news: news.rows,
       editions: editions.rows,
       houses: houses.rows.map(x => ({ ...x, count: Number(x.count), missions: Number(x.missions) })),
-      ranking: ranking.rows
+      ranking: ranking.rows,
+      announcements: announcements.rows.map(a=>({
+        id:Number(a.id),title:a.title,category:a.category||"INFORMATIVO",
+        priority:a.priority||"INFORMATIVO",body:a.body||"",date:a.date,featured:Boolean(a.featured)
+      }))
     });
   } catch (e) {
     console.error(e);
@@ -613,6 +690,93 @@ app.get("/api/ranking", async (req, res) => {
   }
 });
 
+
+app.get("/api/players/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: "Jogador inválido." });
+  }
+
+  try {
+    const [playerResult, rolesResult, missionsResult, rankingResult] = await Promise.all([
+      pool.query(
+        `SELECT id,nick,number,identifier,house,patent,role,grimoire,
+                hp,mana,yuls,missions,achievements,ranking,power,public_profile
+         FROM players
+         WHERE id=$1 AND public_profile=1`,
+        [id]
+      ),
+      pool.query(
+        `SELECT r.id,r.name,r.description,r.salary,r.sort_order
+         FROM roles r
+         JOIN player_roles pr ON pr.role_id=r.id
+         WHERE pr.player_id=$1
+         ORDER BY r.sort_order ASC,r.name COLLATE "C" ASC`,
+        [id]
+      ),
+      pool.query(
+        `SELECT id,title,mission_type,mission_rank,status,reward_yuls,notes,completed_at
+         FROM missions
+         WHERE player_id=$1
+         ORDER BY id DESC
+         LIMIT 20`,
+        [id]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS position
+         FROM players
+         WHERE public_profile=1
+           AND ranking>0
+           AND ranking < (SELECT ranking FROM players WHERE id=$1)`,
+        [id]
+      )
+    ]);
+
+    const player = playerResult.rows[0];
+    if (!player) {
+      return res.status(404).json({ error: "Jogador não encontrado ou perfil privado." });
+    }
+
+    const roles = rolesResult.rows.map(r => ({
+      id:Number(r.id),
+      name:r.name,
+      description:r.description || "",
+      salary:Number(r.salary || 0),
+      sort_order:Number(r.sort_order || 0)
+    }));
+
+    const missions = missionsResult.rows.map(m => ({
+      id:Number(m.id),
+      title:m.title,
+      mission_type:m.mission_type || "",
+      mission_rank:m.mission_rank || "",
+      status:m.status || "",
+      reward_yuls:Number(m.reward_yuls || 0),
+      notes:m.notes || "",
+      completed_at:m.completed_at,
+      created_at:m.created_at
+    }));
+
+    const completed=missions.filter(m=>m.status==="Concluída").length;
+    const totalRewards=missions.filter(m=>m.status==="Concluída").reduce((sum,m)=>sum+m.reward_yuls,0);
+
+    res.json({
+      player:{...publicPlayer(player),roles},
+      mission_summary:{
+        completed:Number(player.missions || completed),
+        recent:missions,
+        rewards_on_page:totalRewards
+      },
+      ranking_position: Number(player.ranking || 0) > 0
+        ? Number(rankingResult.rows[0].position)+1
+        : 0
+    });
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar ficha do jogador."});
+  }
+});
+
 app.get("/api/players", async (req, res) => {
   try {
     const result = await pool.query(
@@ -689,6 +853,98 @@ app.delete("/api/admin/editions/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   try{await pool.query("DELETE FROM editions WHERE id=$1",[id]);res.json({ok:true})}
   catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir edição."});}
+});
+
+app.get("/api/admin/announcements", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(
+      `SELECT id,title,category,priority,body,date,featured,published
+       FROM announcements ORDER BY id DESC LIMIT 200`
+    );
+    res.json({announcements:r.rows.map(a=>({
+      id:Number(a.id),title:a.title,category:a.category||"INFORMATIVO",
+      priority:a.priority||"INFORMATIVO",body:a.body||"",date:a.date,
+      featured:Number(a.featured),published:Number(a.published)
+    }))});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar comunicados administrativos."});
+  }
+});
+
+app.post("/api/admin/announcements", requireAdmin, async (req,res)=>{
+  const b=req.body||{};
+  const title=String(b.title||"").trim();
+  const category=String(b.category||"INFORMATIVO").trim()||"INFORMATIVO";
+  const priority=String(b.priority||"INFORMATIVO").trim()||"INFORMATIVO";
+  const body=String(b.body||"").trim();
+  const date=String(b.date||new Date().toISOString().slice(0,10)).trim();
+  const featured=Number(b.featured)?1:0;
+  const published=Number(b.published??1)?1:0;
+
+  if(!title)return res.status(400).json({error:"Título do comunicado é obrigatório."});
+  if(!["URGENTE","IMPORTANTE","INFORMATIVO"].includes(priority)){
+    return res.status(400).json({error:"Prioridade inválida."});
+  }
+
+  try{
+    if(featured)await pool.query("UPDATE announcements SET featured=0");
+    const r=await pool.query(
+      `INSERT INTO announcements(title,category,priority,body,date,featured,published)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [title,category,priority,body,date,featured,published]
+    );
+    res.json({announcement:r.rows[0]});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao publicar comunicado."});
+  }
+});
+
+app.put("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id),b=req.body||{};
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Comunicado inválido."});
+
+  const title=String(b.title||"").trim();
+  const category=String(b.category||"INFORMATIVO").trim()||"INFORMATIVO";
+  const priority=String(b.priority||"INFORMATIVO").trim()||"INFORMATIVO";
+  const body=String(b.body||"").trim();
+  const date=String(b.date||new Date().toISOString().slice(0,10)).trim();
+  const featured=Number(b.featured)?1:0;
+  const published=Number(b.published??1)?1:0;
+
+  if(!title)return res.status(400).json({error:"Título do comunicado é obrigatório."});
+  if(!["URGENTE","IMPORTANTE","INFORMATIVO"].includes(priority)){
+    return res.status(400).json({error:"Prioridade inválida."});
+  }
+
+  try{
+    if(featured)await pool.query("UPDATE announcements SET featured=0 WHERE id<>$1",[id]);
+    const r=await pool.query(
+      `UPDATE announcements
+       SET title=$1,category=$2,priority=$3,body=$4,date=$5,featured=$6,published=$7,updated_at=NOW()
+       WHERE id=$8 RETURNING *`,
+      [title,category,priority,body,date,featured,published,id]
+    );
+    if(!r.rows[0])return res.status(404).json({error:"Comunicado não encontrado."});
+    res.json({announcement:r.rows[0]});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao atualizar comunicado."});
+  }
+});
+
+app.delete("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Comunicado inválido."});
+  try{
+    const r=await pool.query("DELETE FROM announcements WHERE id=$1",[id]);
+    if(!r.rowCount)return res.status(404).json({error:"Comunicado não encontrado."});
+    res.json({ok:true});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao excluir comunicado."});
+  }
 });
 
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
@@ -934,6 +1190,118 @@ app.get("/api/admin/players", requireAdmin, async (req, res) => {
   } catch(e) {
     console.error(e);
     res.status(500).json({error:"Erro ao carregar jogadores administrativos."});
+  }
+});
+
+
+app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
+  const b=req.body||{};
+  const ids=[...new Set((Array.isArray(b.player_ids)?b.player_ids:[])
+    .map(Number).filter(x=>Number.isInteger(x)&&x>0))];
+  const action=String(b.action||"").trim();
+
+  if(!ids.length)return res.status(400).json({error:"Selecione pelo menos um jogador."});
+  if(!["add_yuls","remove_yuls","set_house","set_patent","set_roles","set_missions","add_missions","set_power","set_public"].includes(action)){
+    return res.status(400).json({error:"Ação inválida."});
+  }
+
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    const pr=await client.query(`SELECT * FROM players WHERE id=ANY($1::bigint[]) FOR UPDATE`,[ids]);
+    if(pr.rows.length!==ids.length){
+      await client.query("ROLLBACK");
+      return res.status(400).json({error:"Um ou mais jogadores não foram encontrados."});
+    }
+
+    if(action==="add_yuls"||action==="remove_yuls"){
+      const amount=Math.round(Number(b.amount||0));
+      if(!Number.isFinite(amount)||amount<=0){
+        await client.query("ROLLBACK");
+        return res.status(400).json({error:"Informe um valor de Yuls maior que zero."});
+      }
+      const delta=action==="add_yuls"?amount:-amount;
+      const reason=String(b.reason||"Movimentação administrativa em massa").trim();
+
+      for(const player of pr.rows){
+        const newBalance=Number(player.yuls||0)+delta;
+        if(newBalance<0){
+          await client.query("ROLLBACK");
+          return res.status(400).json({error:`A ação deixaria ${player.nick}${player.number} com saldo negativo.`});
+        }
+        await client.query("UPDATE players SET yuls=$1,updated_at=NOW() WHERE id=$2",[newBalance,player.id]);
+        await client.query(
+          `INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES ($1,$2,$3,$4)`,
+          [player.id,delta,reason,newBalance]
+        );
+      }
+    }
+
+    if(action==="set_house"){
+      const id=Number(b.house_id||0);
+      const r=await client.query("SELECT name FROM houses WHERE id=$1",[id]);
+      if(!r.rows[0]){await client.query("ROLLBACK");return res.status(400).json({error:"Casa não encontrada."});}
+      await client.query("UPDATE players SET house=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[r.rows[0].name,ids]);
+    }
+
+    if(action==="set_patent"){
+      const id=Number(b.patent_id||0);
+      const r=await client.query("SELECT name FROM patents WHERE id=$1",[id]);
+      if(!r.rows[0]){await client.query("ROLLBACK");return res.status(400).json({error:"Patente não encontrada."});}
+      await client.query("UPDATE players SET patent=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[r.rows[0].name,ids]);
+    }
+
+    if(action==="set_roles"){
+      const roleIds=[...new Set((Array.isArray(b.role_ids)?b.role_ids:[])
+        .map(Number).filter(x=>Number.isInteger(x)&&x>0))];
+      const valid=roleIds.length
+        ? await client.query(`SELECT id FROM roles WHERE id=ANY($1::bigint[])`,[roleIds])
+        : {rows:[]};
+      await client.query("DELETE FROM player_roles WHERE player_id=ANY($1::bigint[])",[ids]);
+      for(const playerId of ids){
+        for(const role of valid.rows){
+          await client.query(
+            `INSERT INTO player_roles(player_id,role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+            [playerId,Number(role.id)]
+          );
+        }
+      }
+    }
+
+    if(action==="set_missions"||action==="add_missions"){
+      const amount=Math.round(Number(b.amount||0));
+      if(!Number.isFinite(amount)||amount<0){
+        await client.query("ROLLBACK");
+        return res.status(400).json({error:"Quantidade de missões inválida."});
+      }
+      for(const player of pr.rows){
+        const value=action==="add_missions"?Number(player.missions||0)+amount:amount;
+        await client.query("UPDATE players SET missions=$1,updated_at=NOW() WHERE id=$2",[value,player.id]);
+      }
+    }
+
+    if(action==="set_power"){
+      const amount=Math.round(Number(b.amount||0));
+      if(!Number.isFinite(amount)||amount<0){
+        await client.query("ROLLBACK");
+        return res.status(400).json({error:"Valor de força inválido."});
+      }
+      await client.query("UPDATE players SET power=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[amount,ids]);
+    }
+
+    if(action==="set_public"){
+      const visible=Number(b.public_profile)?1:0;
+      await client.query("UPDATE players SET public_profile=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[visible,ids]);
+    }
+
+    await client.query("COMMIT");
+    res.json({ok:true,changed:ids.length});
+  }catch(e){
+    await client.query("ROLLBACK");
+    console.error("Erro em /api/admin/players/bulk:",e);
+    res.status(500).json({error:"Erro ao executar ação em massa."});
+  }finally{
+    client.release();
   }
 });
 
