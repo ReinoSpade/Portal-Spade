@@ -15,7 +15,7 @@ function go(page){
   if(page==="jogadores") loadPlayers();
   if(page==="casas") loadHouses();
   if(page==="ranking") loadRanking();
-  if(page==="dashboard") renderDashboard();
+  if(page==="dashboard") { refreshDashboard(); }
   if(page==="admin" && state.admin) initAdmin();
 }
 
@@ -71,6 +71,27 @@ async function loadPlayerMissions(){
       return `<div class="player-mission-row"><div class="player-mission-top"><div><div class="player-mission-title">${escapeHtml(m.title)}</div><div class="player-mission-meta">${escapeHtml(m.mission_type)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""} • ${escapeHtml(String(m.completed_at||""))}</div></div><span class="mission-status ${cls}">${escapeHtml(m.status)}</span></div>${m.reward_yuls>0?`<div class="mission-reward">🪙 +${money(m.reward_yuls)} Yuls</div>`:""}${m.notes?`<div class="mission-notes">${escapeHtml(m.notes)}</div>`:""}</div>`;
     }).join(""):"<div class=\"yuls-empty\">Nenhuma missão registrada.</div>";
   }catch(e){historyEl.innerHTML=`<div class=\"yuls-empty\">${escapeHtml(e.message)}</div>`}
+}
+
+async function refreshDashboardStateOnly(){
+  try{
+    const d=await api("/api/me");
+    state.me=d.player;
+    if(state.page==="dashboard"){ renderDashboard(); }
+  }catch{}
+}
+
+async function refreshDashboard(){
+  try{
+    const d=await api("/api/me");
+    state.me=d.player;
+    setPlayerNav();
+    renderDashboard();
+  }catch(e){
+    state.me=null;
+    setLoginNav();
+    go("login");
+  }
 }
 
 function renderDashboard(){
@@ -169,6 +190,7 @@ async function launchYuls(){
   try{
     await adminApi(`/api/admin/players/${state.selectedPlayer.id}/yuls`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,reason})});
     await selectAdminPlayer(state.selectedPlayer.id);alert("Movimentação registrada.");
+    if(state.me && Number(state.me.id)===Number(state.selectedPlayer.id)){ await refreshDashboardStateOnly(); }
   }catch(ex){alert(ex.message)}
 }
 async function launchMission(){
@@ -186,13 +208,13 @@ async function launchMission(){
     await adminApi(`/api/admin/players/${state.selectedPlayer.id}/missions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,mission_type,mission_rank,status,reward_yuls,completed_at,notes})});
     await selectAdminPlayer(state.selectedPlayer.id);
     alert(status==="Concluída"?"Missão registrada e contagem atualizada.":"Missão registrada.");
-    if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await tryMe();if(state.page==="dashboard"){loadPlayerYuls();loadPlayerMissions();}}
+    if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}
   }catch(ex){alert(ex.message)}
 }
 
 async function deleteMission(missionId){
   if(!confirm("Excluir esta missão? Se ela estiver concluída, a contagem e a recompensa serão desfeitas."))return;
-  try{await adminApi(`/api/admin/missions/${missionId}`,{method:"DELETE"});await selectAdminPlayer(state.selectedPlayer.id);alert("Missão excluída.");if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await tryMe();if(state.page==="dashboard"){loadPlayerYuls();loadPlayerMissions();}}}catch(ex){alert(ex.message)}
+  try{await adminApi(`/api/admin/missions/${missionId}`,{method:"DELETE"});await selectAdminPlayer(state.selectedPlayer.id);alert("Missão excluída.");if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}}catch(ex){alert(ex.message)}
 }
 
 async function deleteSelectedPlayer(){
