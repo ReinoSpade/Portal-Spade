@@ -65,7 +65,8 @@ function publicPlayer(row) {
     yuls: Number(row.yuls || 0),
     missions: Number(row.missions || 0),
     achievements: Number(row.achievements || 0),
-    ranking: Number(row.ranking || 0)
+    ranking: Number(row.ranking || 0),
+    power: Number(row.power || 0)
   };
 }
 
@@ -103,12 +104,14 @@ async function initDatabase() {
       missions INTEGER DEFAULT 0 CHECK (missions >= 0),
       achievements INTEGER DEFAULT 0 CHECK (achievements >= 0),
       ranking INTEGER DEFAULT 0 CHECK (ranking >= 0),
+      power INTEGER DEFAULT 0 CHECK (power >= 0),
       public_profile INTEGER DEFAULT 1 CHECK (public_profile IN (0,1)),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
 
     CREATE TABLE IF NOT EXISTS news (
       id BIGSERIAL PRIMARY KEY,
@@ -433,10 +436,91 @@ app.get("/api/houses/:id", async (req, res) => {
   }
 });
 
+
+app.get("/api/rankings", async (req, res) => {
+  try {
+    const [powerResult, missionsResult, wealthResult, activityResult, houseResult] = await Promise.all([
+      pool.query(
+        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
+         FROM players
+         WHERE public_profile=1
+         ORDER BY power DESC, missions DESC, nick COLLATE "C" ASC
+         LIMIT 75`
+      ),
+      pool.query(
+        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
+         FROM players
+         WHERE public_profile=1
+         ORDER BY missions DESC, achievements DESC, nick COLLATE "C" ASC
+         LIMIT 75`
+      ),
+      pool.query(
+        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
+         FROM players
+         WHERE public_profile=1
+         ORDER BY yuls DESC, missions DESC, nick COLLATE "C" ASC
+         LIMIT 75`
+      ),
+      pool.query(
+        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
+         FROM players
+         WHERE public_profile=1
+         ORDER BY (missions + achievements * 3) DESC, missions DESC, achievements DESC, nick COLLATE "C" ASC
+         LIMIT 75`
+      ),
+      pool.query(
+        `SELECT h.id,h.name,h.emblem,h.leader,h.vice_leader,
+                COUNT(p.id)::int AS members,
+                COALESCE(SUM(p.missions),0)::bigint AS missions,
+                COALESCE(SUM(p.yuls),0)::bigint AS yuls,
+                COALESCE(SUM(p.power),0)::bigint AS power
+         FROM houses h
+         LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1
+         GROUP BY h.id
+         ORDER BY power DESC, missions DESC, members DESC, h.name ASC
+         LIMIT 20`
+      )
+    ]);
+
+    const mapPlayer = p => ({
+      id:Number(p.id),
+      nick:p.nick,
+      number:p.number,
+      identifier:p.identifier,
+      house:p.house||"",
+      power:Number(p.power||0),
+      missions:Number(p.missions||0),
+      achievements:Number(p.achievements||0),
+      yuls:Number(p.yuls||0)
+    });
+
+    res.json({
+      force: powerResult.rows.map(mapPlayer),
+      missions: missionsResult.rows.map(mapPlayer),
+      wealth: wealthResult.rows.map(mapPlayer),
+      activity: activityResult.rows.map(mapPlayer),
+      houses: houseResult.rows.map(h=>({
+        id:Number(h.id),
+        name:h.name,
+        emblem:h.emblem||"♜",
+        leader:h.leader||"",
+        vice_leader:h.vice_leader||"",
+        members:Number(h.members||0),
+        missions:Number(h.missions||0),
+        yuls:Number(h.yuls||0),
+        power:Number(h.power||0)
+      }))
+    });
+  } catch(e) {
+    console.error("Erro em /api/rankings:",e);
+    res.status(500).json({error:"Erro ao carregar rankings."});
+  }
+});
+
 app.get("/api/ranking", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT nick,identifier,house,missions,yuls,ranking
+      `SELECT nick,identifier,house,missions,yuls,ranking,power
        FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 75`
     );
     res.json({
@@ -453,7 +537,7 @@ app.get("/api/ranking", async (req, res) => {
 app.get("/api/players", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id,nick,number,identifier,house,patent,role,grimoire,missions,achievements,ranking,yuls
+      `SELECT id,nick,number,identifier,house,patent,role,grimoire,missions,achievements,ranking,power,yuls
        FROM players WHERE public_profile=1 ORDER BY nick COLLATE "C" ASC`
     );
     res.json({ players: result.rows.map(publicPlayer) });
@@ -758,8 +842,8 @@ app.post("/api/admin/players", requireAdmin, async (req, res) => {
     const passwordHash = await validateNewPassword(password);
     const result = await pool.query(
       `INSERT INTO players
-       (nick,number,identifier,password_hash,house,patent,role,grimoire,hp,mana,yuls,missions,achievements,ranking,public_profile)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       (nick,number,identifier,password_hash,house,patent,role,grimoire,hp,mana,yuls,missions,achievements,ranking,power,public_profile)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         nick, number, identifier, passwordHash,
@@ -767,7 +851,7 @@ app.post("/api/admin/players", requireAdmin, async (req, res) => {
         String(b.role || ""), String(b.grimoire || ""),
         positiveInt(b.hp, 200), positiveInt(b.mana, 400), positiveInt(b.yuls, 0),
         positiveInt(b.missions, 0), positiveInt(b.achievements, 0), positiveInt(b.ranking, 0),
-        Number(b.public_profile ?? 1) ? 1 : 0
+        positiveInt(b.power, 0), Number(b.public_profile ?? 1) ? 1 : 0
       ]
     );
     const player = result.rows[0];
@@ -817,8 +901,8 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
       `UPDATE players
        SET nick=$1, number=$2, identifier=$3, password_hash=$4, house=$5, patent=$6, role=$7, grimoire=$8,
            hp=$9, mana=$10, yuls=$11, missions=$12, achievements=$13, ranking=$14,
-           public_profile=$15, updated_at=NOW()
-       WHERE id=$16
+           power=$15, public_profile=$16, updated_at=NOW()
+       WHERE id=$17
        RETURNING *`,
       [
         nick, number, `${nick}${number}`, passwordHash,
@@ -832,6 +916,7 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
         positiveInt(b.missions, Number(current.missions)),
         positiveInt(b.achievements, Number(current.achievements)),
         positiveInt(b.ranking, Number(current.ranking)),
+        positiveInt(b.power, Number(current.power || 0)),
         Number(b.public_profile ?? current.public_profile) ? 1 : 0,
         id
       ]
