@@ -33,7 +33,25 @@
         <div id="houseDetail" class="house-detail-wrap"></div>
       </div>
     </section>
-<section class="page" id="ranking"><div class="subhero"><p class="eyebrow">PLACAR DO REINO</p><h1>Ranking <em>geral.</em></h1><p>Classificação baseada nos dados cadastrados no sistema.</p></div><div class="content"><div class="panel table-wrap"><table><thead><tr><th>#</th><th>Jogador</th><th>Casa</th><th>Missões</th><th>Yuls</th></tr></thead><tbody id="rankingBody"></tbody></table></div></div></section>
+<section class="page" id="ranking">
+  <div class="subhero"><p class="eyebrow">PLACAR DO REINO</p><h1>Rankings de <em>Spade.</em></h1><p>Classificações atualizadas diretamente dos registros oficiais do Reino.</p></div>
+  <div class="content">
+    <div class="ranking-tabs" role="tablist">
+      <button class="ranking-tab active" data-ranking-tab="force">⚔️ Força</button>
+      <button class="ranking-tab" data-ranking-tab="activity">⭐ Atividade</button>
+      <button class="ranking-tab" data-ranking-tab="missions">📋 Missões</button>
+      <button class="ranking-tab" data-ranking-tab="wealth">🪙 Riqueza</button>
+      <button class="ranking-tab" data-ranking-tab="houses">🏰 Casas</button>
+    </div>
+    <div class="ranking-explainer" id="rankingExplainer"></div>
+    <div class="panel ranking-panel">
+      <div class="table-wrap"><table class="ranking-table">
+        <thead><tr><th>#</th><th>Jogador / Casa</th><th>Casa</th><th>Principal</th><th>Secundário</th></tr></thead>
+        <tbody id="rankingBody"></tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
 <section class="page" id="login">
   <div class="login-wrap">
     <div class="seal big">♠<small>SPADE</small></div>
@@ -94,6 +112,6 @@
 </main>
 <footer><span>♠ THE KING MAGAZINE</span><small>Portal oficial do Reino Spade • 2026</small></footer>
 </div>
-<script src="/app.js?v=9"></script>
+<script src="/app.js?v=10"></script>
 </body>
 </html>
