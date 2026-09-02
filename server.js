@@ -88,6 +88,7 @@ function normalizeIdentifier(value) {
 }
 
 async function initDatabase() {
+  // Create all base tables before running any migrations or seed queries.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS players (
       id BIGSERIAL PRIMARY KEY,
@@ -110,12 +111,6 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
-
-    ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
-    ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
-    ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
-    ALTER TABLE news ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
-    
 
     CREATE TABLE IF NOT EXISTS news (
       id BIGSERIAL PRIMARY KEY,
@@ -189,7 +184,6 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-
     CREATE TABLE IF NOT EXISTS player_roles (
       player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
       role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
@@ -197,15 +191,39 @@ async function initDatabase() {
       PRIMARY KEY (player_id, role_id)
     );
 
+    CREATE TABLE IF NOT EXISTS announcements (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT 'INFORMATIVO',
+      priority TEXT DEFAULT 'INFORMATIVO',
+      body TEXT DEFAULT '',
+      date DATE DEFAULT CURRENT_DATE,
+      featured INTEGER DEFAULT 0 CHECK (featured IN (0,1)),
+      published INTEGER DEFAULT 1 CHECK (published IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Add columns introduced in later versions to existing installations.
+  await pool.query(`
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
+    ALTER TABLE news ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
+    ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
+  `);
+
+  // Indexes
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_players_identifier ON players(identifier);
     CREATE INDEX IF NOT EXISTS idx_players_nick ON players(nick);
     CREATE INDEX IF NOT EXISTS idx_yuls_history_player ON yuls_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_roles_role ON player_roles(role_id);
     CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_announcements_public ON announcements(published, featured, id DESC);
   `);
 
-
-  // Migração de players.role para a relação muitos-para-muitos.
+  // Migrate the old single-role field to the multiple-role relationship.
   await pool.query(`
     INSERT INTO player_roles(player_id, role_id)
     SELECT p.id, r.id
@@ -247,7 +265,10 @@ async function initDatabase() {
     );
   }
 
-  const announcementCount = await pool.query("SELECT COUNT(*)::int AS c FROM announcements");
+  // The announcements table definitely exists at this point.
+  const announcementCount = await pool.query(
+    "SELECT COUNT(*)::int AS c FROM announcements"
+  );
   if (announcementCount.rows[0].c === 0) {
     await pool.query(
       `INSERT INTO announcements(title,category,priority,body,featured,published)
@@ -273,11 +294,16 @@ async function initDatabase() {
       ]
     );
   }
+
   const editionCount = await pool.query("SELECT COUNT(*)::int AS c FROM editions");
   if (editionCount.rows[0].c === 0) {
     await pool.query(
       `INSERT INTO editions(title,edition,description) VALUES ($1,$2,$3)`,
-      ["The King Magazine — Setembro 2026", "EDIÇÃO 01", "A edição de estreia do novo ciclo de Spade."]
+      [
+        "The King Magazine — Setembro 2026",
+        "EDIÇÃO 01",
+        "A edição de estreia do novo ciclo de Spade."
+      ]
     );
   }
 }
