@@ -152,11 +152,41 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS houses (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      emblem TEXT DEFAULT '♜',
+      description TEXT DEFAULT '',
+      leader TEXT DEFAULT '',
+      vice_leader TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_players_identifier ON players(identifier);
     CREATE INDEX IF NOT EXISTS idx_players_nick ON players(nick);
     CREATE INDEX IF NOT EXISTS idx_yuls_history_player ON yuls_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
   `);
+
+
+  const defaultHouses = [
+    "Casa Mars",
+    "Casa Voltia",
+    "Casa Kruger",
+    "Casa Whomalt",
+    "Casa Faust",
+    "Casa Vermillion",
+    "Casa Silvamillion",
+    "Casa Silva",
+    "Casa Mariella"
+  ];
+  for (const name of defaultHouses) {
+    await pool.query(
+      `INSERT INTO houses(name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [name]
+    );
+  }
 
   const newsCount = await pool.query("SELECT COUNT(*)::int AS c FROM news");
   if (newsCount.rows[0].c === 0) {
@@ -294,20 +324,112 @@ app.get("/api/home", async (req, res) => {
     const [news, editions, houses, ranking] = await Promise.all([
       pool.query("SELECT id,title,category,excerpt,date FROM news WHERE published=1 ORDER BY id DESC LIMIT 6"),
       pool.query("SELECT id,title,edition,description,pdf_url,date FROM editions WHERE published=1 ORDER BY id DESC LIMIT 6"),
-      pool.query(`SELECT house, COUNT(*)::int AS count, COALESCE(SUM(missions),0)::bigint AS missions
-                  FROM players WHERE house<>'' GROUP BY house ORDER BY missions DESC LIMIT 12`),
+      pool.query(`SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
+                         COUNT(p.id)::int AS count,
+                         COALESCE(SUM(p.missions),0)::bigint AS missions
+                  FROM houses h
+                  LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name))
+                  GROUP BY h.id
+                  ORDER BY missions DESC, h.name ASC
+                  LIMIT 20`),
       pool.query(`SELECT nick,identifier,house,missions,ranking
                   FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 10`)
     ]);
     res.json({
       news: news.rows,
       editions: editions.rows,
-      houses: houses.rows.map(x => ({ ...x, missions: Number(x.missions) })),
+      houses: houses.rows.map(x => ({ ...x, count: Number(x.count), missions: Number(x.missions) })),
       ranking: ranking.rows
     });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar o portal." });
+  }
+});
+
+
+app.get("/api/houses", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
+              COUNT(p.id)::int AS count,
+              COALESCE(SUM(p.missions),0)::bigint AS missions,
+              COALESCE(SUM(p.yuls),0)::bigint AS yuls
+       FROM houses h
+       LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1
+       GROUP BY h.id
+       ORDER BY missions DESC,h.name ASC`
+    );
+    res.json({
+      houses: result.rows.map(h => ({
+        id: Number(h.id),
+        name: h.name,
+        emblem: h.emblem || "♜",
+        description: h.description || "",
+        leader: h.leader || "",
+        vice_leader: h.vice_leader || "",
+        count: Number(h.count),
+        missions: Number(h.missions),
+        yuls: Number(h.yuls)
+      }))
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao carregar Casas." });
+  }
+});
+
+app.get("/api/houses/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Casa inválida." });
+
+  try {
+    const houseResult = await pool.query("SELECT * FROM houses WHERE id=$1", [id]);
+    const house = houseResult.rows[0];
+    if (!house) return res.status(404).json({ error: "Casa não encontrada." });
+
+    const members = await pool.query(
+      `SELECT id,nick,number,identifier,patent,role,grimoire,missions,yuls,ranking
+       FROM players
+       WHERE public_profile=1 AND lower(trim(house))=lower(trim($1))
+       ORDER BY missions DESC,nick COLLATE "C" ASC`,
+      [house.name]
+    );
+
+    const totals = members.rows.reduce((acc, p) => {
+      acc.missions += Number(p.missions || 0);
+      acc.yuls += Number(p.yuls || 0);
+      return acc;
+    }, { missions: 0, yuls: 0 });
+
+    res.json({
+      house: {
+        id: Number(house.id),
+        name: house.name,
+        emblem: house.emblem || "♜",
+        description: house.description || "",
+        leader: house.leader || "",
+        vice_leader: house.vice_leader || "",
+        count: members.rows.length,
+        missions: totals.missions,
+        yuls: totals.yuls,
+        members: members.rows.map(p => ({
+          id: Number(p.id),
+          nick: p.nick,
+          number: p.number,
+          identifier: p.identifier,
+          patent: p.patent || "",
+          role: p.role || "",
+          grimoire: p.grimoire || "",
+          missions: Number(p.missions || 0),
+          yuls: Number(p.yuls || 0),
+          ranking: Number(p.ranking || 0)
+        }))
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao carregar Casa." });
   }
 });
 
@@ -363,6 +485,108 @@ app.get("/api/admin/overview", requireAdmin, async (req, res) => {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar administração." });
   }
+});
+
+
+app.get("/api/admin/houses", requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
+              COUNT(p.id)::int AS count,
+              COALESCE(SUM(p.missions),0)::bigint AS missions,
+              COALESCE(SUM(p.yuls),0)::bigint AS yuls
+       FROM houses h
+       LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name))
+       GROUP BY h.id
+       ORDER BY h.name COLLATE "C" ASC`
+    );
+    res.json({ houses: result.rows.map(h => ({
+      id:Number(h.id), name:h.name, emblem:h.emblem||"♜",
+      description:h.description||"", leader:h.leader||"", vice_leader:h.vice_leader||"",
+      count:Number(h.count), missions:Number(h.missions), yuls:Number(h.yuls)
+    }))});
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar Casas administrativas."});
+  }
+});
+
+app.post("/api/admin/houses", requireAdmin, async (req, res) => {
+  const b=req.body||{};
+  const name=String(b.name||"").trim();
+  if(!name) return res.status(400).json({error:"Nome da Casa é obrigatório."});
+  try {
+    const result=await pool.query(
+      `INSERT INTO houses(name,emblem,description,leader,vice_leader)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [name,String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
+       String(b.leader||"").trim(),String(b.vice_leader||"").trim()]
+    );
+    res.json({house:result.rows[0]});
+  } catch(e) {
+    console.error(e);
+    if(e.code==="23505") return res.status(400).json({error:"Essa Casa já existe."});
+    res.status(500).json({error:"Erro ao criar Casa."});
+  }
+});
+
+app.put("/api/admin/houses/:id", requireAdmin, async (req,res) => {
+  const id=Number(req.params.id), b=req.body||{};
+  if(!Number.isInteger(id)||id<=0) return res.status(400).json({error:"Casa inválida."});
+  const name=String(b.name||"").trim();
+  if(!name) return res.status(400).json({error:"Nome da Casa é obrigatório."});
+  try {
+    const current=await pool.query("SELECT * FROM houses WHERE id=$1",[id]);
+    if(!current.rows[0]) return res.status(404).json({error:"Casa não encontrada."});
+    const oldName=current.rows[0].name;
+    const client=await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result=await client.query(
+        `UPDATE houses
+         SET name=$1,emblem=$2,description=$3,leader=$4,vice_leader=$5,updated_at=NOW()
+         WHERE id=$6 RETURNING *`,
+        [name,String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
+         String(b.leader||"").trim(),String(b.vice_leader||"").trim(),id]
+      );
+      if(oldName.toLowerCase()!==name.toLowerCase()){
+        await client.query(
+          `UPDATE players SET house=$1,updated_at=NOW()
+           WHERE lower(trim(house))=lower(trim($2))`,
+          [name,oldName]
+        );
+      }
+      await client.query("COMMIT");
+      res.json({house:result.rows[0]});
+    } catch(e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally { client.release(); }
+  } catch(e) {
+    console.error(e);
+    if(e.code==="23505") return res.status(400).json({error:"Essa Casa já existe."});
+    res.status(500).json({error:"Erro ao atualizar Casa."});
+  }
+});
+
+app.delete("/api/admin/houses/:id", requireAdmin, async (req,res) => {
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0) return res.status(400).json({error:"Casa inválida."});
+  const client=await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result=await client.query("SELECT name FROM houses WHERE id=$1",[id]);
+    const house=result.rows[0];
+    if(!house){await client.query("ROLLBACK");return res.status(404).json({error:"Casa não encontrada."});}
+    await client.query("UPDATE players SET house='' , updated_at=NOW() WHERE lower(trim(house))=lower(trim($1))",[house.name]);
+    await client.query("DELETE FROM houses WHERE id=$1",[id]);
+    await client.query("COMMIT");
+    res.json({ok:true});
+  } catch(e) {
+    await client.query("ROLLBACK");
+    console.error(e);
+    res.status(500).json({error:"Erro ao excluir Casa."});
+  } finally { client.release(); }
 });
 
 app.get("/api/admin/players", requireAdmin, async (req, res) => {
