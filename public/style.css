@@ -6,3 +6,5 @@
 
 .admin-stats{grid-template-columns:repeat(6,1fr)}
 @media(max-width:900px){.admin-stats{grid-template-columns:repeat(2,1fr)}}
+
+.player-yuls-section{margin-top:12px}.player-yuls-card{background:#fff}.player-yuls-head{display:flex;justify-content:space-between;align-items:end;gap:15px;border-bottom:1px solid #e5ddd1;padding-bottom:15px}.player-yuls-head h3{margin:0;font:600 25px Cinzel}.player-yuls-head>strong{font:600 28px Cinzel;color:#9a7738;white-space:nowrap}.player-yuls-history{max-height:310px;overflow:auto;margin-top:8px}.player-yuls-row{display:flex;justify-content:space-between;gap:15px;padding:12px 0;border-top:1px solid #eee6da;font-size:11px}.player-yuls-row:first-child{border-top:0}.player-yuls-row .reason{color:#555}.player-yuls-row small{display:block;color:#999;font-size:9px;margin-top:3px}.player-yuls-row .change{font-weight:800;white-space:nowrap}.player-yuls-row .plus{color:#52724e}.player-yuls-row .minus{color:#9a5959}.yuls-empty{padding:20px 0;text-align:center;color:#888;font-size:11px}
