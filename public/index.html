@@ -14,7 +14,7 @@
   <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
   <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
   <nav id="nav">
-    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="eventos">Eventos</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button>
+    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button>
     <button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
@@ -25,21 +25,60 @@
   <div class="split"><div class="panel"><p class="eyebrow">EDIÇÃO ATUAL</p><h3 id="editionTitle">Carregando...</h3><p id="editionDesc"></p><button class="gold small" data-page="jornal">Abrir jornal</button></div><div class="panel"><p class="eyebrow">REINO</p><h3>O portal está vivo.</h3><p>As páginas públicas serão alimentadas pelos dados que você cadastrar no painel administrativo.</p></div></div></div>
 </section>
 <section class="page" id="jornal">
-      <div class="subhero">
-        <p class="eyebrow">THE KING MAGAZINE</p>
-        <h1>O jornal do <em>Reino Spade.</em></h1>
-        <p>As principais notícias, comunicados e edições oficiais do Reino reunidas em um só lugar.</p>
-      </div>
-      <div class="content">
-        <div class="journal-feature" id="journalFeature"></div>
-        <div class="section-head journal-section-head"><div><p class="eyebrow">ARQUIVO</p><h2>Edições</h2></div></div>
-        <div id="editions" class="edition-grid"></div>
+  <div class="subhero journal-subhero">
+    <div class="journal-kicker">THE KING MAGAZINE</div>
+    <h1>O jornal do <em>Reino Spade.</em></h1>
+    <p>Onde os acontecimentos deixam de ser apenas lembranças e passam a fazer parte da história.</p>
+  </div>
+  <div class="content journal-home-content">
+    <div class="journal-edition-hero" id="journalFeature"></div>
 
-        <div class="section-head journal-section-head" style="margin-top:50px"><div><p class="eyebrow">NOTÍCIAS</p><h2>Últimos acontecimentos</h2></div></div>
-        <div id="journalNews" class="news-grid journal-news-grid"></div>
+    <div class="journal-contents-grid">
+      <section class="panel journal-contents-panel">
+        <div class="section-head compact-head"><div><p class="eyebrow">NESTA EDIÇÃO</p><h2>Índice</h2></div></div>
+        <div id="journalContents" class="journal-contents"></div>
+      </section>
+      <aside class="journal-letter panel">
+        <p class="eyebrow">ABERTURA</p>
+        <h3 id="journalLetterTitle">Uma história começa quando alguém decide registrá-la.</h3>
+        <p id="journalLetterText">Spade já tem acontecimentos suficientes para merecer memória. O The King Magazine existe para guardar aquilo que o Reino não pode esquecer.</p>
+        <button class="outline small" type="button" id="journalReadEditorial">Ler editorial</button>
+      </aside>
+    </div>
+
+    <section class="journal-timeline-section">
+      <div class="section-head"><div><p class="eyebrow">LINHA DO TEMPO</p><h2>Os primeiros capítulos</h2></div><span>O Reino em movimento.</span></div>
+      <div id="journalTimeline" class="journal-timeline"></div>
+    </section>
+
+    <section class="journal-feature-section">
+      <div class="section-head"><div><p class="eyebrow">REPORTAGENS</p><h2>As histórias de Spade</h2></div><span>Leia por assunto.</span></div>
+      <div id="journalStories" class="journal-stories"></div>
+    </section>
+
+    <section class="journal-numbers-section">
+      <div class="section-head"><div><p class="eyebrow">O REINO EM NÚMEROS</p><h2>Spade hoje</h2></div><span>Dados do Portal.</span></div>
+      <div id="editorialStats" class="editorial-stats"></div>
+      <div class="journal-numbers-grid">
+        <div class="panel journal-house-leaders"><p class="eyebrow">CASAS</p><h3>Quem está se movimentando?</h3><div id="editorialHouses"></div></div>
+        <div class="panel journal-voices"><p class="eyebrow">VOZES DE SPADE</p><h3>O Reino também fala.</h3><div id="editorialVoices"></div><button class="outline small" data-page="status" type="button">Ver mural completo</button></div>
       </div>
     </section>
-<section class="page" id="comunicados">
+
+    <section class="journal-next-section">
+      <div class="journal-next-card">
+        <div><p class="eyebrow">PRÓXIMO CAPÍTULO</p><h2>A história continua.</h2><p>O Jornal registra o que aconteceu. O Cronograma, os Eventos e o Mural mostram o que está acontecendo agora.</p></div>
+        <div class="actions"><button class="gold small" data-page="cronograma">Ver cronograma</button><button class="outline small" data-page="eventos">Ver eventos</button><button class="outline small" data-page="ranking">Ver rankings</button></div>
+      </div>
+    </section>
+
+    <div class="section-head journal-section-head" style="margin-top:45px"><div><p class="eyebrow">ARQUIVO</p><h2>Edições</h2></div></div>
+    <div id="editions" class="edition-grid"></div>
+
+    <div class="section-head journal-section-head" style="margin-top:45px"><div><p class="eyebrow">NOTÍCIAS</p><h2>Últimos acontecimentos</h2></div></div>
+    <div id="journalNews" class="news-grid journal-news-grid"></div>
+  </div>
+</section><section class="page" id="comunicados">
   <div class="subhero">
     <p class="eyebrow">MURAL OFICIAL</p>
     <h1>Comunicados do <em>Reino.</em></h1>
@@ -49,6 +88,20 @@
     <div id="announcementFeature"></div>
     <div class="section-head" style="margin-top:38px"><div><p class="eyebrow">ARQUIVO</p><h2>Comunicados</h2></div></div>
     <div id="announcementList" class="announcement-list"></div>
+  </div>
+</section>
+<section class="page" id="status">
+  <div class="subhero">
+    <p class="eyebrow">MURAL DO REINO</p>
+    <h1>Status do <em>Reino.</em></h1>
+    <p>Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.</p>
+  </div>
+  <div class="content">
+    <div class="status-page-toolbar">
+      <div class="panel status-rules"><span>♠</span><div><b>Um status por dia</b><small>Você pode publicar e atualizar o seu status de hoje.</small></div></div>
+      <button class="outline dark-outline" type="button" id="statusRefreshBtn">↻ Atualizar mural</button>
+    </div>
+    <div id="statusBoard" class="status-board"></div>
   </div>
 </section>
 <section class="page" id="eventos">
@@ -155,7 +208,18 @@
     <p style="margin-top:18px;font-size:10px;color:#777">Esqueceu a senha? Procure a administração do RPG.</p>
   </div>
 </section>
-<section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p>Acompanhe sua jornada, seus dados e sua posição no Reino.</p></div><div id="playerAlerts" class="player-alerts"></div><div class="content"><div id="dash"></div><div class="player-yuls-section"><div class="panel player-yuls-card"><div class="player-yuls-head"><div><p class="eyebrow">BANCO DE YULS</p><h3>Meu saldo</h3></div><strong id="playerYulsBalance">🪙 0</strong></div><div id="playerYulsHistory" class="player-yuls-history"><p>Carregando histórico...</p></div></div></div><div class="player-missions-section"><div class="panel player-missions-card"><div class="player-missions-head"><div><p class="eyebrow">ATIVIDADE</p><h3>Minhas missões</h3></div><strong id="playerMissionCount">0 missões</strong></div><div id="playerMissionHistory" class="player-mission-history"><p>Carregando missões...</p></div></div></div></div><div class="player-sheet-section">
+<section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p>Acompanhe sua jornada, seus dados e sua posição no Reino.</p></div><div id="playerAlerts" class="player-alerts"></div><div class="content"><div id="dash"></div><div class="player-yuls-section"><div class="panel player-yuls-card"><div class="player-yuls-head"><div><p class="eyebrow">BANCO DE YULS</p><h3>Meu saldo</h3></div><strong id="playerYulsBalance">🪙 0</strong></div><div id="playerYulsHistory" class="player-yuls-history"><p>Carregando histórico...</p></div></div></div><div class="player-missions-section"><div class="panel player-missions-card"><div class="player-missions-head"><div><p class="eyebrow">ATIVIDADE</p><h3>Minhas missões</h3></div><strong id="playerMissionCount">0 missões</strong></div><div id="playerMissionHistory" class="player-mission-history"><p>Carregando missões...</p></div></div></div></div><div class="player-status-section">
+  <div class="panel player-status-panel">
+    <div class="player-status-head">
+      <div><p class="eyebrow">STATUS DIÁRIO</p><h3>O que você está fazendo?</h3><p>Publique uma mensagem curta para o quadro do Reino.</p></div>
+      <span id="playerStatusDate"></span>
+    </div>
+    <textarea id="playerStatusMessage" maxlength="280" placeholder="Escreva seu status de hoje..."></textarea>
+    <div class="player-status-footer"><small><span id="playerStatusCount">0</span>/280</small><button class="gold" type="button" id="playerStatusPublishBtn">Publicar status</button></div>
+    <div class="error" id="playerStatusError"></div>
+  </div>
+</div>
+<div class="player-sheet-section">
   <div class="player-sheet">
     <div class="player-sheet-head">
       <div><p class="eyebrow">FICHA OFICIAL</p><h2>Ficha completa</h2><p>Resumo oficial dos seus dados no Reino Spade.</p></div>
@@ -216,7 +280,7 @@
   <div class="bulk-toolbar panel" id="bulkToolbar">
     <div class="bulk-selection"><b id="bulkSelectedCount">0 selecionados</b><button type="button" class="text-button" id="selectAllPlayersBtn">Selecionar todos</button><button type="button" class="text-button" id="clearAllPlayersBtn">Limpar seleção</button></div>
     <div class="bulk-actions">
-      <button type="button" class="bulk-action" data-bulk-action="yuls">🪙 Yuls</button>
+      <button type="button" class="bulk-action" data-bulk-action="yuls">🪙 Yuls</button><button type="button" class="bulk-action" data-bulk-action="cards">🃏 Cards</button>
       <button type="button" class="bulk-action" data-bulk-action="house">🏰 Casa</button>
       <button type="button" class="bulk-action" data-bulk-action="patent">🎖️ Patente</button>
       <button type="button" class="bulk-action" data-bulk-action="roles">👑 Cargos</button>
