@@ -160,6 +160,43 @@ async function initDatabase() {
     );
 
 
+    -- Cards are created before Events because event reward tables reference them.
+    CREATE TABLE IF NOT EXISTS cards (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL DEFAULT 'Outros',
+      category TEXT,
+      cost TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS player_cards (
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+      acquisition_type TEXT DEFAULT 'OUTRO',
+      acquisition_id BIGINT,
+      acquisition_name TEXT DEFAULT '',
+      acquired_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (player_id, card_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS player_card_history (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      acquisition_type TEXT DEFAULT 'OUTRO',
+      acquisition_id BIGINT,
+      acquisition_name TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS events (
       id BIGSERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -361,42 +398,6 @@ async function initDatabase() {
     );
 
 
-    CREATE TABLE IF NOT EXISTS cards (
-      id BIGSERIAL PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      type TEXT NOT NULL DEFAULT 'Outros',
-      category TEXT,
-      cost TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      sort_order INTEGER DEFAULT 0,
-      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS player_cards (
-      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-      quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
-      acquisition_type TEXT DEFAULT 'OUTRO',
-      acquisition_id BIGINT,
-      acquisition_name TEXT DEFAULT '',
-      acquired_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      PRIMARY KEY (player_id, card_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS player_card_history (
-      id BIGSERIAL PRIMARY KEY,
-      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-      action TEXT NOT NULL,
-      acquisition_type TEXT DEFAULT 'OUTRO',
-      acquisition_id BIGINT,
-      acquisition_name TEXT DEFAULT '',
-      notes TEXT DEFAULT '',
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
   `);
 
   // Add columns introduced in later versions to existing installations.
