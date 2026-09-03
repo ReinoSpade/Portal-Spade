@@ -161,6 +161,17 @@ async function initDatabase() {
 
 
     -- Cards are created before Events because event reward tables reference them.
+    CREATE TABLE IF NOT EXISTS player_statuses (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      status_date DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date),
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(player_id,status_date),
+      CHECK (char_length(message) BETWEEN 1 AND 280)
+    );
+
     CREATE TABLE IF NOT EXISTS cards (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -448,6 +459,9 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_announcements_public ON announcements(published, featured, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_admin_history ON player_admin_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_cards_player ON player_cards(player_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_player_statuses_date ON player_statuses(status_date DESC,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_player_statuses_player ON player_statuses(player_id,status_date DESC);
+
     CREATE INDEX IF NOT EXISTS idx_player_cards_card ON player_cards(card_id);
     CREATE INDEX IF NOT EXISTS idx_player_card_history_player ON player_card_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_card_history_card ON player_card_history(card_id, id DESC);
@@ -572,6 +586,41 @@ async function initDatabase() {
       [name,responsibilities,sortOrder,rank,vacancies,paymentMode,remunerationDetail,requirements,benefits,scope]
     );
   }
+
+  async function seedDigitalEditionOne(){
+    const ed=await pool.query(`SELECT id FROM editions WHERE published=1 ORDER BY id ASC LIMIT 1`);
+    if(!ed.rows[0])return;
+    const editionId=Number(ed.rows[0].id);
+    const articles=[
+      ["Editorial — O nascimento de Spade","A primeira página de uma história que ainda está sendo escrita.","Redação The King Magazine","EDITORIAL","Há Reinos que nascem com glórias. Outros nascem com promessas. Spade nasceu com trabalho.",`Quando os primeiros membros chegaram, ainda não havia tradição, prestígio ou história para contar. Havia apenas um Reino novo, Casas começando a criar raízes, Legiões tomando forma e gente disposta — ou curiosa o bastante — a descobrir até onde aquilo poderia chegar.\n\nOs primeiros dias trouxeram aquilo que todo Reino recém-nascido precisa enfrentar: regras, organização, competição, recrutamento, dúvidas e a velha vontade de descobrir quem conseguiria chegar primeiro.\n\nAgora já existem nomes, rivalidades, vitórias, fracassos, cargos, Cards, missões e algumas boas histórias. Esta é a primeira edição. E talvez seja justamente por isso a mais importante.\n\nPorque daqui para frente, tudo o que acontecer terá passado a fazer parte da história de Spade.`],
+      ["O nascimento de um Reino","Como Spade começou a ganhar forma.","Redação The King Magazine","HISTÓRIA","Os primeiros dias foram suficientes para mostrar que o novo Reino não pretendia ficar parado.",`Spade começou como começo de todo grande ciclo: pequeno, barulhento e cheio de possibilidades. Antes que a rotina pudesse se instalar, o Reino já organizava missões, exames, eventos, recrutamentos e atividades que colocavam os jogadores diante de escolhas e desafios.\n\nA estrutura surgiu depressa. Casas passaram a reunir seus membros, Legiões começaram a selecionar seus combatentes, e o cronograma deixou de ser apenas uma lista para se tornar uma espécie de relógio do Reino.\n\nO que parecia um conjunto de atividades isoladas rapidamente virou uma comunidade com memória própria.`],
+      ["Os primeiros dias","Da Trívia às primeiras grandes provas.","Redação The King Magazine","RETROSPECTIVA","Missões, exames e eventos deram aos primeiros dias de Spade um ritmo que não demorou a acelerar.",`O começo de Spade não teve tempo para ser silencioso. Missões de Trívia, provas de admissão, desafios de Rank, eventos e recrutamentos se sucederam enquanto os jogadores ainda descobriam os caminhos do novo Reino.\n\nFoi nesse período que a participação começou a ganhar peso. Não bastava estar presente: era preciso fazer, disputar, vencer, organizar e aprender.\n\nOs primeiros resultados ainda eram modestos, mas já anunciavam uma característica que acompanharia Spade: o Reino se movimentava quando seus jogadores decidiam se movimentar.`],
+      ["As Casas que deram rosto ao Reino","As moradas onde a história começou a se dividir.","Redação The King Magazine","CASAS","Muito antes de existirem números consolidados, existiam bandeiras, nomes e lideranças.",`Cada Casa começou a construir sua própria maneira de existir. Algumas buscaram recrutamento, outras apostaram em atividade, outras encontraram sua força na organização.\n\nEssa diferença é importante. Um Reino pode reunir centenas de nomes, mas são as suas Casas que dão rosto à comunidade. É nelas que surgem rivalidades, alianças, lideranças, erros, recomeços e aquela saudável vontade de provar que a própria bandeira consegue chegar mais longe.\n\nNo Portal, essa história agora pode ser acompanhada por membros, missões, Yuls e outros números. Mas os números contam apenas uma parte dela. O restante está nas pessoas.`],
+      ["As Três Legiões","Destruição, Conquista e Extermínio.","Redação The King Magazine","LEGIÕES","Três caminhos diferentes para representar a mesma vontade: conquistar um lugar na história de Spade.",`As Legiões nasceram para organizar forças que não poderiam permanecer dispersas. Destruição, Conquista e Extermínio assumiram identidades próprias e começaram a reunir jogadores ao redor de objetivos diferentes.\n\nO primeiro período de seleção já mostrou que uma Legião não é apenas um nome bonito. Ela exige disciplina, participação, comunicação e, acima de tudo, disposição para trabalhar como grupo.\n\nCom o tempo, as três forças passaram a representar mais do que funções. Tornaram-se parte da identidade do Reino.`],
+      ["O primeiro grande torneio","Quando a competição deixou de ser promessa.","Redação The King Magazine","TORNEIO","O primeiro grande torneio colocou os nomes do novo Reino frente a frente.",`Todo Reino precisa de um momento em que a promessa vira competição real. Em Spade, esse momento chegou com o primeiro grande Torneio de Reino.\n\nFases, disputas e resultados deram aos jogadores a oportunidade de descobrir não apenas quem tinha força, mas quem conseguia manter a cabeça no lugar quando a pressão aparecia.\n\nÉ fácil ser promissor quando ninguém está olhando. O torneio serviu para descobrir quem continuava sendo perigoso quando todos estavam olhando.`],
+      ["Quando participar passou a valer","Fichas, leilões, recompensas e a economia do Reino.","Redação The King Magazine","ECONOMIA","Em Spade, participar começou a significar progresso — e, em alguns casos, uma boa oportunidade de gastar.",`A criação das Fichas de Participação mudou a relação dos jogadores com as atividades. Eventos, missões, torneios e outras ações passaram a alimentar um sistema em que presença podia se transformar em recurso.\n\nDepois vieram as trocas, os leilões e a circulação de recompensas. A comunidade descobriu rapidamente que uma boa estratégia também podia existir fora da luta.\n\nFoi assim que Spade começou a construir sua própria economia: com atividade, recompensa e aquela inevitável vontade de descobrir o que dava para comprar.`],
+      ["O nascimento da imprensa","Antes da primeira edição, já havia gente cobrando pelo jornal.","Redação The King Magazine","JORNAL","O jornal foi anunciado cedo — e a comunidade tratou de lembrar que promessa de jornalista também tem prazo.",`Um Reino que começa a criar história precisa de alguém disposto a registrá-la. Foi assim que a ideia do The King Magazine apareceu ainda nos primeiros movimentos de Spade.\n\nVieram recrutamento, planejamento, cobrança, discussão sobre matérias e, naturalmente, a pergunta inevitável: “cadê o jornal?”.\n\nA imprensa de Spade nasceu, portanto, de uma necessidade simples: se os acontecimentos estavam acontecendo rápido demais, alguém precisava contar essa história antes que a comunidade começasse a esquecer o que tinha acabado de viver.`],
+      ["Da Forja à Torre de Grimórios","Criação, treinamento e o desejo de construir mais do que números.","Redação The King Magazine","SISTEMAS","Forja, Grimórios e outras atividades começaram a ampliar o repertório de Spade.",`A história de um Reino não pode depender apenas de combates. Em determinado momento, é preciso criar. A Forja trouxe exatamente essa camada: transformar ideias em objetos, Cards e recursos que passam a fazer parte do próprio universo.\n\nA Torre de Grimórios acrescentou outro símbolo forte. Treinar e descobrir mais sobre a própria magia faz parte da construção do personagem e também da construção do Reino.\n\nEntre uma missão e outra, Spade começou a descobrir que sua história também seria feita por aquilo que os jogadores fossem capazes de criar.`],
+      ["Um Reino aprende a se organizar","A administração que nasceu junto com a comunidade.","Redação The King Magazine","ADMINISTRAÇÃO","Quando o Reino cresce, boa vontade deixa de ser suficiente e estrutura passa a ser necessidade.",`Atualizar listas, julgar lutas, coordenar eventos, administrar Casas, cuidar do jornal, organizar Cards e manter os registros em ordem são trabalhos que raramente aparecem na frente do palco — até o dia em que deixam de existir.\n\nFoi dessa necessidade que nasceu uma estrutura administrativa mais clara, com Ranks, funções, responsabilidades e formas de remuneração.\n\nO objetivo não é transformar pessoas em números. É dar nome, responsabilidade e reconhecimento a quem mantém o Reino funcionando quando a maioria só enxerga o resultado.`],
+      ["Vozes de Spade","O Reino também é feito pelo que seus jogadores dizem.","Redação The King Magazine","COMUNIDADE","Uma história fica melhor quando aqueles que a vivem também ganham espaço para contar o que pensam.",`Entre anúncios, missões, disputas e cobranças, existe uma camada que nenhum ranking consegue medir: a voz dos jogadores.\n\nÉ nas conversas rápidas, nas comemorações, nas reclamações, nos conselhos e nas piadas que a comunidade revela o que realmente pensa do Reino.\n\nEsta coluna foi criada para isso. Nas próximas edições, o mural de Status do Portal e os registros da comunidade poderão trazer essas vozes para o centro da revista.`],
+      ["Dizem por aí...","Porque todo Reino que se preze precisa de um corredor cheio de fofocas.","Redação The King Magazine","FOFOCAS","Há coisas que não aparecem no relatório. Ainda bem.",`Dizem por aí que ninguém lê fofoca até perceber que o próprio nome apareceu nela.\n\nDizem também que alguns jogadores começam dizendo que não se importam com ranking e terminam atualizando a página cinco vezes. Que certas Casas juram que não existe rivalidade alguma — desde que ninguém toque no assunto. E que toda grande reforma administrativa encontra, em algum canto, alguém perguntando: “mas isso vai dar Yuls?”.\n\nA verdade? Talvez metade seja exagero. A outra metade provavelmente estará no próximo comunicado.`],
+      ["O próximo capítulo","O primeiro ciclo terminou. A história, não.","Redação The King Magazine","ENCERRAMENTO","A primeira edição registra onde chegamos. O restante ainda está sendo escrito.",`Spade começou há pouco, mas já tem memória. Tem Casas, Legiões, jogadores, histórias, Cards, eventos, missões, conquistas e um calendário cheio de coisas por acontecer.\n\nO Portal agora passa a guardar não apenas números, mas também a narrativa do Reino. O cronograma aponta para o futuro. O Ranking mostra o presente. O Jornal registra aquilo que não podemos deixar desaparecer.\n\nEste foi apenas o primeiro capítulo. O próximo depende de todos nós.`]
+    ];
+    for(let i=0;i<articles.length;i++){
+      const a=articles[i];
+      const existing=await pool.query(`SELECT id FROM articles WHERE title=$1 ORDER BY id DESC LIMIT 1`,[a[0]]);
+      let articleId;
+      if(existing.rows[0]) articleId=Number(existing.rows[0].id);
+      else {
+        const created=await pool.query(`INSERT INTO articles(title,subtitle,author,category,excerpt,body,date,published) VALUES($1,$2,$3,$4,$5,$6,(NOW() AT TIME ZONE 'America/Sao_Paulo')::date,1) RETURNING id`,a);
+        articleId=Number(created.rows[0].id);
+      }
+      await pool.query(`INSERT INTO edition_articles(edition_id,article_id,sort_order) VALUES($1,$2,$3) ON CONFLICT (edition_id,article_id) DO UPDATE SET sort_order=EXCLUDED.sort_order`,[editionId,articleId,(i+1)*10]);
+    }
+    await pool.query(`UPDATE editions SET title=CASE WHEN title='' THEN 'The King Magazine — Setembro 2026' ELSE title END, description=CASE WHEN description='' THEN 'A primeira edição digital do The King Magazine: o nascimento de Spade.' ELSE description END WHERE id=$1`,[editionId]);
+  }
+
+  await seedDigitalEditionOne();
 
   const defaultPatents = [
     "Cavaleiro Mágico Junior",
@@ -741,6 +790,69 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
+
+function saoPauloTodaySql(){ return "((NOW() AT TIME ZONE 'America/Sao_Paulo')::date)"; }
+
+app.get("/api/me/status/today", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const r=await pool.query(`
+      SELECT ps.id,ps.status_date,ps.message,ps.created_at,ps.updated_at,p.nick,p.house
+      FROM player_statuses ps
+      JOIN players p ON p.id=ps.player_id
+      WHERE ps.player_id=$1 AND ps.status_date=${saoPauloTodaySql()}
+      LIMIT 1`,[playerId]);
+    const x=r.rows[0];
+    res.json({status:x?{
+      id:Number(x.id),status_date:x.status_date,message:x.message,
+      created_at:x.created_at,updated_at:x.updated_at,nick:x.nick,house:x.house||""
+    }:null});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seu status de hoje."});}
+});
+
+app.post("/api/me/status", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const message=String(req.body?.message||"").trim();
+  if(!message)return res.status(400).json({error:"Escreva uma mensagem antes de publicar."});
+  if(message.length>280)return res.status(400).json({error:"O status pode ter no máximo 280 caracteres."});
+  try{
+    const r=await pool.query(`
+      INSERT INTO player_statuses(player_id,status_date,message,created_at,updated_at)
+      VALUES($1,${saoPauloTodaySql()},$2,NOW(),NOW())
+      ON CONFLICT(player_id,status_date)
+      DO UPDATE SET message=EXCLUDED.message,updated_at=NOW()
+      RETURNING id,status_date,message,created_at,updated_at`,
+      [playerId,message]
+    );
+    const player=await pool.query("SELECT nick,house FROM players WHERE id=$1",[playerId]);
+    res.json({status:{...r.rows[0],id:Number(r.rows[0].id),nick:player.rows[0]?.nick||"",house:player.rows[0]?.house||""}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao publicar seu status."});}
+});
+
+app.get("/api/status-board", async (req,res)=>{
+  const viewerId=readPlayerToken(req);
+  if(!viewerId)return res.status(401).json({error:"Faça login para visualizar o quadro de status."});
+  try{
+    const days=Math.min(14,Math.max(1,Number(req.query?.days||7)));
+    const r=await pool.query(`
+      SELECT ps.id,ps.player_id,ps.status_date,ps.message,ps.created_at,ps.updated_at,
+             p.nick,p.house,p.patent,p.public_profile
+      FROM player_statuses ps
+      JOIN players p ON p.id=ps.player_id
+      WHERE ps.status_date >= (${saoPauloTodaySql()} - $1::int)
+      ORDER BY ps.status_date DESC,ps.updated_at DESC,ps.id DESC
+      LIMIT 500`,[days-1]);
+    res.json({statuses:r.rows.map(x=>({
+      id:Number(x.id),player_id:Number(x.player_id),status_date:x.status_date,
+      message:x.message,created_at:x.created_at,updated_at:x.updated_at,
+      nick:x.nick,house:x.house||"",patent:x.patent||"",
+      mine:Number(x.player_id)===Number(viewerId)
+    }))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar quadro de status."});}
+});
+
 app.get("/api/me/yuls-history", async (req, res) => {
   const id = readPlayerToken(req);
   if (!id) return res.status(401).json({ error: "Não autenticado." });
@@ -889,6 +1001,42 @@ app.get("/api/me/alerts", async (req,res)=>{
   }
 });
 
+
+app.get("/api/editorial/overview", async (req,res)=>{
+  try{
+    const [stats,houses,statuses,featuredEvents]=await Promise.all([
+      pool.query(`SELECT
+        (SELECT COUNT(*) FROM players)::int AS players,
+        (SELECT COUNT(*) FROM houses)::int AS houses,
+        (SELECT COUNT(*) FROM news WHERE published=1)::int AS news,
+        (SELECT COUNT(*) FROM editions WHERE published=1)::int AS editions,
+        (SELECT COALESCE(SUM(yuls),0) FROM players)::bigint AS yuls,
+        (SELECT COUNT(*) FROM missions)::int AS missions,
+        (SELECT COUNT(*) FROM events WHERE published=1)::int AS events,
+        (SELECT COUNT(*) FROM cards WHERE active=1)::int AS cards`),
+      pool.query(`SELECT h.id,h.name,h.emblem,h.description,COUNT(p.id)::int AS members,
+                         COALESCE(SUM(p.missions),0)::int AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls
+                  FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name))
+                  GROUP BY h.id ORDER BY missions DESC,h.name ASC LIMIT 6`),
+      pool.query(`SELECT ps.status_date,ps.message,p.nick,p.house,ps.updated_at
+                  FROM player_statuses ps JOIN players p ON p.id=ps.player_id
+                  WHERE p.public_profile=1 AND ps.status_date >= ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date - 1)
+                  ORDER BY ps.status_date DESC,ps.updated_at DESC LIMIT 6`),
+      pool.query(`SELECT id,title,event_type,description,start_date,end_date,status,image_url,featured
+                  FROM events WHERE published=1 ORDER BY featured DESC,
+                  CASE status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,
+                  start_date NULLS LAST,id DESC LIMIT 3`)
+    ]);
+    const st=stats.rows[0]||{};
+    res.json({
+      stats:{players:Number(st.players||0),houses:Number(st.houses||0),news:Number(st.news||0),editions:Number(st.editions||0),
+             yuls:Number(st.yuls||0),missions:Number(st.missions||0),events:Number(st.events||0),cards:Number(st.cards||0)},
+      houses:houses.rows.map(h=>({id:Number(h.id),name:h.name,emblem:h.emblem||'♜',description:h.description||'',members:Number(h.members||0),missions:Number(h.missions||0),yuls:Number(h.yuls||0)})),
+      voices:statuses.rows.map(x=>({date:x.status_date,message:x.message,nick:x.nick,house:x.house||'',updated_at:x.updated_at})),
+      featuredEvents:featuredEvents.rows.map(x=>({...x,id:Number(x.id),featured:Boolean(x.featured)}))
+    });
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar o material editorial.'})}
+});
 
 app.get("/api/journal/editions/:id", async (req,res)=>{
   const id=Number(req.params.id);
@@ -3032,6 +3180,100 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
 });
 
 
+
+
+app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
+  const body=req.body||{};
+  const playerIds=[...new Set((Array.isArray(body.player_ids)?body.player_ids:[])
+    .map(Number).filter(x=>Number.isInteger(x)&&x>0))];
+  const cardId=Number(body.card_id);
+  const acquisitionType=String(body.acquisition_type||"OUTRO").trim().toUpperCase();
+  const acquisitionName=String(body.acquisition_name||"").trim();
+  const acquisitionId=(body.acquisition_id!==undefined&&body.acquisition_id!=="")?Number(body.acquisition_id):null;
+  const validTypes=["MISSAO","EVENTO","LOJA","PATENTE","OUTRO"];
+
+  if(!playerIds.length)return res.status(400).json({error:"Selecione pelo menos um jogador."});
+  if(!Number.isInteger(cardId)||cardId<=0)return res.status(400).json({error:"Selecione um card."});
+  if(!validTypes.includes(acquisitionType))return res.status(400).json({error:"Origem inválida."});
+  if(!acquisitionName && !acquisitionId)return res.status(400).json({error:"Informe a origem do card."});
+
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    const cr=await client.query(
+      "SELECT id,name,COALESCE(category,type) AS category,active FROM cards WHERE id=$1 FOR UPDATE",[cardId]
+    );
+    if(!cr.rows[0]){await client.query("ROLLBACK");return res.status(404).json({error:"Card não encontrado."});}
+    if(!Number(cr.rows[0].active)){await client.query("ROLLBACK");return res.status(400).json({error:"Este card está desativado."});}
+
+    const prs=await client.query(
+      `SELECT id,nick,house FROM players WHERE id=ANY($1::bigint[]) ORDER BY nick COLLATE "C"`,[playerIds]
+    );
+    if(prs.rows.length!==playerIds.length){
+      const found=new Set(prs.rows.map(x=>Number(x.id)));
+      const missing=playerIds.filter(id=>!found.has(id));
+      await client.query("ROLLBACK");
+      return res.status(404).json({error:`Jogador(es) não encontrado(s): ${missing.join(", ")}`});
+    }
+
+    const added=[],skipped=[];
+    for(const pr of prs.rows){
+      const existing=await client.query(
+        "SELECT 1 FROM player_cards WHERE player_id=$1 AND card_id=$2",[pr.id,cardId]
+      );
+      if(existing.rows[0]){
+        skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"Já possui este card."});
+        continue;
+      }
+
+      let resolvedName=acquisitionName;
+      let resolvedId=acquisitionId;
+
+      if(acquisitionType==="MISSAO" && resolvedId){
+        const mr=await client.query(
+          "SELECT id,title FROM missions WHERE id=$1 AND player_id=$2",[resolvedId,pr.id]
+        );
+        if(!mr.rows[0]){
+          skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"A missão informada não pertence a este jogador."});
+          continue;
+        }
+        resolvedName=mr.rows[0].title;
+      }
+      if(!resolvedName){
+        skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"Origem não informada."});
+        continue;
+      }
+
+      await client.query(
+        `INSERT INTO player_cards(player_id,card_id,quantity,acquisition_type,acquisition_id,acquisition_name,acquired_at,updated_at)
+         VALUES($1,$2,1,$3,$4,$5,NOW(),NOW())`,
+        [pr.id,cardId,acquisitionType,resolvedId,resolvedName]
+      );
+      await client.query(
+        `INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes)
+         VALUES($1,$2,'ADQUIRIDO',$3,$4,$5,$6)`,
+        [pr.id,cardId,acquisitionType,resolvedId,resolvedName,"Card distribuído pela administração em massa."]
+      );
+      await client.query(
+        `INSERT INTO player_admin_history(player_id,action,description)
+         VALUES($1,'CARDS',$2)`,
+        [pr.id,`Card adquirido: ${cr.rows[0].name} • origem ${acquisitionType}${resolvedName?` — ${resolvedName}`:""}. Distribuição em massa.`]
+      );
+      added.push({player_id:Number(pr.id),nick:pr.nick});
+    }
+
+    await client.query("COMMIT");
+    res.json({
+      ok:true,
+      card:{id:Number(cr.rows[0].id),name:cr.rows[0].name,category:cr.rows[0].category||"Outros"},
+      added,skipped,total:playerIds.length
+    });
+  }catch(e){
+    await client.query("ROLLBACK");
+    console.error(e);
+    res.status(500).json({error:"Erro ao distribuir o card."});
+  }finally{client.release();}
+});
 
 app.get("/api/admin/players/:id/cards", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
