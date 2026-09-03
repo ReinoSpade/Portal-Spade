@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null};
+const state={page:"home",me:null,admin:false,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -18,6 +18,7 @@ function go(page){
   if(page==="jornal") loadEditions();
   if(page==="comunicados") loadAnnouncements();
   if(page==="eventos") loadEvents();
+  if(page==="cronograma") loadSchedule();
   if(page==="jogadores") loadPlayers();
   if(page==="casas") loadHouses();
   if(page==="ranking") loadRanking();
@@ -123,6 +124,44 @@ function renderHomeAnnouncements(items){
 function eventTypeLabel(t){return {JOGO:"Evento de Jogo",ESPECIAL:"Evento Especial",TEMPORADA:"Evento de Temporada",LEGIAO:"Evento de Legião"}[t]||t}
 function eventStatusClass(s){return s==="ATIVO"?"active":s==="PLANEJADO"?"plan":s==="ENCERRADO"?"closed":""}
 function eventStatusLabel(s){return {ATIVO:"ATIVO",PLANEJADO:"PRÓXIMO",ENCERRADO:"ENCERRADO",CANCELADO:"CANCELADO"}[s]||s}
+
+async function loadSchedule(){
+  try{
+    const d=await api("/api/schedule");
+    state.schedule=d.activities||[];
+    populateScheduleTypeFilter(state.schedule);
+    renderSchedule(state.schedule);
+  }catch(e){
+    const g=qs("#scheduleGrid");if(g)g.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
+  }
+}
+function scheduleDateLabel(value){
+  if(!value)return "";
+  const str=String(value).slice(0,10);
+  const [y,m,d]=str.split("-");
+  return [d,m,y].join("/");
+}
+function renderSchedule(items){
+  const g=qs("#scheduleGrid");if(!g)return;
+  const term=String(qs("#scheduleSearch")?.value||"").toLowerCase().trim();
+  const date=qs("#scheduleDateFilter")?.value||"",type=qs("#scheduleTypeFilter")?.value||"";
+  const filtered=(items||[]).filter(a=>{
+    if(date&&String(a.activity_date).slice(0,10)!==date)return false;
+    if(type&&a.activity_type!==type)return false;
+    return !term||`${a.title} ${a.description} ${a.activity_type} ${a.location}`.toLowerCase().includes(term);
+  });
+  g.innerHTML=filtered.length?filtered.map(a=>`<article class="schedule-card ${a.featured?"featured":""}">
+    <div class="schedule-date"><b>${escapeHtml(scheduleDateLabel(a.activity_date))}</b><small>${escapeHtml(a.start_time?String(a.start_time).slice(0,5):"")}${a.end_time?` — ${escapeHtml(String(a.end_time).slice(0,5))}`:""}</small></div>
+    <div class="schedule-main"><div class="schedule-card-meta"><span>${escapeHtml(a.activity_type||"ATIVIDADE")}</span><span>${escapeHtml(a.status||"AGENDADA")}</span></div><h3>${escapeHtml(a.title)}</h3><p>${escapeHtml(a.description||"")}</p><small>${escapeHtml(a.location||"")}${a.event_title?` • Evento: ${escapeHtml(a.event_title)}`:""}</small>${a.link?`<a class="schedule-link" href="${escapeHtml(a.link)}" target="_blank" rel="noopener">Abrir link</a>`:""}</div>
+  </article>`).join(""):`<div class="panel"><p>Nenhuma atividade encontrada.</p></div>`;
+}
+function populateScheduleTypeFilter(items){
+  const el=qs("#scheduleTypeFilter");if(!el)return;
+  const types=[...new Set((items||[]).map(x=>x.activity_type).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"pt-BR"));
+  const current=el.value;
+  el.innerHTML=`<option value="">Todos os tipos</option>`+types.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
+  if(types.includes(current))el.value=current;
+}
 
 async function loadEvents(){
   try{
@@ -850,12 +889,77 @@ async function confirmPlayerImport(){
     if(e.issues)renderImportPreview({...state.playerImport.preview,invalid:e.issues.length,valid:0,issues:e.issues});
   }
 }
+async function loadAdminSchedule(){
+  if(!state.admin)return;
+  try{
+    const d=await adminApi("/api/admin/schedule");
+    state.adminSchedule=d.activities||[];
+    populateScheduleEventSelect();
+    renderAdminSchedule();
+  }catch(e){
+    const er=qs("#scheduleError");if(er)er.textContent=e.message;
+  }
+}
+function populateScheduleEventSelect(){
+  const el=qs("#scheduleEvent");if(!el)return;
+  const current=el.value;
+  el.innerHTML=`<option value="">Sem evento vinculado</option>`+(state.adminEvents||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.title)}</option>`).join("");
+  if(current)el.value=current;
+}
+function resetScheduleForm(){
+  const f=qs("#scheduleForm");if(!f)return;
+  f.reset();
+  qs("#scheduleId").value="";
+  qs("#scheduleType").value="ATIVIDADE";
+  qs("#scheduleStatus").value="AGENDADA";
+  qs("#scheduleFeatured").checked=false;
+  qs("#schedulePublished").checked=true;
+  qs("#scheduleSaveBtn").textContent="Criar atividade";
+  qs("#scheduleError").textContent="";
+}
+function editAdminSchedule(id){
+  const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;
+  qs("#scheduleId").value=a.id;qs("#scheduleTitle").value=a.title||"";
+  qs("#scheduleType").value=a.activity_type||"ATIVIDADE";qs("#scheduleStatus").value=a.status||"AGENDADA";
+  qs("#scheduleDate").value=String(a.activity_date||"").slice(0,10);
+  qs("#scheduleStart").value=a.start_time?String(a.start_time).slice(0,5):"";
+  qs("#scheduleEnd").value=a.end_time?String(a.end_time).slice(0,5):"";
+  qs("#scheduleLocation").value=a.location||"";qs("#scheduleLink").value=a.link||"";
+  qs("#scheduleEvent").value=a.event_id?String(a.event_id):"";
+  qs("#scheduleDescription").value=a.description||"";
+  qs("#scheduleFeatured").checked=Number(a.featured)===1;
+  qs("#schedulePublished").checked=Number(a.published)===1;
+  qs("#scheduleSaveBtn").textContent="Salvar atividade";
+  qs("#scheduleError").textContent="";
+  qs("#scheduleForm").scrollIntoView({behavior:"smooth",block:"center"});
+}
+function renderAdminSchedule(){
+  const el=qs("#adminScheduleList");if(!el)return;
+  el.innerHTML=(state.adminSchedule||[]).map(a=>`<div class="editorial-item">
+    <div class="editorial-item-head">
+      <div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.activity_type||"ATIVIDADE")} • ${escapeHtml(scheduleDateLabel(a.activity_date))}${a.start_time?` • ${escapeHtml(String(a.start_time).slice(0,5))}`:""} • ${escapeHtml(a.status||"AGENDADA")}${Number(a.published)?"" :" • Não publicado"}</small></div>
+      <div class="editorial-actions"><button type="button" data-schedule-edit="${a.id}">✎</button><button type="button" class="delete" data-schedule-delete="${a.id}">×</button></div>
+    </div>
+  </div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma atividade cadastrada.</div>`;
+  qsa("[data-schedule-edit]").forEach(b=>b.onclick=()=>editAdminSchedule(Number(b.dataset.scheduleEdit)));
+  qsa("[data-schedule-delete]").forEach(b=>b.onclick=()=>deleteAdminSchedule(Number(b.dataset.scheduleDelete)));
+}
+async function deleteAdminSchedule(id){
+  const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;
+  if(!confirm(`Excluir "${a.title}" do cronograma?`))return;
+  try{
+    await adminApi(`/api/admin/schedule/${id}`,{method:"DELETE"});
+    await loadAdminSchedule();await loadSchedule();alert("Atividade excluída.");
+  }catch(e){qs("#scheduleError").textContent=e.message}
+}
+
 async function initAdmin(){
   if(!state.admin)return;
   try{
     const [ov,pl]=await Promise.all([adminApi("/api/admin/overview"),adminApi("/api/admin/players")]);
     state.players=pl.players;
     await loadAdminCards();
+    await loadAdminSchedule();
     renderAdminStats(ov);populateAdminFilters();renderAdminList(state.players,qs("#adminSearch").value);
     if(state.selectedPlayer){await selectAdminPlayer(state.selectedPlayer.id)}
   }catch(e){alert(e.message);go("home")}
@@ -1729,6 +1833,25 @@ async function deleteEdition(id){
 
 qs("#saveEventResultsBtn").addEventListener("click",saveAdminResults);
 qs("#publishEventResultsBtn").addEventListener("click",publishAdminResults);
+qs("#scheduleSearch")?.addEventListener("input",()=>renderSchedule(state.schedule));
+qs("#scheduleDateFilter")?.addEventListener("change",()=>renderSchedule(state.schedule));
+qs("#scheduleTypeFilter")?.addEventListener("change",()=>renderSchedule(state.schedule));
+qs("#scheduleForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const b=Object.fromEntries(new FormData(e.target).entries());
+  b.featured=qs("#scheduleFeatured").checked?1:0;
+  b.published=qs("#schedulePublished").checked?1:0;
+  b.event_id=qs("#scheduleEvent").value||null;
+  try{
+    if(b.id)await adminApi(`/api/admin/schedule/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    else await adminApi("/api/admin/schedule",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    resetScheduleForm();
+    await loadAdminSchedule();
+    await loadSchedule();
+    alert("Cronograma salvo com sucesso.");
+  }catch(ex){qs("#scheduleError").textContent=ex.message}
+});
+qs("#scheduleCancelBtn").addEventListener("click",resetScheduleForm);
 qs("#eventAdminForm").addEventListener("submit",async e=>{
   e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
   b.featured=qs("#eventFeatured").checked?1:0;b.published=qs("#eventPublished").checked?1:0;
