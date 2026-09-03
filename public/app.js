@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[]};
+const state={page:"home",me:null,admin:false,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -17,6 +17,7 @@ function go(page){
   if(page==="home") loadHome();
   if(page==="jornal") loadEditions();
   if(page==="comunicados") loadAnnouncements();
+  if(page==="status") { if(state.me) loadStatusBoard(); else { state.page="login"; return go("login"); } }
   if(page==="eventos") loadEvents();
   if(page==="cronograma") loadSchedule();
   if(page==="jogadores") loadPlayers();
@@ -125,6 +126,75 @@ function eventTypeLabel(t){return {JOGO:"Evento de Jogo",ESPECIAL:"Evento Especi
 function eventStatusClass(s){return s==="ATIVO"?"active":s==="PLANEJADO"?"plan":s==="ENCERRADO"?"closed":""}
 function eventStatusLabel(s){return {ATIVO:"ATIVO",PLANEJADO:"PRÓXIMO",ENCERRADO:"ENCERRADO",CANCELADO:"CANCELADO"}[s]||s}
 
+function statusDateLabel(value){
+  const str=String(value||"").slice(0,10);
+  const [y,m,d]=str.split("-");
+  return y&&m&&d?`${d}/${m}/${y}`:"";
+}
+function statusDateHuman(value){
+  const str=String(value||"").slice(0,10);
+  const [y,m,d]=str.split("-");
+  if(!y)return "";
+  const dt=new Date(Number(y),Number(m)-1,Number(d));
+  const today=new Date();
+  today.setHours(0,0,0,0);
+  dt.setHours(0,0,0,0);
+  const diff=Math.round((today-dt)/86400000);
+  if(diff===0)return "Hoje";
+  if(diff===1)return "Ontem";
+  return statusDateLabel(value);
+}
+async function loadTodayStatus(){
+  if(!state.me)return;
+  try{
+    const d=await api("/api/me/status/today");
+    state.todayStatus=d.status||null;
+    const box=qs("#playerStatusMessage"),date=qs("#playerStatusDate");
+    if(box)box.value=state.todayStatus?.message||"";
+    if(date)date.textContent=state.todayStatus?"Status de hoje":"Ainda não publicado";
+    updateStatusCounter();
+  }catch(e){console.error(e)}
+}
+function updateStatusCounter(){
+  const box=qs("#playerStatusMessage"),count=qs("#playerStatusCount");
+  if(count)count.textContent=String((box?.value||"").length);
+}
+async function publishPlayerStatus(){
+  const box=qs("#playerStatusMessage"),err=qs("#playerStatusError");
+  const message=(box?.value||"").trim();
+  if(!message){if(err)err.textContent="Escreva uma mensagem antes de publicar.";return}
+  if(message.length>280){if(err)err.textContent="O status pode ter no máximo 280 caracteres.";return}
+  if(err)err.textContent="Publicando...";
+  try{
+    const d=await api("/api/me/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message})});
+    state.todayStatus=d.status||null;
+    if(err)err.textContent="Status publicado.";
+    qs("#playerStatusDate").textContent="Status de hoje";
+    await loadStatusBoard();
+    setTimeout(()=>{if(qs("#playerStatusError"))qs("#playerStatusError").textContent=""},1200);
+  }catch(e){if(err)err.textContent=e.message}
+}
+async function loadStatusBoard(){
+  const board=qs("#statusBoard");if(board)board.innerHTML=`<div class="panel"><p>Carregando mural...</p></div>`;
+  try{
+    const d=await api("/api/status-board?days=7");
+    state.statusBoard=d.statuses||[];
+    renderStatusBoard(state.statusBoard);
+  }catch(e){
+    if(board)board.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
+  }
+}
+function renderStatusBoard(items){
+  const board=qs("#statusBoard");if(!board)return;
+  board.innerHTML=items.length?items.map(x=>`<article class="status-post ${x.mine?"mine":""}">
+    <div class="status-avatar">♠</div>
+    <div class="status-body">
+      <div class="status-post-head"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")}${x.patent?` • ${escapeHtml(x.patent)}`:""}</small></div><time>${escapeHtml(statusDateHuman(x.status_date))}</time></div>
+      <p>${escapeHtml(x.message)}</p>
+      ${x.mine?`<span class="status-own">Seu status</span>`:""}
+    </div>
+  </article>`).join(""):`<div class="panel status-empty"><div>♠</div><h3>Nenhum status publicado</h3><p>Seja o primeiro a compartilhar algo com o Reino hoje.</p></div>`;
+}
 async function loadSchedule(){
   try{
     const d=await api("/api/schedule");
@@ -228,109 +298,84 @@ async function loadEditions(){
   try{
     const d=state.data||await api("/api/home");
     state.data=d;
-    renderJournal(d.editions||[],d.news||[]);
+    const o=await api("/api/editorial/overview");
+    state.editorialOverview=o;
+    renderJournal(d.editions||[],d.news||[],o);
   }catch(e){
     const el=qs("#editions");if(el)el.innerHTML=`<div class="panel"><h3>Erro ao carregar o jornal</h3><p>${escapeHtml(e.message)}</p></div>`;
   }
 }
-
-function renderJournal(editions,news){
-  const feature=qs("#journalFeature"),editionEl=qs("#editions"),newsEl=qs("#journalNews");
-  const latest=editions?.[0];
-
+function renderEditorialStats(o){
+  const s=o?.stats||{};
+  const el=qs("#editorialStats");if(!el)return;
+  const cards=[["♟","Jogadores",s.players],["♜","Casas",s.houses],["⚔","Missões",s.missions],["◆","Eventos",s.events],["🃏","Cards ativos",s.cards],["🪙","Yuls em circulação",money(s.yuls)]];
+  el.innerHTML=cards.map(c=>`<div class="editorial-stat"><span>${c[0]}</span><small>${c[1]}</small><b>${c[2]}</b></div>`).join("");
+}
+function renderEditorialHouses(o){
+  const el=qs("#editorialHouses");if(!el)return;
+  el.innerHTML=(o?.houses||[]).map((h,i)=>`<button class="editorial-house-row" data-open-house-editorial="${h.id}" type="button"><span class="house-rank">${String(i+1).padStart(2,"0")}</span><span class="house-row-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="house-row-main"><b>${escapeHtml(h.name)}</b><small>${h.members} membros • ${h.missions} missões</small></span><strong>${money(h.yuls)} 🪙</strong></button>`).join("")||`<p style="font-size:9px;color:#888">Nenhuma Casa cadastrada.</p>`;
+  qsa("[data-open-house-editorial]").forEach(b=>b.onclick=()=>{go("casas");setTimeout(()=>openHouse(Number(b.dataset.openHouseEditorial)),50)});
+}
+function renderEditorialVoices(o){
+  const el=qs("#editorialVoices");if(!el)return;
+  el.innerHTML=(o?.voices||[]).map(v=>`<blockquote class="editorial-voice"><p>“${escapeHtml(v.message)}”</p><footer>${escapeHtml(v.nick)}${v.house?` • ${escapeHtml(v.house)}`:""}</footer></blockquote>`).join("")||`<div class="journal-empty-note">O mural ainda está silencioso.</div>`;
+}
+function renderJournalContents(articles){
+  const el=qs("#journalContents");if(!el)return;
+  el.innerHTML=(articles||[]).map((a,i)=>`<button type="button" class="journal-content-item" data-open-article-index="${i}"><span>${String(i+1).padStart(2,"0")}</span><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.category||"RPG")}${a.author?` • ${escapeHtml(a.author)}`:""}</small></div><em>→</em></button>`).join("")||`<p style="font-size:9px;color:#888">Esta edição ainda não possui matérias.</p>`;
+  qsa("[data-open-article-index]").forEach(b=>b.onclick=()=>openPublicArticle(Number(b.dataset.openArticleIndex),articles));
+}
+function renderJournalStories(articles){
+  const el=qs("#journalStories");if(!el)return;
+  const featured=(articles||[]).filter(a=>a.category!=="EDITORIAL");
+  el.innerHTML=featured.slice(0,8).map((a,i)=>`<article class="journal-story-card ${i<2?"large":""}"><div class="story-number">${String(i+1).padStart(2,"0")}</div><div class="story-copy"><span class="tag">${escapeHtml(a.category||"RPG")}</span><h3>${escapeHtml(a.title)}</h3><p>${escapeHtml(a.excerpt||"")}</p><button type="button" class="outline small" data-story-article="${a.id}">Ler matéria</button></div></article>`).join("")||`<div class="panel"><p>Nenhuma reportagem publicada.</p></div>`;
+  qsa("[data-story-article]").forEach(b=>b.onclick=()=>openPublicArticle(Number(b.dataset.storyArticle),articles));
+}
+function renderEditorialTimeline(){
+  const items=[
+    ["08 AGO","O começo","O novo Reino começa a reunir suas primeiras histórias."],
+    ["10 AGO","Primeiros desafios","Missões, exames e atividades colocam os jogadores em movimento."],
+    ["13 AGO","As Legiões","As primeiras forças organizadas começam a ganhar forma."],
+    ["21 AGO","Primeiro grande torneio","A competição passa a escrever seus primeiros resultados."],
+    ["23 AGO","Fichas e recompensas","A participação começa a alimentar o primeiro grande ciclo de trocas."],
+    ["26 AGO","A Forja","Criar também passa a fazer parte da história do Reino."],
+    ["31 AGO","Fim de um ciclo","Rankings e exames marcam o fechamento de agosto."],
+    ["02 SET","Nova fase","Administração, cargos e estrutura apontam para o próximo capítulo."]
+  ];
+  const el=qs("#journalTimeline");if(!el)return;
+  el.innerHTML=items.map((x,i)=>`<article class="timeline-item"><div class="timeline-dot">${String(i+1).padStart(2,"0")}</div><div class="timeline-date">${x[0]}</div><div class="timeline-copy"><h3>${x[1]}</h3><p>${x[2]}</p></div></article>`).join("");
+}
+function renderJournal(editions,news,o){
+  const feature=qs("#journalFeature"),editionEl=qs("#editions"),newsEl=qs("#journalNews"),latest=editions?.[0];
   if(feature){
-    feature.innerHTML=latest
-      ? `<div class="journal-feature-cover ${latest.cover_url?"":"fallback"}" ${latest.cover_url?`style="background-image:url('${escapeHtml(latest.cover_url)}')"`:""}>${latest.cover_url?"":`<div class="cover-fallback"><span style="font-size:65px">♠</span><b>SPADE</b><small>${escapeHtml(latest.edition||"EDIÇÃO")}</small></div>`}</div>
-         <div class="journal-feature-info">
-           <div class="journal-feature-meta">${escapeHtml(latest.edition||"EDIÇÃO")} • ${escapeHtml(String(latest.date||""))}</div>
-           <h2>${escapeHtml(latest.title)}</h2>
-           <p>${escapeHtml(latest.description||"")}</p>
-           <div class="actions">${latest.pdf_url?`<a class="gold" href="${escapeHtml(latest.pdf_url)}" target="_blank" rel="noopener">📄 PDF</a>`:""}<button class="gold" data-open-edition="${latest.id}">📖 Ler edição</button><button class="outline" data-journal-scroll>Ver arquivo</button></div>
-         </div>`
-      : `<div class="panel"><h3>O jornal ainda não possui uma edição.</h3><p>As próximas edições serão publicadas pela administração.</p></div>`;
-    const scroll=feature.querySelector("[data-journal-scroll]");
-    if(scroll)scroll.onclick=()=>editionEl?.scrollIntoView({behavior:"smooth",block:"start"});
-    const open=feature.querySelector("[data-open-edition]");
-    if(open)open.onclick=()=>openPublicEdition(Number(open.dataset.openEdition));
+    feature.innerHTML=latest?`<div class="journal-feature-cover ${latest.cover_url?"has-image":"fallback"}" ${latest.cover_url?`style="background-image:url('${escapeHtml(latest.cover_url)}')"`:""}>${latest.cover_url?"":`<span>♠</span><small>${escapeHtml(latest.edition||"EDIÇÃO 01")}</small><b>SPADE</b>`}</div><div class="journal-feature-info"><span class="journal-issue-label">${escapeHtml(latest.edition||"EDIÇÃO 01")} • ${escapeHtml(String(latest.date||""))}</span><h2>${escapeHtml(latest.title)}</h2><p>${escapeHtml(latest.description||"")}</p><div class="actions"><button class="gold" type="button" data-journal-open-latest="${latest.id}">Ler edição</button>${latest.pdf_url?`<a class="outline" href="${escapeHtml(latest.pdf_url)}" target="_blank" rel="noopener">PDF</a>`:""}</div><div class="journal-feature-foot"><span>${Number(latest.article_count||0)} matérias</span><span>EDIÇÃO DIGITAL</span></div></div>`:`<div class="panel"><h3>O jornal ainda não possui uma edição.</h3><p>As próximas edições serão publicadas pela administração.</p></div>`;
+    qs("[data-journal-open-latest]")?.addEventListener("click",()=>openPublicEdition(Number(qs("[data-journal-open-latest]").dataset.journalOpenLatest)));
   }
-
+  // Use the current edition's article list in the index; fetch asynchronously.
+  renderEditorialStats(o);renderEditorialHouses(o);renderEditorialVoices(o);renderEditorialTimeline();
+  if(latest){
+    api(`/api/journal/editions/${latest.id}`).then(d=>{
+      renderJournalContents(d.articles||[]);renderJournalStories(d.articles||[]);
+      const first=d.articles?.find(a=>a.category==="EDITORIAL")||d.articles?.[0];
+      if(first){qs("#journalLetterTitle").textContent=first.title;qs("#journalLetterText").textContent=first.excerpt||first.body?.slice(0,220)||"";qs("#journalReadEditorial")?.addEventListener("click",()=>openPublicArticle(Number(first.id),d.articles));}
+    }).catch(()=>{});
+  }else{renderJournalContents([]);renderJournalStories([])}
   if(editionEl){
-    editionEl.innerHTML=editions?.length
-      ? editions.map(e=>`<article class="edition">
-          <div class="edition-cover ${e.cover_url?"has-image":""}" ${e.cover_url?`style="background-image:url('${escapeHtml(e.cover_url)}')"`:""}>
-            ${e.cover_url?"":`<span>♠</span><small>${escapeHtml(e.edition||"EDIÇÃO")}</small><b>SPADE</b><em>${escapeHtml(String(e.date||""))}</em>`}
-          </div>
-          <h3>${escapeHtml(e.title)}</h3>
-          <p>${escapeHtml(e.description||"")}</p>
-          <small class="edition-card-meta">${Number(e.article_count||0)} matéria(s)</small>
-          <div class="actions"><button class="gold small journal-edition-open" type="button" data-open-edition="${e.id}">📖 Ler edição</button>${e.pdf_url?`<a class="outline small" href="${escapeHtml(e.pdf_url)}" target="_blank" rel="noopener">📄 PDF</a>`:""}</div>
-        </article>`).join("")
-      : `<div class="panel"><h3>Nenhuma edição publicada.</h3></div>`;
+    editionEl.innerHTML=editions?.length?editions.map(e=>`<article class="edition"><div class="edition-cover ${e.cover_url?"has-image":""}" ${e.cover_url?`style="background-image:url('${escapeHtml(e.cover_url)}')"`:""}>${e.cover_url?"":`<span>♠</span><small>${escapeHtml(e.edition||"EDIÇÃO")}</small><b>SPADE</b><em>${escapeHtml(String(e.date||""))}</em>`}</div><h3>${escapeHtml(e.title)}</h3><p>${escapeHtml(e.description||"")}</p><small class="edition-card-meta">${Number(e.article_count||0)} matéria(s)</small><div class="actions"><button class="gold small journal-edition-open" type="button" data-open-edition="${e.id}">Ler edição</button>${e.pdf_url?`<a class="outline small" href="${escapeHtml(e.pdf_url)}" target="_blank" rel="noopener">PDF</a>`:""}</div></article>`).join(""):`<div class="panel"><h3>Nenhuma edição publicada.</h3></div>`;
     qsa("[data-open-edition]").forEach(b=>b.onclick=()=>openPublicEdition(Number(b.dataset.openEdition)));
   }
-
-  if(newsEl){
-    newsEl.innerHTML=news?.length
-      ? news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}">
-          <div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div>
-          <div><span class="tag">${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt||"")}</p></div>
-        </article>`).join("")
-      : `<div class="panel"><h3>Nenhuma notícia publicada.</h3></div>`;
-  }
-}
-
-async function openPublicEdition(id){
-  state.lastPublicEditionId=id;
-  let wrap=qs("#journalEditionReader");
-  if(!wrap){
-    wrap=document.createElement("div");
-    wrap.id="journalEditionReader";
-    wrap.className="journal-public-article-wrap";
-    document.body.appendChild(wrap);
-  }
-  wrap.innerHTML=`<div class="journal-public-article"><button class="journal-close" id="closeEditionReader">×</button><div class="journal-public-content"><p>Carregando edição...</p></div></div>`;
-  wrap.style.display="block";
-  try{
-    const d=await api(`/api/journal/editions/${id}`);
-    const cover=d.edition.cover_url?`style="background-image:url('${escapeHtml(d.edition.cover_url)}')"`:"";
-    const articles=(d.articles||[]).map(a=>`<button class="edition-article-link" type="button" data-open-article="${a.id}"><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.author||"Redação")} • ${escapeHtml(a.category||"RPG")}</small></button>`).join("")
-      ||`<p style="color:#888;font-size:10px">Esta edição ainda não possui matérias.</p>`;
-    wrap.innerHTML=`<div class="journal-public-article">
-      <button class="journal-close" id="closeEditionReader">×</button>
-      <div class="journal-public-cover ${d.edition.cover_url?"":"no-image"}" ${cover}>${d.edition.cover_url?"":"♠"}</div>
-      <div class="journal-public-content">
-        <span class="tag">${escapeHtml(d.edition.edition||"EDIÇÃO")} • ${escapeHtml(String(d.edition.date||""))}</span>
-        <h2>${escapeHtml(d.edition.title)}</h2>
-        <div class="article-subtitle">${escapeHtml(d.edition.description||"")}</div>
-        <div class="edition-article-list">${articles}</div>
-        ${d.edition.pdf_url?`<div class="actions" style="margin-top:18px"><a class="gold small" href="${escapeHtml(d.edition.pdf_url)}" target="_blank" rel="noopener">📄 Abrir PDF</a></div>`:""}
-      </div>
-    </div>`;
-    qs("#closeEditionReader").onclick=()=>{wrap.style.display="none"};
-    wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
-    qsa("[data-open-article]",wrap).forEach(b=>b.onclick=()=>openPublicArticle(Number(b.dataset.openArticle),d.articles));
-  }catch(e){
-    wrap.innerHTML=`<div class="journal-public-article"><button class="journal-close" id="closeEditionReader">×</button><div class="journal-public-content"><h2>Erro ao carregar</h2><p>${escapeHtml(e.message)}</p></div></div>`;
-    qs("#closeEditionReader").onclick=()=>wrap.style.display="none";
-  }
+  if(newsEl){newsEl.innerHTML=news?.length?news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt||"")}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada.</h3></div>`}
 }
 function openPublicArticle(id,articles){
-  const a=(articles||[]).find(x=>Number(x.id)===id);
+  let a=(articles||[]).find(x=>Number(x.id)===id);
+  if(!a && Array.isArray(articles))a=(articles||[]).find(x=>Number(x.id)===Number(id));
   if(!a)return;
-  const wrap=qs("#journalEditionReader");if(!wrap)return;
-  const cover=a.image_url?`style="background-image:url('${escapeHtml(a.image_url)}')"`:"";
-  wrap.innerHTML=`<div class="journal-public-article">
-    <button class="journal-close" id="closeArticleReader">×</button>
-    <div class="journal-public-cover ${a.image_url?"":"no-image"}" ${cover}>${a.image_url?"":"♠"}</div>
-    <div class="journal-public-content">
-      <span class="tag">${escapeHtml(a.category||"RPG")} • ${escapeHtml(String(a.date||""))}</span>
-      <h2>${escapeHtml(a.title)}</h2>
-      ${a.subtitle?`<div class="article-subtitle">${escapeHtml(a.subtitle)}</div>`:""}
-      <div class="article-meta">Por ${escapeHtml(a.author||"Redação")}</div>
-      <div class="article-body">${escapeHtml(a.body||a.excerpt||"")}</div>
-    </div>
-  </div>`;
-  qs("#closeArticleReader").onclick=()=>openPublicEdition(state.lastPublicEditionId||0);
+  let wrap=qs("#journalEditionReader");
+  if(!wrap){wrap=document.createElement("div");wrap.id="journalEditionReader";wrap.className="journal-public-article-wrap";document.body.appendChild(wrap)}
+  wrap.style.display="block";
+  wrap.innerHTML=`<div class="journal-public-article journal-article-reader"><button class="journal-close" id="closeArticleReader">×</button><div class="journal-article-reader-head"><span class="tag">${escapeHtml(a.category||"RPG")} • ${escapeHtml(String(a.date||""))}</span><h2>${escapeHtml(a.title)}</h2>${a.subtitle?`<div class="article-subtitle">${escapeHtml(a.subtitle)}</div>`:""}<div class="article-meta">Por ${escapeHtml(a.author||"Redação")}</div></div><div class="article-body article-prose">${escapeHtml(a.body||a.excerpt||"")}</div></div>`;
+  qs("#closeArticleReader").onclick=()=>wrap.style.display="none";
+  wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
 }
 async function loadPlayers(){
   const d=await api("/api/players");state.players=d.players;renderPlayers("");
@@ -755,6 +800,7 @@ function renderDashboard(){
  loadPlayerYuls();
  loadPlayerMissions();
  loadPlayerAlerts();
+ loadTodayStatus();
 }
 
 async function tryMe(){
@@ -776,6 +822,9 @@ qs("#loginForm").addEventListener("submit",async e=>{
   }catch(ex){err.textContent=ex.message}
 });
 
+qs("#playerStatusMessage")?.addEventListener("input",updateStatusCounter);
+qs("#playerStatusPublishBtn")?.addEventListener("click",publishPlayerStatus);
+qs("#statusRefreshBtn")?.addEventListener("click",loadStatusBoard);
 qs("#playerCardSearch")?.addEventListener("input",e=>{state.cardSearch=e.target.value;renderPlayerCards(state.playerCards)});
 qs("#playerCardCategoryFilter")?.addEventListener("change",e=>{state.cardFilter=e.target.value;renderPlayerCards(state.playerCards)});
 qs("#backToDashboard")?.addEventListener("click",()=>go("dashboard"));
@@ -1035,6 +1084,14 @@ function openBulkModal(type){
   if(!ids.length){alert("Selecione pelo menos um jogador.");return;}
   let title="",body="";
   if(type==="yuls")title="🪙 Movimentar Yuls",body=`<div class="bulk-modal-grid"><select id="bulkYulsMode"><option value="add">Adicionar Yuls</option><option value="remove">Retirar Yuls</option></select><input id="bulkYulsAmount" type="number" min="1" placeholder="Valor"><textarea id="bulkYulsReason" placeholder="Motivo"></textarea></div>`;
+  if(type==="cards"){
+    const catalog=(state.adminCards||[]).filter(c=>Number(c.active)===1);
+    body=`<div class="bulk-card-distribution"><div class="bulk-modal-grid">
+      <select id="bulkCardSelect">${catalog.map(c=>`<option value="${c.id}">${escapeHtml(c.name)} — ${escapeHtml(c.category)}</option>`).join("")||`<option value="">Nenhum card ativo</option>`}</select>
+      <select id="bulkCardSourceType"><option value="MISSAO">🎯 Missão</option><option value="EVENTO">🎉 Evento</option><option value="LOJA">🛒 Loja</option><option value="PATENTE">🎖️ Patente</option><option value="OUTRO">◆ Outra origem</option></select>
+      <input id="bulkCardSourceName" placeholder="Nome da missão/evento/origem">
+    </div><p class="bulk-card-help">O mesmo card será lançado para todos os selecionados. Se algum jogador já possuir o card, ele será apenas informado como ignorado.</p></div>`;
+  }
   if(type==="house")title="🏰 Alterar Casa",body=`<div class="bulk-modal-grid"><select id="bulkHouse">${(state.adminHouses||[]).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select></div>`;
   if(type==="patent")title="🎖️ Alterar Patente",body=`<div class="bulk-modal-grid"><select id="bulkPatent">${(state.adminHierarchy?.patents||[]).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select></div>`;
   if(type==="roles")title="👑 Definir Cargos",body=`<div class="bulk-role-options">${(state.adminHierarchy?.roles||[]).map(x=>`<label class="role-option"><input type="checkbox" name="bulkRoleIds" value="${x.id}"><span><b>${escapeHtml(x.name)}</b><small>${x.salary>0?`🪙 ${money(x.salary)}`:""}</small></span></label>`).join("")||`<span style="font-size:10px;color:#888">Nenhum cargo cadastrado.</span>`}</div>`;
@@ -1056,6 +1113,18 @@ async function submitBulkAction(type,ids,modal){
     payload.amount=Math.round(Number(qs("#bulkYulsAmount").value||0));
     payload.reason=qs("#bulkYulsReason").value.trim()||"Movimentação administrativa em massa";
     action=qs("#bulkYulsMode").value==="add"?"add_yuls":"remove_yuls";
+  }
+  if(type==="cards"){
+    payload.card_id=Number(qs("#bulkCardSelect").value||0);
+    payload.acquisition_type=qs("#bulkCardSourceType").value;
+    payload.acquisition_name=qs("#bulkCardSourceName").value.trim();
+    try{
+      const r=await adminApi("/api/admin/cards/distribute",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      modal.remove();state.selectedPlayers.clear();await initAdmin();
+      const skipped=(r.skipped||[]).map(x=>`${x.nick}: ${x.reason}`).join("\n");
+      alert(`Card distribuído para ${r.added.length} jogador(es).${skipped?`\n\nIgnorados:\n${skipped}`:""}`);
+    }catch(e){alert(e.message)}
+    return;
   }
   if(type==="house"){action="set_house";payload.house_id=Number(qs("#bulkHouse").value)}
   if(type==="patent"){action="set_patent";payload.patent_id=Number(qs("#bulkPatent").value)}
