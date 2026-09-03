@@ -741,7 +741,21 @@ qs("#playerCardSearch")?.addEventListener("input",e=>{state.cardSearch=e.target.
 qs("#playerCardCategoryFilter")?.addEventListener("change",e=>{state.cardFilter=e.target.value;renderPlayerCards(state.playerCards)});
 qs("#backToDashboard")?.addEventListener("click",()=>go("dashboard"));
 
-async function adminApi(url,options={}){options.headers={...(options.headers||{}),"x-admin-key":state.adminKey};return api(url,options)}
+function getStoredAdminKey(){
+  try{return sessionStorage.getItem("spade_admin_key")||""}catch{return ""}
+}
+function storeAdminKey(key){
+  try{sessionStorage.setItem("spade_admin_key",key)}catch{}
+}
+function clearStoredAdminKey(){
+  try{sessionStorage.removeItem("spade_admin_key")}catch{}
+}
+async function adminApi(url,options={}){
+  const key=state.adminKey||getStoredAdminKey();
+  state.adminKey=key;
+  options.headers={...(options.headers||{}),"x-admin-key":key};
+  return api(url,options);
+}
 
 async function loadAdminHouses(){
   try{
@@ -1273,7 +1287,7 @@ qs("#newPlayerBtn").addEventListener("click",openNewPlayer);
 qs("#refreshAdminBtn").addEventListener("click",initAdmin);
 qs("#newsForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
 qs("#editionForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
-qs("#logoutAdminBtn").addEventListener("click",()=>{state.admin=false;state.adminKey=null;state.selectedPlayer=null;go("home")});
+qs("#logoutAdminBtn").addEventListener("click",()=>{state.admin=false;state.adminKey=null;clearStoredAdminKey();state.selectedPlayer=null;go("home")});
 
 qs("#houseForm").addEventListener("submit",async e=>{
   e.preventDefault();
@@ -1837,11 +1851,21 @@ qs("#announcementCancelBtn").addEventListener("click",resetAnnouncementForm);
 async function tryAdminHash(){
   if(location.hash!=="#admin")return;
   setTimeout(async()=>{
-    const key=prompt("Chave administrativa:");
+    const stored=getStoredAdminKey();
+    const key=stored||prompt("Chave administrativa:");
     if(!key){history.replaceState(null,"",location.pathname+location.search);go("home");return}
     state.adminKey=key;
-    try{await adminApi("/api/admin/overview");state.admin=true;go("admin");}
-    catch(e){state.adminKey=null;alert("Chave inválida.");go("home")}
+    try{
+      await adminApi("/api/admin/overview");
+      state.admin=true;
+      storeAdminKey(key);
+      go("admin");
+    }catch(e){
+      state.adminKey=null;
+      clearStoredAdminKey();
+      alert("Chave administrativa inválida ou sessão expirada.");
+      go("home");
+    }
   },80);
 }
 
