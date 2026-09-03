@@ -371,7 +371,7 @@
   </div>
   <div class="panel admin-schedule-manager">
     <div class="panel-head"><div><p class="eyebrow">CRONOGRAMA</p><h3>Agenda do Reino</h3></div><span>Cadastre as atividades oficiais</span></div>
-    <form id="scheduleForm" class="admin-form">
+    <form id="scheduleForm" class="admin-form" onsubmit="return false;">
       <input type="hidden" name="id" id="scheduleId">
       <div class="article-form-grid">
         <input name="title" id="scheduleTitle" class="full" placeholder="Nome da atividade" required>
@@ -518,8 +518,11 @@
   <div class="admin-danger"><button class="outline danger" id="logoutAdminBtn">Sair da administração</button></div>
 </div></section>
 </main>
-<footer><span>♠ THE KING MAGAZINE</span><small>Portal oficial do Reino Spade • 2026</small></footer>
+<footer class="site-footer">
+  <div class="footer-brand"><span>♠</span><b>THE KING MAGAZINE</b></div>
+  <small>Portal oficial do Reino Spade • 2026</small>
+</footer>
 </div>
-<script src="/app.js?v=18.1"></script>
+<script src="/app.js?v=27.1"></script>
 </body>
 </html>
