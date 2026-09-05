@@ -2278,22 +2278,44 @@ app.get("/api/roles/:id", async (req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Cargo inválido."});
   try{
-    const r=await pool.query(`
-      SELECT r.id,r.name,r.description,r.rank_code,r.vacancies,r.payment_mode,r.remuneration_detail,
-             r.requirements,r.benefits,r.scope,rr.name AS rank_name,rr.description AS rank_description,rr.requirements AS rank_requirements
-      FROM roles r LEFT JOIN role_ranks rr ON rr.code=r.rank_code
-      WHERE r.id=$1 AND r.active=1`,[id]);
-    if(!r.rows[0])return res.status(404).json({error:"Cargo não encontrado."});
-    const x=r.rows[0];
+    const [roleResult, occupantsResult]=await Promise.all([
+      pool.query(`
+        SELECT r.id,r.name,r.description,r.rank_code,r.vacancies,r.payment_mode,r.remuneration_detail,
+               r.requirements,r.benefits,r.scope,rr.name AS rank_name,rr.description AS rank_description,rr.requirements AS rank_requirements
+        FROM roles r LEFT JOIN role_ranks rr ON rr.code=r.rank_code
+        WHERE r.id=$1 AND r.active=1`,[id]),
+      pool.query(`
+        SELECT p.id,p.nick,p.house,p.patent,p.grimoire
+        FROM players p
+        JOIN player_roles pr ON pr.player_id=p.id
+        WHERE pr.role_id=$1 AND p.active=1 AND p.public_profile=1
+        ORDER BY lower(p.nick) ASC`,[id])
+    ]);
+    if(!roleResult.rows[0])return res.status(404).json({error:"Cargo não encontrado."});
+    const x=roleResult.rows[0];
     res.json({role:{
       id:Number(x.id),name:x.name,description:x.description||"",rank_code:x.rank_code||"",
       rank_name:x.rank_name||"",rank_description:x.rank_description||"",rank_requirements:x.rank_requirements||"",
       vacancies:x.vacancies||"",payment_mode:x.payment_mode||"",remuneration_detail:x.remuneration_detail||"",
-      requirements:x.requirements||"",benefits:x.benefits||"",scope:x.scope||""
+      requirements:x.requirements||"",benefits:x.benefits||"",scope:x.scope||"",
+      occupants:occupantsResult.rows.map(p=>({id:Number(p.id),nick:p.nick,house:p.house||"",patent:p.patent||"",grimoire:p.grimoire||""}))
     }});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar o cargo."});}
 });
 
+app.get("/api/patents/:id", async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Patente inválida."});
+  try{
+    const [patentResult, occupantsResult]=await Promise.all([
+      pool.query(`SELECT id,name,description,sort_order FROM patents WHERE id=$1`,[id]),
+      pool.query(`SELECT id,nick,house,patent,grimoire FROM players WHERE active=1 AND public_profile=1 AND lower(trim(patent))=lower(trim((SELECT name FROM patents WHERE id=$1))) ORDER BY lower(nick) ASC`,[id])
+    ]);
+    const x=patentResult.rows[0];
+    if(!x)return res.status(404).json({error:"Patente não encontrada."});
+    res.json({patent:{id:Number(x.id),name:x.name,description:x.description||"",sort_order:Number(x.sort_order||0),occupants:occupantsResult.rows.map(p=>({id:Number(p.id),nick:p.nick,house:p.house||"",patent:p.patent||"",grimoire:p.grimoire||""}))}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar a patente."});}
+});
 
 app.get("/api/search", async (req,res)=>{
   const q=String(req.query.q||"").trim().slice(0,80);
@@ -2476,14 +2498,24 @@ app.get("/api/houses/:id", async (req, res) => {
 app.get("/api/hierarchy", async (req,res) => {
   try {
     const [patents,roles,ranks]=await Promise.all([
-      pool.query(`SELECT id,name,description,sort_order FROM patents ORDER BY sort_order ASC,name COLLATE "C" ASC`),
-      pool.query(`SELECT id,name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope
-                  FROM roles WHERE active=1
-                  ORDER BY CASE rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,sort_order ASC,name COLLATE "C" ASC`),
+      pool.query(`SELECT p.id,p.name,p.description,p.sort_order,
+                         COUNT(pl.id)::int AS occupant_count
+                  FROM patents p
+                  LEFT JOIN players pl ON pl.active=1 AND lower(trim(pl.patent))=lower(trim(p.name))
+                  GROUP BY p.id,p.name,p.description,p.sort_order
+                  ORDER BY p.sort_order ASC,p.name COLLATE "C" ASC`),
+      pool.query(`SELECT r.id,r.name,r.description,r.salary,r.sort_order,r.rank_code,r.vacancies,r.payment_mode,r.remuneration_detail,r.requirements,r.benefits,r.scope,
+                         COUNT(pl.id)::int AS occupant_count
+                  FROM roles r
+                  LEFT JOIN player_roles pr ON pr.role_id=r.id
+                  LEFT JOIN players pl ON pl.id=pr.player_id AND pl.active=1
+                  WHERE r.active=1
+                  GROUP BY r.id,r.name,r.description,r.salary,r.sort_order,r.rank_code,r.vacancies,r.payment_mode,r.remuneration_detail,r.requirements,r.benefits,r.scope
+                  ORDER BY CASE r.rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,r.sort_order ASC,r.name COLLATE "C" ASC`),
       pool.query(`SELECT id,code,name,description,requirements,sort_order FROM role_ranks ORDER BY sort_order ASC`)
     ]);
     res.json({
-      patents:patents.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",sort_order:Number(x.sort_order||0)})),
+      patents:patents.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",sort_order:Number(x.sort_order||0),occupant_count:Number(x.occupant_count||0)})),
       roles:roles.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",salary:Number(x.salary||0),sort_order:Number(x.sort_order||0),rank_code:x.rank_code||"",vacancies:x.vacancies||"",payment_mode:x.payment_mode||"",remuneration_detail:x.remuneration_detail||"",requirements:x.requirements||"",benefits:x.benefits||"",scope:x.scope||""})),
       ranks:ranks.rows.map(x=>({id:Number(x.id),code:x.code,name:x.name,description:x.description||"",requirements:x.requirements||"",sort_order:Number(x.sort_order||0)}))
     });
@@ -3845,15 +3877,23 @@ app.post("/api/admin/houses/:id/history", requireAdmin, async (req,res)=>{
 app.get("/api/admin/hierarchy", requireAdmin, async (req,res) => {
   try {
     const [patents,roles,ranks]=await Promise.all([
-      pool.query(`SELECT id,name,description,sort_order FROM patents ORDER BY sort_order ASC,name COLLATE "C" ASC`),
-      pool.query(`SELECT id,name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope,active
-                  FROM roles
-                  ORDER BY CASE rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,sort_order ASC,name COLLATE "C" ASC`),
+      pool.query(`SELECT p.id,p.name,p.description,p.sort_order,COUNT(pl.id)::int AS occupant_count
+                  FROM patents p
+                  LEFT JOIN players pl ON pl.active=1 AND lower(trim(pl.patent))=lower(trim(p.name))
+                  GROUP BY p.id,p.name,p.description,p.sort_order
+                  ORDER BY p.sort_order ASC,p.name COLLATE "C" ASC`),
+      pool.query(`SELECT r.id,r.name,r.description,r.salary,r.sort_order,r.rank_code,r.vacancies,r.payment_mode,r.remuneration_detail,r.requirements,r.benefits,r.scope,r.active,
+                         COUNT(pl.id)::int AS occupant_count
+                  FROM roles r
+                  LEFT JOIN player_roles pr ON pr.role_id=r.id
+                  LEFT JOIN players pl ON pl.id=pr.player_id AND pl.active=1
+                  GROUP BY r.id,r.name,r.description,r.salary,r.sort_order,r.rank_code,r.vacancies,r.payment_mode,r.remuneration_detail,r.requirements,r.benefits,r.scope,r.active
+                  ORDER BY CASE r.rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,sort_order ASC,r.name COLLATE "C" ASC`),
       pool.query(`SELECT id,code,name,description,requirements,sort_order FROM role_ranks ORDER BY sort_order ASC`)
     ]);
     res.json({
-      patents:patents.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",sort_order:Number(x.sort_order||0)})),
-      roles:roles.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",salary:Number(x.salary||0),sort_order:Number(x.sort_order||0),rank_code:x.rank_code||"",vacancies:x.vacancies||"",payment_mode:x.payment_mode||"",remuneration_detail:x.remuneration_detail||"",requirements:x.requirements||"",benefits:x.benefits||"",scope:x.scope||"",active:Number(x.active??1)})),
+      patents:patents.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",sort_order:Number(x.sort_order||0),occupant_count:Number(x.occupant_count||0)})),
+      roles:roles.rows.map(x=>({id:Number(x.id),name:x.name,description:x.description||"",salary:Number(x.salary||0),sort_order:Number(x.sort_order||0),rank_code:x.rank_code||"",vacancies:x.vacancies||"",payment_mode:x.payment_mode||"",remuneration_detail:x.remuneration_detail||"",requirements:x.requirements||"",benefits:x.benefits||"",scope:x.scope||"",active:Number(x.active??1),occupant_count:Number(x.occupant_count||0)})),
       ranks:ranks.rows.map(x=>({id:Number(x.id),code:x.code,name:x.name,description:x.description||"",requirements:x.requirements||"",sort_order:Number(x.sort_order||0)}))
     });
   } catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar hierarquia administrativa."});}
