@@ -16,6 +16,7 @@ function go(page){
   qs("#nav")?.classList.remove("open");
   if(page==="home") loadHome();
   if(page==="jornal") loadEditions();
+  if(page==="notificacoes") loadNotifications();
   if(page==="comunicados") loadAnnouncements();
   if(page==="status") { if(state.me) loadStatusBoard(); else { state.page="login"; return go("login"); } }
   if(page==="eventos") loadEvents();
@@ -656,6 +657,20 @@ async function loadRankingPlayerActions(){
 async function loadAdminRankingBattles(){const list=qs("#adminRankingBattleList");if(!list)return;try{const status=qs("#adminRankingBattleStatus")?.value||"AGUARDANDO_ADMIN";const d=await adminApi(`/api/admin/ranking-battles?status=${encodeURIComponent(status)}`);state.adminRankingBattles=d.battles||[];list.innerHTML=state.adminRankingBattles.length?state.adminRankingBattles.map(x=>`<div class="admin-battle-row"><div><b>${escapeHtml(x.ranking_type)} • ${escapeHtml(x.challenger_nick)} × ${escapeHtml(x.opponent_nick)}</b><small>${escapeHtml(x.status)} • Resultado: ${escapeHtml(x.result)} • Antes: ${x.challenger_score_before} × ${x.opponent_score_before}</small>${x.proof_url?`<a href="${escapeHtml(x.proof_url)}" target="_blank" rel="noopener">Abrir prova</a>`:""}</div>${x.status==="AGUARDANDO_ADMIN"?`<div class="admin-battle-actions"><input type="number" min="0" id="cs-${x.id}" value="${x.challenger_score_before}" placeholder="SC/VT final"><input type="number" min="0" id="os-${x.id}" value="${x.opponent_score_before}" placeholder="SC/VT final"><button class="gold small" type="button" data-approve-battle="${x.id}">Aprovar</button><button class="outline danger small" type="button" data-reject-battle="${x.id}">Rejeitar</button></div>`:`<div class="admin-battle-final">${x.challenger_score_after??"—"} × ${x.opponent_score_after??"—"}</div>`}</div>`).join(""):`<div class="admin-history-empty">Nenhum registro nesta categoria.</div>`;qsa("[data-approve-battle]").forEach(b=>b.onclick=async()=>{const id=b.dataset.approveBattle;try{await adminApi(`/api/admin/ranking-battles/${id}/approve`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({challenger_score_after:Number(qs(`#cs-${id}`).value),opponent_score_after:Number(qs(`#os-${id}`).value)})});await loadAdminRankingBattles();}catch(ex){alert(ex.message)}});qsa("[data-reject-battle]").forEach(b=>b.onclick=async()=>{const reason=prompt("Motivo da rejeição:")??"";try{await adminApi(`/api/admin/ranking-battles/${b.dataset.rejectBattle}/reject`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason})});await loadAdminRankingBattles();}catch(ex){alert(ex.message)}});}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
 
 
+async function loadNotifications(){
+  const list=qs("#notificationList"), summary=qs("#notificationSummary"); if(!list)return;
+  if(!state.me){list.innerHTML=`<div class="panel"><h3>Entre para acessar suas notificações.</h3><p>Esta central é exclusiva dos jogadores.</p></div>`;return;}
+  try{const d=await api("/api/me/notifications"); const items=d.notifications||[]; const unread=Number(d.unread||0);
+    if(summary)summary.textContent=`${unread} não lida${unread===1?"":"s"} • ${items.length} notificações`;
+    const badge=qs("#notificationBadge"); if(badge){badge.textContent=unread;badge.style.display=unread?"inline-flex":"none";}
+    list.innerHTML=items.length?items.map(n=>`<article class="notification-card ${n.read?"read":"unread"}" data-notification-id="${n.id}"><div class="notification-icon">${n.type==="URGENTE"?"🔴":n.type==="IMPORTANTE"?"🟡":n.type==="SISTEMA"?"⚙️":"🔔"}</div><div class="notification-main"><div class="notification-top"><span>${escapeHtml(n.type)}</span><small>${new Date(n.created_at).toLocaleString("pt-BR")}</small></div><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.body||"")}</p>${n.link_page?`<button class="outline small notification-link" data-notification-link="${escapeHtml(n.link_page)}">Abrir conteúdo →</button>`:""}</div>${n.read?"":`<button class="notification-read" data-read-notification="${n.id}" aria-label="Marcar como lida">✓</button>`}</article>`).join(""):"<div class='panel'><h3>Nenhuma notificação.</h3><p>Quando houver um aviso direcionado a você, ele aparecerá aqui.</p></div>";
+    qsa("[data-read-notification]").forEach(b=>b.onclick=async()=>{try{await api(`/api/me/notifications/${b.dataset.readNotification}/read`,{method:"POST"});await loadNotifications();}catch(e){alert(e.message)}});
+    qsa("[data-notification-link]").forEach(b=>b.onclick=()=>{const pg=b.dataset.notificationLink;if(document.querySelector(`#${pg}`))go(pg);else window.location.hash=pg;});
+  }catch(e){list.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;}
+}
+
+async function loadNotificationBadge(){if(!state.me)return;try{const d=await api("/api/me/notifications");const b=qs("#notificationBadge");if(b){b.textContent=Number(d.unread||0);b.style.display=d.unread?"inline-flex":"none";}}catch{}}
+
 function playerAlertStorageKey(id){
   return `spade-alert-${state.me?.identifier||"player"}-${id}`;
 }
@@ -891,7 +906,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1167,6 +1182,7 @@ async function initAdmin(){
     if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
     if(hasAdminPermission("cards")) await loadAdminCards();
     if(hasAdminPermission("economy")){ populateEconomyPlayers(); await loadAdminEconomy(); }
+    if(hasAdminPermission("notifications")){ populateNotificationPlayers(); await loadAdminNotifications(); }
     if(hasAdminPermission("schedule")) await loadAdminSchedule();
     if(hasAdminPermission("missions")) await loadAdminMissions();
     if(hasAdminPermission("admin_users")) await loadAdminUsers();
@@ -2277,3 +2293,9 @@ async function tryAdminHash(){
 }
 
 loadHome();tryMe();setAdminNav();tryAdminHash();
+
+
+function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
+async function loadAdminNotifications(){const list=qs("#adminNotificationList");if(!list)return;try{const d=await adminApi("/api/admin/notifications");list.innerHTML=(d.notifications||[]).map(n=>`<div class="editorial-item"><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.type)} • ${escapeHtml(n.nick)}${n.house?` • ${escapeHtml(n.house)}`:""} • ${new Date(n.created_at).toLocaleString("pt-BR")}</small></div></div>`).join("")||`<div class="admin-history-empty">Nenhuma notificação enviada.</div>`;}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
+qs("#adminNotificationForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#notificationAdminError");err.textContent="";try{const all=qs("#notificationAllActive").checked;const pid=Number(qs("#notificationPlayer").value||0);if(!all&&!pid)throw new Error("Escolha um jogador ou marque todos os ativos.");await adminApi("/api/admin/notifications",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:qs("#notificationTitle").value,body:qs("#notificationBody").value,type:qs("#notificationType").value,link_page:qs("#notificationLink").value,all_active:all,player_id:pid})});e.target.reset();await loadAdminNotifications();alert("Notificação enviada.");}catch(ex){err.textContent=ex.message;}});
+qs("#markAllNotifications")?.addEventListener("click",async()=>{try{await api("/api/me/notifications/read-all",{method:"POST"});await loadNotifications();}catch(e){alert(e.message)}});
