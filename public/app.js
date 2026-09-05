@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[]};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -220,6 +220,7 @@ function updateStatusCounter(){
   if(count)count.textContent=String((box?.value||"").length);
 }
 async function publishPlayerStatus(){
+  if(state.me?.account_type==="ALLY") return;
   const box=qs("#playerStatusMessage"),err=qs("#playerStatusError");
   const message=(box?.value||"").trim();
   if(!message){if(err)err.textContent="Escreva uma mensagem antes de publicar.";return}
@@ -252,9 +253,9 @@ function renderStatusBoard(items){
       <div class="status-post-head"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")}${x.patent?` • ${escapeHtml(x.patent)}`:""}</small></div><time>${escapeHtml(statusDateHuman(x.status_date))}</time></div>
       <p>${escapeHtml(x.message)}</p>
       <div class="status-actions">
-        <button type="button" class="status-react ${x.reacted?"active":""}" data-status-react="${x.id}">❤️ <span>${x.reaction_count||0}</span></button>
-        <button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 <span>${x.comment_count||0}</span></button>
-        ${x.mine?`<span class="status-own">Seu status</span>`:""}
+        ${state.me?.account_type==="ALLY"
+          ? `<span class="status-readonly">👁️ Somente leitura</span><span>❤️ ${x.reaction_count||0}</span><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 ${x.comment_count||0}</button>`
+          : `<button type="button" class="status-react ${x.reacted?"active":""}" data-status-react="${x.id}">❤️ <span>${x.reaction_count||0}</span></button><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 <span>${x.comment_count||0}</span></button>${x.mine?`<span class="status-own">Seu status</span>`:""}` }
       </div>
       <div class="status-comments" id="status-comments-${x.id}" hidden></div>
     </div>
@@ -267,7 +268,7 @@ async function toggleStatusComments(id){
   const box=qs(`#status-comments-${id}`);if(!box)return;
   if(!box.hidden){box.hidden=true;return;}
   box.hidden=false;box.innerHTML=`<div class="comments-loading">Carregando comentários...</div>`;
-  try{const d=await api(`/api/status/${id}/comments`);box.innerHTML=(d.comments||[]).map(c=>`<div class="status-comment"><b>${escapeHtml(c.nick)}</b><span>${escapeHtml(c.message)}</span></div>`).join("")+`<form class="status-comment-form" data-comment-form="${id}"><input maxlength="280" placeholder="Comente neste status..."><button class="gold small" type="submit">Enviar</button></form>`;
+  try{const d=await api(`/api/status/${id}/comments`);const comments=(d.comments||[]).map(c=>`<div class="status-comment"><b>${escapeHtml(c.nick)}</b><span>${escapeHtml(c.message)}</span></div>`).join("");const form=state.me?.account_type==="ALLY"?`<div class="status-readonly-note">👁️ Você está acompanhando este mural em modo observador.</div>`:`<form class="status-comment-form" data-comment-form="${id}"><input maxlength="280" placeholder="Comente neste status..."><button class="gold small" type="submit">Enviar</button></form>`;box.innerHTML=comments+form;
   }catch(e){box.innerHTML=`<div class="comments-loading">${escapeHtml(e.message)}</div>`}
 }
 async function loadSchedule(){
@@ -366,7 +367,7 @@ async function openPublicEvent(id){
   try{
     const d=await api(`/api/events/${id}`),e=d.event;
     const actions=(d.actions||[]).map(a=>`<div class="event-action-public"><div><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.description||"")}</small></div><span>${a.points} pts</span></div>`).join("")||`<p style="font-size:10px;color:#888">Nenhuma ação cadastrada.</p>`;
-    const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`;
+    const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA" && state.me?.account_type!=="ALLY"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`;
     wrap.innerHTML=`<div class="event-public-detail">
       <button class="journal-close" id="closeEventReader">×</button>
       <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span></div>
@@ -848,7 +849,19 @@ function renderPlayerCards(cards){
       </div>
     </section>`).join("");
 }
+async function loadAllyCards(){
+  try{
+    const d=await api("/api/me/ally-cards");
+    state.playerCards=d.cards||[];
+    renderPlayerCardFilters(state.playerCards);
+    renderPlayerCards(state.playerCards);
+    const summary=qs("#playerCardsSummary"); if(summary)summary.textContent=`${state.playerCards.length} cards no inventário de aliado`;
+    const sub=qs("#cards .subhero p"); if(sub)sub.textContent="Consulte os Cards concedidos a esta conta de aliado.";
+  }catch(e){const grid=qs("#playerCardsGrid");if(grid)grid.innerHTML=`<div class="cards-empty">${escapeHtml(e.message)}</div>`;}
+}
+
 async function loadPlayerCards(){
+  if(state.me?.account_type==="ALLY") return loadAllyCards();
   try{
     const d=await api("/api/me/cards");
     state.playerCards=d.cards||[];
@@ -904,6 +917,7 @@ function dashboardDateLabel(v){
 function dashboardTimeLabel(v){return v?String(v).slice(0,5):"";}
 function renderDashboard(){
   if(!state.me)return go("login");
+  if(state.me.account_type==="ALLY") return renderAllyDashboard();
   const d=state.dashboardData||{};
   const p=d.player||state.me,c=d.cards||{},r=d.rankings||{};
   qs("#dashName").textContent=`Bem-vindo, ${displayPlayerName(p)}.`;
@@ -940,13 +954,50 @@ function renderDashboard(){
   loadPlayerYuls();loadPlayerMissions();loadPlayerAlerts();loadTodayStatus();
 }
 
+function renderAllyDashboard(){
+  const d=state.dashboardData||{}; const p=d.player||state.me, c=d.cards||{};
+  qs("#dashboardEyebrow").textContent="PAINEL DO ALIADO";
+  qs("#dashboardDescription").textContent="Acompanhe Spade em modo observador: conteúdo liberado, sem interações.";
+  const badge=qs("#allyModeBadge"); if(badge)badge.hidden=false;
+  qs("#dashName").textContent=`Bem-vindo, ${displayPlayerName(p)}.`;
+  const active=(d.activeEvents||[]).map(x=>`<article class="dashboard-live-item"><div><span class="tag">🎪 ${escapeHtml(x.event_type||"EVENTO")}</span><h4>${escapeHtml(x.title)}</h4><p>Encerramento: ${escapeHtml(dashboardDateLabel(x.end_date))}</p></div><button class="outline dark-outline small" type="button" data-dashboard-page="eventos">Ver evento</button></article>`).join("");
+  const upcoming=(d.upcoming||[]).map(x=>`<div class="dashboard-upcoming-item"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.activity_type||"ATIVIDADE")}</small></div><span>${escapeHtml(dashboardDateLabel(x.activity_date))}${x.start_time?` • ${escapeHtml(dashboardTimeLabel(x.start_time))}`:""}</span></div>`).join("");
+  qs("#dash").innerHTML=`
+    <div class="dashboard-hero-grid">
+      <section class="dash-main dashboard-profile-card ally-profile-card">
+        <div class="dash-ident"><div class="avatar">🤝</div><div><h2>${escapeHtml(displayPlayerName(p))}</h2><p>${escapeHtml(p.origin_kingdom||"Reino aliado não informado")} • ${escapeHtml(p.origin_house||"Casa não informada")}</p></div></div>
+        <div class="dashboard-profile-tags"><span>🤝 Aliado Oculto</span><span>👁️ Somente leitura</span>${p.patent?`<span>🎖️ ${escapeHtml(p.patent)}</span>`:""}${p.role?`<span>💼 ${escapeHtml(p.role)}</span>`:""}</div>
+        <div class="profile-lines"><div><small>CARDS</small><b>${money(c.count)}</b></div><div><small>PODER DOS CARDS</small><b>${money(c.power)}</b></div></div>
+      </section>
+      <section class="dash-status dashboard-resource-card"><p class="eyebrow">ACESSO</p><div class="ally-access-copy"><b>Modo observador</b><p>Você pode acompanhar o Reino Spade, consultar seu inventário e ler o mural. Publicações e interações estão desabilitadas.</p></div></section>
+    </div>
+    <div class="dashboard-rank-grid">
+      <div class="dashboard-rank-card"><small>🃏 MEUS CARDS</small><strong>${money(c.count)}</strong><span>Cards em seu inventário</span></div>
+      <div class="dashboard-rank-card"><small>⚡ PODER DOS CARDS</small><strong>${money(c.power)}</strong><span>valor acumulado</span></div>
+      <div class="dashboard-rank-card"><small>🎪 EVENTOS ATIVOS</small><strong>${(d.activeEvents||[]).length}</strong><span>para acompanhar</span></div>
+      <div class="dashboard-rank-card"><small>📅 PRÓXIMAS ATIVIDADES</small><strong>${(d.upcoming||[]).length}</strong><span>no cronograma</span></div>
+    </div>
+    <section class="dashboard-live panel"><div class="panel-head"><div><p class="eyebrow">ACONTECENDO AGORA</p><h3>O Reino está em movimento</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Ver cronograma</button></div><div class="dashboard-live-list">${active||`<div class="dashboard-empty-state"><span>✦</span><div><b>Nenhum evento ativo agora.</b><p>Você pode acompanhar as próximas atividades no cronograma.</p></div></div>`}</div></section>
+    <div class="dashboard-two-col"><section class="panel"><div class="panel-head"><div><p class="eyebrow">PRÓXIMOS</p><h3>Agenda do Reino</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Tudo</button></div><div class="dashboard-upcoming-list">${upcoming||`<div class="dashboard-empty-state"><span>📅</span><div><b>Sem próximas atividades.</b><p>O calendário será atualizado pela Administração.</p></div></div>`}</div></section><section class="panel"><div class="panel-head"><div><p class="eyebrow">💬 COMUNIDADE</p><h3>Status de Spade</h3></div><button class="text-button" type="button" data-dashboard-page="status">Ver mural</button></div><div class="dashboard-empty-state"><span>👁️</span><div><b>Acompanhamento em modo observador.</b><p>Leia os Status e comentários sem publicar, reagir ou comentar.</p></div></div></section></div>`;
+  qsa('[data-dashboard-page]').forEach(b=>b.onclick=()=>go(b.dataset.dashboardPage));
+  loadAllyCards();
+}
+
 async function tryMe(){
   try{
     const d=await api("/api/me");state.me=d.player;setPlayerNav();
   }catch{}
 }
-function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";}
-function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";}
+function setViewerModeUI(){
+  const ally=state.me?.account_type==="ALLY";
+  [".player-yuls-section",".player-missions-section",".player-status-section",".player-sheet-section"].forEach(sel=>qsa(sel).forEach(el=>el.style.display=ally?"none":""));
+  const eyebrow=qs("#dashboardEyebrow"),desc=qs("#dashboardDescription");
+  if(ally){if(eyebrow)eyebrow.textContent="PAINEL DO ALIADO";if(desc)desc.textContent="Acompanhe Spade em modo observador: conteúdo liberado, sem interações.";}
+  const statusDesc=qs("#status .subhero p:last-child");
+  if(statusDesc)statusDesc.textContent=ally?"Acompanhe os Status do Reino. Aliados Ocultos possuem acesso somente para leitura.":"Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.";
+}
+function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";setViewerModeUI();}
+function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;setViewerModeUI();}
 
 qs("#loginForm").addEventListener("submit",async e=>{
   e.preventDefault();const err=qs("#loginError");err.textContent="";
@@ -997,7 +1048,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1345,6 +1396,33 @@ qsa('[data-settings-add]')?.forEach(btn=>btn.addEventListener('click',()=>{
 document.addEventListener('click',e=>{const b=e.target.closest('[data-settings-remove]');if(!b)return;const key=b.dataset.settingsRemove;const value=b.dataset.settingsValue;const current=Array.isArray(state.portalSettings?.[key])?state.portalSettings[key].slice():[];if(current.length<=1){alert('A configuração precisa manter pelo menos um item.');return;}if(!confirm(`Remover "${value}" da configuração?`))return;updatePortalSetting(key,current.filter(x=>x!==value));});
 qs('#portalIdentityForm')?.addEventListener('submit',async e=>{e.preventDefault();const values={kingdom_name:qs('#settingKingdomName').value,kingdom_motto:qs('#settingKingdomMotto').value,timezone:qs('#settingTimezone').value,footer_text:qs('#settingFooter').value};for(const [k,v] of Object.entries(values)){const ok=await updatePortalSetting(k,v);if(!ok)return;}alert('Identidade do Reino atualizada.');});
 
+async function loadAdminAllies(){
+  const list=qs("#adminAllyList");if(!list)return;
+  try{
+    const d=await adminApi("/api/admin/allies"); state.allies=d.allies||[];
+    list.innerHTML=state.allies.map(a=>`<div class="admin-user-row"><div><b>🤝 ${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)} • ${escapeHtml(a.origin_kingdom||"Reino não informado")}${a.origin_house?` • ${escapeHtml(a.origin_house)}`:""} • ${a.active?"Ativo":"Suspenso"} • ${a.card_count||0} Cards${a.last_login?` • último acesso ${escapeHtml(new Date(a.last_login).toLocaleString("pt-BR"))}`:""}</small></div><div class="admin-user-actions"><button type="button" class="outline small" data-ally-cards="${a.id}">Cards</button><button type="button" class="outline small" data-ally-edit="${a.id}">Editar</button><button type="button" class="outline small ${a.active?"danger":""}" data-ally-toggle="${a.id}" data-ally-active="${a.active?0:1}">${a.active?"Suspender":"Reativar"}</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum Aliado Oculto cadastrado.</div>`;
+    qsa("[data-ally-edit]").forEach(b=>b.onclick=()=>editAdminAlly(Number(b.dataset.allyEdit)));
+    qsa("[data-ally-toggle]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/allies/${b.dataset.allyToggle}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:Number(b.dataset.allyActive)===1})});await loadAdminAllies();}catch(e){alert(e.message)}});
+    qsa("[data-ally-cards]").forEach(b=>b.onclick=()=>openAllyCardManager(Number(b.dataset.allyCards)));
+  }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
+}
+function clearAdminAllyForm(){const f=qs("#adminAllyForm");if(f)f.reset();qs("#adminAllyId").value="";qs("#adminAllyActive").checked=true;qs("#adminAllyPassword").required=true;qs("#adminAllyError").textContent="";}
+function editAdminAlly(id){const a=(state.allies||[]).find(x=>Number(x.id)===id);if(!a)return;qs("#adminAllyId").value=a.id;qs("#adminAllyUsername").value=a.username||"";qs("#adminAllyDisplayName").value=a.display_name||"";qs("#adminAllyPassword").value="";qs("#adminAllyPassword").required=false;qs("#adminAllyKingdom").value=a.origin_kingdom||"";qs("#adminAllyHouse").value=a.origin_house||"";qs("#adminAllyPatent").value=a.patent||"";qs("#adminAllyRole").value=a.role||"";qs("#adminAllyDescription").value=a.description||"";qs("#adminAllyActive").checked=Number(a.active)===1;qs("#adminAllyError").textContent="Editando aliado.";qs("#adminAlliesPanel")?.scrollIntoView({behavior:"smooth",block:"center"});}
+async function openAllyCardManager(id){
+  state.selectedAllyId=id; const a=(state.allies||[]).find(x=>Number(x.id)===id);
+  qs("#allyCardManager").hidden=false; qs("#allyCardManagerTitle").textContent=`Cards de ${a?.display_name||"Aliado"}`;
+  try{
+    const [cards,cat]=await Promise.all([adminApi(`/api/admin/allies/${id}/cards`),adminApi("/api/admin/cards")]);
+    state.allyCards=cards.cards||[]; const all=cat.cards||[]; const sel=qs("#allyCardSelect"); if(sel)sel.innerHTML='<option value="">Selecionar Card...</option>'+all.filter(c=>Number(c.active??1)!==0).map(c=>`<option value="${c.id}">${escapeHtml(c.name_pt||c.name)}${c.name_jp?` • ${escapeHtml(c.name_jp)}`:""}</option>`).join("");
+    renderAllyAdminCards();
+  }catch(e){qs("#allyCardList").innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
+}
+function renderAllyAdminCards(){const el=qs("#allyCardList");if(!el)return;el.innerHTML=(state.allyCards||[]).map(c=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>🃏 ${escapeHtml(c.name_pt||c.name)}</b><small>${escapeHtml(c.category||"Outros")} • ⚡ ${Number(c.power_value||0)} • ${escapeHtml(c.acquisition_name||"Administrativo")}</small></div><div class="editorial-actions"><button type="button" class="delete" data-ally-card-remove="${c.id}">×</button></div></div></div>`).join("")||`<div class="admin-history-empty">Este aliado ainda não possui Cards.</div>`;qsa("[data-ally-card-remove]").forEach(b=>b.onclick=async()=>{if(!confirm("Remover este Card do aliado?"))return;try{await adminApi(`/api/admin/allies/${state.selectedAllyId}/cards/${b.dataset.allyCardRemove}`,{method:"DELETE"});await openAllyCardManager(state.selectedAllyId);await loadAdminAllies();}catch(e){alert(e.message)}});}
+qs("#closeAllyCardManager")?.addEventListener("click",()=>{qs("#allyCardManager").hidden=true;state.selectedAllyId=null;});
+qs("#grantAllyCardBtn")?.addEventListener("click",async()=>{const id=state.selectedAllyId,card=Number(qs("#allyCardSelect")?.value||0);if(!id||!card)return alert("Selecione um Card.");try{await adminApi(`/api/admin/allies/${id}/cards`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_id:card,acquisition_name:qs("#allyCardAcquisition")?.value||"Concessão administrativa"})});qs("#allyCardSelect").value="";qs("#allyCardAcquisition").value="";await openAllyCardManager(id);await loadAdminAllies();}catch(e){alert(e.message)}});
+qs("#adminAllyClear")?.addEventListener("click",clearAdminAllyForm);
+qs("#adminAllyForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminAllyId").value;const body={username:qs("#adminAllyUsername").value,display_name:qs("#adminAllyDisplayName").value,password:qs("#adminAllyPassword").value,origin_kingdom:qs("#adminAllyKingdom").value,origin_house:qs("#adminAllyHouse").value,patent:qs("#adminAllyPatent").value,role:qs("#adminAllyRole").value,description:qs("#adminAllyDescription").value,active:qs("#adminAllyActive").checked};const err=qs("#adminAllyError");err.textContent="Salvando...";try{await adminApi(id?`/api/admin/allies/${id}`:"/api/admin/allies",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminAllyForm();await loadAdminAllies();err.textContent="Aliado salvo.";}catch(ex){err.textContent=ex.message;}});
+
 async function initAdmin(){
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
@@ -1365,6 +1443,7 @@ async function initAdmin(){
     if(hasAdminPermission("journal")) await loadAdminEditorial();
     if(hasAdminPermission("library")) await loadAdminLibrary();
     if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
+    if(hasAdminPermission("allies")) await loadAdminAllies();
     if(hasAdminPermission("audit")) await loadAdminAudit();
   }catch(e){console.error(e)}
 }
