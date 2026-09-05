@@ -199,7 +199,7 @@ function readAllyToken(req) {
 async function resolveAlly(req) {
   const tokenId = readAllyToken(req);
   if (!tokenId) return null;
-  const r = await pool.query(`SELECT id,username,display_name,origin_kingdom,origin_house,base_hp,base_mana,base_status,patent,role,description,active FROM ally_accounts WHERE id=$1 AND active=1 LIMIT 1`, [tokenId]);
+  const r = await pool.query(`SELECT id,username,display_name,origin_kingdom,origin_house,patent,role,description,active FROM ally_accounts WHERE id=$1 AND active=1 LIMIT 1`, [tokenId]);
   return r.rows[0] || null;
 }
 
@@ -536,9 +536,6 @@ async function initDatabase() {
       display_name TEXT NOT NULL,
       origin_kingdom TEXT DEFAULT '',
       origin_house TEXT DEFAULT '',
-      base_hp INTEGER DEFAULT 0 CHECK (base_hp >= 0),
-      base_mana INTEGER DEFAULT 0 CHECK (base_mana >= 0),
-      base_status TEXT DEFAULT '',
       patent TEXT DEFAULT '',
       role TEXT DEFAULT '',
       description TEXT DEFAULT '',
@@ -1006,9 +1003,6 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_schedule_event ON schedule_activities(event_id);
     ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS mission_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL;
     CREATE INDEX IF NOT EXISTS idx_schedule_mission ON schedule_activities(mission_id);
-    ALTER TABLE ally_accounts ADD COLUMN IF NOT EXISTS base_hp INTEGER DEFAULT 0;
-    ALTER TABLE ally_accounts ADD COLUMN IF NOT EXISTS base_mana INTEGER DEFAULT 0;
-    ALTER TABLE ally_accounts ADD COLUMN IF NOT EXISTS base_status TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_ally_accounts_username ON ally_accounts(lower(username));
     CREATE INDEX IF NOT EXISTS idx_ally_cards_ally ON ally_cards(ally_id,card_id);
 
@@ -1503,7 +1497,7 @@ app.post("/api/login", async (req, res) => {
       httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 1000 * 60 * 60 * 24 * 7
     });
     res.clearCookie("spade_player");
-    return res.json({ player: { id:Number(ally.id), nick:ally.display_name, identifier:ally.username, house:ally.origin_house||"", patent:ally.patent||"", role:ally.role||"", grimoire:"", hp:Number(ally.base_hp||0), mana:Number(ally.base_mana||0), base_hp:Number(ally.base_hp||0), base_mana:Number(ally.base_mana||0), base_status:ally.base_status||"", yuls:0, missions:0, achievements:0, ranking:0, power:0, active:1, exp:0, roles:[], account_type:"ALLY", read_only:true, origin_kingdom:ally.origin_kingdom||"", origin_house:ally.origin_house||"" } });
+    return res.json({ player: { id:Number(ally.id), nick:ally.display_name, identifier:ally.username, house:ally.origin_house||"", patent:ally.patent||"", role:ally.role||"", grimoire:"", hp:0, mana:0, yuls:0, missions:0, achievements:0, ranking:0, power:0, active:1, exp:0, roles:[], account_type:"ALLY", read_only:true, origin_kingdom:ally.origin_kingdom||"", origin_house:ally.origin_house||"" } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao realizar login." });
@@ -3715,7 +3709,7 @@ app.post("/api/admin/allies", requireAdmin, async (req,res)=>{
     const collision=await pool.query(`SELECT 1 FROM players WHERE lower(nick)=lower($1) OR lower(identifier)=lower($1) LIMIT 1`,[username]);
     if(collision.rows[0])return res.status(400).json({error:"Esse usuário já está reservado por um jogador de Spade."});
     const hash=await bcrypt.hash(password,12);
-    const r=await pool.query(`INSERT INTO ally_accounts(username,password_hash,display_name,origin_kingdom,origin_house,base_hp,base_mana,base_status,patent,role,description,active,hidden) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,1) RETURNING *`,[username,hash,displayName,String(b.origin_kingdom||""),String(b.origin_house||""),Math.max(0,Number(b.base_hp||0)),Math.max(0,Number(b.base_mana||0)),String(b.base_status||""),String(b.patent||""),String(b.role||""),String(b.description||"")]);
+    const r=await pool.query(`INSERT INTO ally_accounts(username,password_hash,display_name,origin_kingdom,origin_house,patent,role,description,active,hidden) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,1) RETURNING *`,[username,hash,displayName,String(b.origin_kingdom||""),String(b.origin_house||""),String(b.patent||""),String(b.role||""),String(b.description||"")]);
     res.json({ally:{...r.rows[0],id:Number(r.rows[0].id),active:1,hidden:1}});
   }catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:"Esse usuário de aliado já existe."});res.status(500).json({error:"Erro ao criar Aliado Oculto."});}
 });
@@ -3730,7 +3724,7 @@ app.put("/api/admin/allies/:id", requireAdmin, async (req,res)=>{
     const collision=await pool.query(`SELECT 1 FROM players WHERE (lower(nick)=lower($1) OR lower(identifier)=lower($1)) AND id<>$2 LIMIT 1`,[username,0]);
     if(collision.rows[0])return res.status(400).json({error:"Esse usuário já está reservado por um jogador de Spade."});
     let hash=a.password_hash; if(String(b.password||"")){if(String(b.password).length<6)return res.status(400).json({error:"A nova senha precisa ter pelo menos 6 caracteres."});hash=await bcrypt.hash(String(b.password),12);}
-    const r=await pool.query(`UPDATE ally_accounts SET username=$1,password_hash=$2,display_name=$3,origin_kingdom=$4,origin_house=$5,base_hp=$6,base_mana=$7,base_status=$8,patent=$9,role=$10,description=$11,active=$12,hidden=1,updated_at=NOW() WHERE id=$13 RETURNING *`,[username,hash,displayName,String(b.origin_kingdom??a.origin_kingdom??""),String(b.origin_house??a.origin_house??""),Math.max(0,Number(b.base_hp??a.base_hp??0)),Math.max(0,Number(b.base_mana??a.base_mana??0)),String(b.base_status??a.base_status??""),String(b.patent??a.patent??""),String(b.role??a.role??""),String(b.description??a.description??""),Number(b.active??a.active)?1:0,id]);
+    const r=await pool.query(`UPDATE ally_accounts SET username=$1,password_hash=$2,display_name=$3,origin_kingdom=$4,origin_house=$5,patent=$6,role=$7,description=$8,active=$9,hidden=1,updated_at=NOW() WHERE id=$10 RETURNING *`,[username,hash,displayName,String(b.origin_kingdom??a.origin_kingdom??""),String(b.origin_house??a.origin_house??""),String(b.patent??a.patent??""),String(b.role??a.role??""),String(b.description??a.description??""),Number(b.active??a.active)?1:0,id]);
     res.json({ally:{...r.rows[0],id:Number(r.rows[0].id),active:Number(r.rows[0].active),hidden:1}});
   }catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:"Esse usuário de aliado já existe."});res.status(500).json({error:"Erro ao atualizar Aliado Oculto."});}
 });
