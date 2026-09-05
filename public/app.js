@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -1100,6 +1100,7 @@ function renderAdminList(players,term){
     if(f.house&&String(p.house||"")!==String(f.house))return false;
     if(f.patent&&String(p.patent||"")!==String(f.patent))return false;
     if(f.visibility!==""&&String(Number(p.public_profile))!==String(f.visibility))return false;
+    if(f.status!==""&&String(Number(p.active ?? 1))!==String(f.status))return false;
     if(f.role&&!((p.roles||[]).map(r=>String(r.id)).includes(String(f.role))))return false;
     return true;
   });
@@ -1118,7 +1119,7 @@ function renderAdminList(players,term){
   qs("#adminPlayerList").innerHTML=filtered.length
     ? filtered.map(p=>`<button class="admin-player ${state.selectedPlayer?.id===p.id?"selected":""}" data-player-id="${p.id}" type="button">
         <span class="player-select-wrap" data-stop-row-click><input class="player-select" type="checkbox" data-player-check="${p.id}" ${state.selectedPlayers.has(Number(p.id))?"checked":""}></span>
-        <span><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent||"Sem patente")} · ${(p.roles||[]).map(r=>escapeHtml(r.name)).join(", ")||"sem cargos"} · ${p.has_password?"🔐 senha definida":"⚠️ sem senha"}</small></span>
+        <span><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent||"Sem patente")} · ${(p.roles||[]).map(r=>escapeHtml(r.name)).join(", ")||"sem cargos"} · ${p.has_password?"🔐 senha definida":"⚠️ sem senha"} · ${Number(p.active??1)?"🟢 ativo":"⛔ suspenso"}</small></span>
         <span class="player-yuls">🪙 ${money(p.yuls)}</span>
       </button>`).join("")
     : `<div style="padding:30px;text-align:center;color:#888;font-size:11px">Nenhum jogador encontrado.</div>`;
@@ -1143,7 +1144,7 @@ function populateAdminFilters(){
   if(h)h.innerHTML=`<option value="">Todas as Casas</option>`+houses.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
   if(p)p.innerHTML=`<option value="">Todas as Patentes</option>`+patents.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
   if(r)r.innerHTML=`<option value="">Todos os Cargos</option>`+roleList.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
-  if(h)h.value=state.adminFilters.house||""; if(p)p.value=state.adminFilters.patent||""; if(r)r.value=state.adminFilters.role||"";
+  if(h)h.value=state.adminFilters.house||""; if(p)p.value=state.adminFilters.patent||""; if(r)r.value=state.adminFilters.role||""; const st=qs("#adminStatusFilter"); if(st)st.value=state.adminFilters.status||"";
 }
 
 function updateBulkCount(){
@@ -1170,6 +1171,7 @@ function openBulkModal(type){
   if(type==="missions")title="📋 Ajustar Missões",body=`<div class="bulk-modal-grid"><select id="bulkMissionMode"><option value="add">Adicionar missões</option><option value="set">Definir quantidade</option></select><input id="bulkMissionAmount" type="number" min="0" placeholder="Quantidade"></div>`;
   if(type==="power")title="⚔️ Definir Força",body=`<div class="bulk-modal-grid"><input id="bulkPowerAmount" type="number" min="0" placeholder="Novo valor de força"></div>`;
   if(type==="visibility")title="👁️ Visibilidade",body=`<div class="bulk-modal-grid"><select id="bulkVisibility"><option value="1">Tornar público</option><option value="0">Ocultar perfil</option></select></div>`;
+  if(type==="status")title="🔐 Acesso ao Portal",body=`<div class="bulk-modal-grid"><select id="bulkActive"><option value="1">🟢 Ativar acesso</option><option value="0">⛔ Suspender acesso</option></select></div><p class="bulk-card-help">Suspender preserva o cadastro, Cards, economia, missões e histórico.</p>`;
 
   const modal=document.createElement("div");
   modal.className="bulk-modal-backdrop";modal.id="bulkModal";
@@ -1204,6 +1206,7 @@ async function submitBulkAction(type,ids,modal){
   if(type==="missions"){action=qs("#bulkMissionMode").value==="add"?"add_missions":"set_missions";payload.amount=Math.round(Number(qs("#bulkMissionAmount").value||0))}
   if(type==="power"){action="set_power";payload.amount=Math.round(Number(qs("#bulkPowerAmount").value||0))}
   if(type==="visibility"){action="set_public";payload.public_profile=Number(qs("#bulkVisibility").value)}
+  if(type==="status"){action="set_active";payload.active=Number(qs("#bulkActive").value)}
 
   try{
     await adminApi("/api/admin/players/bulk",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,...payload})});
@@ -1239,6 +1242,7 @@ function renderOverviewPanel(p){
   <div class="admin-status-line">
     <span class="admin-status-pill ${p.public_profile?"ok":"off"}">${p.public_profile?"● Perfil público":"● Perfil oculto"}</span>
     <span class="admin-status-pill ${p.has_password?"ok":"warn"}">${p.has_password?"🔐 Senha definida":"⚠️ Sem senha"}</span>
+    <span class="admin-status-pill ${Number(p.active??1)?"ok":"off"}">${Number(p.active??1)?"🟢 Acesso ativo":"⛔ Acesso suspenso"}</span>
     <span class="admin-status-pill">${escapeHtml(p.house||"Sem Casa")}</span>
     <span class="admin-status-pill">${escapeHtml(p.patent||"Sem patente")}</span>
   </div>
@@ -1258,8 +1262,9 @@ function renderOverviewPanel(p){
     ${field("🏆 Conquistas","achievements",p.achievements,"number")}
     ${field("Ranking","ranking",p.ranking,"number")}
     ${field("⚔️ Força","power",p.power,"number")}
+    <div class="field full"><label>Acesso ao Portal</label><select name="active"><option value="1" ${Number(p.active??1)?"selected":""}>Ativo — pode entrar</option><option value="0" ${!Number(p.active??1)?"selected":""}>Suspenso — sem acesso</option></select></div>
     <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
-  </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">Excluir jogador</button></div><div class="error" id="editError"></div></form>`;
+  </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">${Number(p.active??1)?"Suspender acesso":"Reativar acesso"}</button></div><div class="error" id="editError"></div></form>`;
 }
 
 function renderEconomyPanel(p){
@@ -1483,11 +1488,14 @@ async function deleteMission(missionId){
 
 async function deleteSelectedPlayer(){
   if(!state.selectedPlayer)return;
-  if(!confirm(`Excluir ${displayPlayerName(state.selectedPlayer)}? Esta ação não pode ser desfeita.`))return;
+  const active=Number(state.selectedPlayer.active??1);
+  const next=active?0:1;
+  const action=next?"reativar":"suspender";
+  if(!confirm(`Deseja ${action} o acesso de ${displayPlayerName(state.selectedPlayer)}? O cadastro e o histórico serão preservados.`))return;
   try{
-    await adminApi(`/api/admin/players/${state.selectedPlayer.id}`,{method:"DELETE"});
-    state.selectedPlayer=null;await initAdmin();
-    qs("#adminEditor").innerHTML=`<div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">JOGADOR EXCLUÍDO</p><h3>Selecione outro jogador</h3><p>O cadastro foi removido do banco.</p></div>`;
+    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:next})});
+    await initAdmin(); await selectAdminPlayer(state.selectedPlayer.id);
+    alert(next?"Acesso reativado.":"Acesso suspenso.");
   }catch(ex){alert(ex.message)}
 }
 
@@ -1507,13 +1515,14 @@ function openNewPlayer(){
 }
 
 qs("#adminSearch").addEventListener("input",e=>renderAdminList(state.players,e.target.value));
-["adminHouseFilter","adminPatentFilter","adminRoleFilter","adminVisibilityFilter","adminSort"].forEach(id=>{
+["adminHouseFilter","adminPatentFilter","adminRoleFilter","adminVisibilityFilter","adminStatusFilter","adminSort"].forEach(id=>{
   const el=qs("#"+id);if(!el)return;
   el.onchange=()=>{
     if(id==="adminHouseFilter")state.adminFilters.house=el.value;
     if(id==="adminPatentFilter")state.adminFilters.patent=el.value;
     if(id==="adminRoleFilter")state.adminFilters.role=el.value;
     if(id==="adminVisibilityFilter")state.adminFilters.visibility=el.value;
+    if(id==="adminStatusFilter")state.adminFilters.status=el.value;
     if(id==="adminSort")state.adminFilters.sort=el.value;
     renderAdminList(state.players,qs("#adminSearch").value);
   };
