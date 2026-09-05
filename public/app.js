@@ -997,7 +997,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],audit:["#adminAuditPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1286,12 +1286,72 @@ async function loadAdminAudit(){
     list.innerHTML=state.adminAudit.map(x=>{const st=auditStatusLabel(x.status_code);return `<article class="audit-row"><div class="audit-icon">${auditSourceIcon(x.source)}</div><div class="audit-main"><div class="audit-top"><b>${escapeHtml(auditHumanAction(x))}</b><span class="audit-status ${st.cls}">${st.label}</span></div><small>${escapeHtml(x.actor||'Administração')} • ${escapeHtml(String(x.entity||'sistema'))}${x.entity_id?` #${escapeHtml(String(x.entity_id))}`:''} • ${escapeHtml(formatAuditDate(x.created_at))}</small>${x.detail?`<p>${escapeHtml(String(x.detail))}</p>`:''}</div></article>`}).join('')||`<div class="admin-history-empty">Nenhum registro encontrado para esses filtros.</div>`;
   }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;const sum=qs('#adminAuditSummary');if(sum)sum.innerHTML='';}
 }
+
+function settingRowsToMap(rows){
+  const out={};(rows||[]).forEach(x=>out[x.key]=x.value);return out;
+}
+function prettyEventType(v){return ({JOGO:'🎮 Evento de Jogo',ESPECIAL:'🃏 Evento Especial',TEMPORADA:'🎫 Evento de Temporada',LEGIAO:'⚔️ Evento de Legião'}[v]||v)}
+function renderSettingsChips(targetId,key,items){
+  const el=qs('#'+targetId);if(!el)return;
+  el.innerHTML=(items||[]).map(v=>`<span class="settings-chip"><span>${escapeHtml(key==='event_types'?prettyEventType(v):v)}</span><button type="button" title="Remover" data-settings-remove="${escapeHtml(key)}" data-settings-value="${escapeHtml(v)}">×</button></span>`).join('')||`<span class="admin-history-empty">Nenhum item cadastrado.</span>`;
+}
+function applyPortalSettingsToForms(cfg){
+  const missions=cfg.mission_types||[];
+  const events=cfg.event_types||[];
+  const origins=cfg.card_origins||[];
+  const missionSel=qs('#adminMissionType');
+  if(missionSel){const current=missionSel.value;missionSel.innerHTML=missions.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');if(missions.includes(current))missionSel.value=current;else if(missions[0])missionSel.value=missions[0];}
+  const eventSel=qs('#eventType');
+  if(eventSel){const current=eventSel.value;eventSel.innerHTML=events.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(prettyEventType(v))}</option>`).join('');if(events.includes(current))eventSel.value=current;else if(events[0])eventSel.value=events[0];}
+  state.cardOrigins=origins; if(typeof populateCardSelects==='function')populateCardSelects();
+  if(qs('#settingKingdomName'))qs('#settingKingdomName').value=cfg.kingdom_name||'';
+  if(qs('#settingKingdomMotto'))qs('#settingKingdomMotto').value=cfg.kingdom_motto||'';
+  if(qs('#settingTimezone'))qs('#settingTimezone').value=cfg.timezone||'America/Sao_Paulo';
+  if(qs('#settingFooter'))qs('#settingFooter').value=cfg.footer_text||'';
+}
+async function loadAdminSettings(){
+  const err=qs('#settingsGlobalError');if(err)err.textContent='';
+  try{
+    const d=await adminApi('/api/admin/settings');
+    const cfg=settingRowsToMap(d.settings||[]);state.portalSettings=cfg;applyPortalSettingsToForms(cfg);
+    renderSettingsChips('settingsMissionTypes','mission_types',cfg.mission_types||[]);
+    renderSettingsChips('settingsEventTypes','event_types',cfg.event_types||[]);
+    renderSettingsChips('settingsCardOrigins','card_origins',cfg.card_origins||[]);
+    renderSettingsChips('settingsCardElements','card_elements',cfg.card_elements||[]);
+  }catch(e){if(err)err.textContent=e.message;}
+}
+async function updatePortalSetting(key,value){
+  try{
+    const d=await adminApi(`/api/admin/settings/${encodeURIComponent(key)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value})});
+    state.portalSettings=state.portalSettings||{};state.portalSettings[key]=d.value;applyPortalSettingsToForms(state.portalSettings);
+    renderSettingsChips('settingsMissionTypes','mission_types',state.portalSettings.mission_types||[]);
+    renderSettingsChips('settingsEventTypes','event_types',state.portalSettings.event_types||[]);
+    renderSettingsChips('settingsCardOrigins','card_origins',state.portalSettings.card_origins||[]);
+    renderSettingsChips('settingsCardElements','card_elements',state.portalSettings.card_elements||[]);
+    await loadAdminSettings();
+    return true;
+  }catch(e){const err=qs('#settingsGlobalError');if(err)err.textContent=e.message;else alert(e.message);return false;}
+}
+function addConfiguredValue(key,inputId){
+  const input=qs('#'+inputId);const value=(input?.value||'').trim();if(!value)return;
+  const current=Array.isArray(state.portalSettings?.[key])?state.portalSettings[key].slice():[];
+  const normalized=key==='event_types'?value.toUpperCase():value;
+  if(current.some(x=>String(x).toLowerCase()===normalized.toLowerCase())){alert('Esse item já existe.');return;}
+  current.push(normalized);updatePortalSetting(key,current).then(ok=>{if(ok)input.value='';});
+}
+qsa('[data-settings-add]')?.forEach(btn=>btn.addEventListener('click',()=>{
+  const key=btn.dataset.settingsAdd;const inputId={mission_types:'newMissionType',event_types:'newEventType',card_origins:'newCardOrigin',card_elements:'newCardElement'}[key];if(inputId)addConfiguredValue(key,inputId);
+}));
+document.addEventListener('click',e=>{const b=e.target.closest('[data-settings-remove]');if(!b)return;const key=b.dataset.settingsRemove;const value=b.dataset.settingsValue;const current=Array.isArray(state.portalSettings?.[key])?state.portalSettings[key].slice():[];if(current.length<=1){alert('A configuração precisa manter pelo menos um item.');return;}if(!confirm(`Remover "${value}" da configuração?`))return;updatePortalSetting(key,current.filter(x=>x!==value));});
+qs('#portalIdentityForm')?.addEventListener('submit',async e=>{e.preventDefault();const values={kingdom_name:qs('#settingKingdomName').value,kingdom_motto:qs('#settingKingdomMotto').value,timezone:qs('#settingTimezone').value,footer_text:qs('#settingFooter').value};for(const [k,v] of Object.entries(values)){const ok=await updatePortalSetting(k,v);if(!ok)return;}alert('Identidade do Reino atualizada.');});
+
 async function initAdmin(){
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
   setAdminPermissionVisibility();
   try{
     if(hasAdminPermission("dashboard")){ const ov=await adminApi("/api/admin/overview"); renderAdminStats(ov); }
+    if(hasAdminPermission("settings")) await loadAdminSettings();
     if(hasAdminPermission("reports")) await loadAdminReports();
     if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
     if(hasAdminPermission("cards")) await loadAdminCards();
@@ -2409,7 +2469,7 @@ async function tryAdminHash(){
   if(state.admin) go("admin"); else go("admin-login");
 }
 
-initGlobalSearch();loadHome();tryMe();setAdminNav();tryAdminHash();
+loadPortalPublicSettings();initGlobalSearch();loadHome();tryMe();setAdminNav();tryAdminHash();
 
 
 function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
