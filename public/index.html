@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<a class="skip-link" href="#mainContent">Pular para o conteúdo</a>
 <div id="app">
 <header class="top">
   <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
@@ -23,7 +24,7 @@
     <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
-<main>
+<main id="mainContent" tabindex="-1">
 <section class="page active" id="home">
   <div class="hero"><div><p class="eyebrow">PORTAL OFICIAL DO REINO SPADE</p><h1>A história do RPG<br><em>vive aqui.</em></h1><p class="lead">Jornal, jogadores, Casas, rankings e os grandes acontecimentos do Reino em um só lugar.</p><div class="actions"><button class="gold" data-page="jornal">Ler o jornal</button><button class="outline" data-page="login">Entrar como jogador</button></div></div><div class="seal">♠<small>REINO SPADE<br>PORTAL OFICIAL</small></div></div>
   <div class="content"><div id="homeActiveActivities"></div><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
@@ -818,9 +819,6 @@
         <input id="adminAllyPassword" type="password" minlength="6" placeholder="Senha (mínimo 6 caracteres)">
         <input id="adminAllyKingdom" placeholder="Reino de origem">
         <input id="adminAllyHouse" placeholder="Casa de origem">
-        <input id="adminAllyBaseHp" type="number" min="0" placeholder="Vida Base">
-        <input id="adminAllyBaseMana" type="number" min="0" placeholder="Mana Base">
-        <input id="adminAllyBaseStatus" placeholder="Status Base (ex.: Em atividade, Guardião, Observador)">
         <input id="adminAllyPatent" placeholder="Patente (opcional)">
         <input id="adminAllyRole" placeholder="Cargo/função (opcional)">
         <textarea id="adminAllyDescription" class="full" placeholder="Descrição / observação administrativa"></textarea>
@@ -858,6 +856,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=50.0"></script>
+<script src="/app.js?v=51.0"></script>
 </body>
 </html>
