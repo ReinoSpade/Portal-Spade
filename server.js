@@ -133,6 +133,7 @@ function publicPlayer(row) {
     achievements: Number(row.achievements || 0),
     ranking: Number(row.ranking || 0),
     power: Number(row.power || 0),
+    active: Number(row.active ?? 1),
     exp: Number(row.exp || 0),
     roles: row.roles || []
   };
@@ -202,6 +203,7 @@ async function initDatabase() {
       ranking INTEGER DEFAULT 0 CHECK (ranking >= 0),
       power INTEGER DEFAULT 0 CHECK (power >= 0),
       public_profile INTEGER DEFAULT 1 CHECK (public_profile IN (0,1)),
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -521,6 +523,7 @@ async function initDatabase() {
   // Add columns introduced in later versions to existing installations.
   await pool.query(`
     ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1 CHECK (active IN (0,1));
     ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
     ALTER TABLE news ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
     ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
@@ -982,7 +985,7 @@ app.post("/api/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT * FROM players WHERE (lower(nick)=lower($1) OR lower(identifier)=lower($1)) AND public_profile=1 LIMIT 1",
+      "SELECT * FROM players WHERE (lower(nick)=lower($1) OR lower(identifier)=lower($1)) AND public_profile=1 AND active=1 LIMIT 1",
       [identifier]
     );
     const player = result.rows[0];
@@ -1017,7 +1020,7 @@ app.get("/api/me", async (req, res) => {
   const id = readPlayerToken(req);
   if (!id) return res.status(401).json({ error: "Não autenticado." });
   try {
-    const result = await pool.query("SELECT * FROM players WHERE id=$1", [id]);
+    const result = await pool.query("SELECT * FROM players WHERE id=$1 AND active=1", [id]);
     const player = result.rows[0];
     if (!player) return res.status(401).json({ error: "Sessão inválida." });
     player.roles=await getPlayerRoles(id);
@@ -1739,7 +1742,7 @@ app.get("/api/players/:id", async (req, res) => {
         `SELECT id,nick,number,identifier,house,patent,role,grimoire,
                 hp,mana,yuls,missions,achievements,ranking,power,public_profile
          FROM players
-         WHERE id=$1 AND public_profile=1`,
+         WHERE id=$1 AND public_profile=1 AND active=1`,
         [id]
       ),
       pool.query(
@@ -1817,7 +1820,7 @@ app.get("/api/players", async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id,nick,number,identifier,house,patent,role,grimoire,missions,achievements,ranking,power,yuls
-       FROM players WHERE public_profile=1 ORDER BY nick COLLATE "C" ASC`
+       FROM players WHERE public_profile=1 AND active=1 ORDER BY nick COLLATE "C" ASC`
     );
     res.json({ players: result.rows.map(publicPlayer) });
   } catch (e) {
@@ -3240,6 +3243,7 @@ app.get("/api/admin/players", requireAdmin, async (req, res) => {
       ...publicPlayer(r),
       roles:r.roles||[],
       public_profile:Number(r.public_profile),
+      active:Number(r.active ?? 1),
       has_password:Boolean(r.password_hash),
       created_at:r.created_at,
       updated_at:r.updated_at
@@ -3258,7 +3262,7 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
   const action=String(b.action||"").trim();
 
   if(!ids.length)return res.status(400).json({error:"Selecione pelo menos um jogador."});
-  if(!["add_yuls","remove_yuls","set_house","set_patent","set_roles","set_missions","add_missions","set_power","set_public"].includes(action)){
+  if(!["add_yuls","remove_yuls","set_house","set_patent","set_roles","set_missions","add_missions","set_power","set_public","set_active"].includes(action)){
     return res.status(400).json({error:"Ação inválida."});
   }
   if(action==="set_roles"){
@@ -3355,6 +3359,11 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
       await client.query("UPDATE players SET public_profile=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[visible,ids]);
     }
 
+    if(action==="set_active"){
+      const active=Number(b.active)?1:0;
+      await client.query("UPDATE players SET active=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[active,ids]);
+    }
+
     const descriptions={
       add_yuls:"Yuls adicionados em massa pela administração.",
       remove_yuls:"Yuls retirados em massa pela administração.",
@@ -3364,7 +3373,8 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
       set_missions:"Missões ajustadas em massa pela administração.",
       add_missions:"Missões adicionadas em massa pela administração.",
       set_power:"Força ajustada em massa pela administração.",
-      set_public:Number(b.public_profile)?"Perfis tornados públicos em massa.":"Perfis ocultados em massa."
+      set_public:Number(b.public_profile)?"Perfis tornados públicos em massa.":"Perfis ocultados em massa.",
+      set_active:Number(b.active)?"Jogadores reativados em massa.":"Jogadores suspensos em massa."
     };
     await client.query(
       `INSERT INTO player_admin_history(player_id,action,description)
@@ -3937,8 +3947,8 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
       `UPDATE players
        SET nick=$1, number=$2, identifier=$3, password_hash=$4, house=$5, patent=$6, role=$7, grimoire=$8,
            hp=$9, mana=$10, yuls=$11, missions=$12, achievements=$13, ranking=$14,
-           power=$15, public_profile=$16, updated_at=NOW()
-       WHERE id=$17
+           power=$15, public_profile=$16, active=$17, updated_at=NOW()
+       WHERE id=$18
        RETURNING *`,
       [
         nick, number, `${nick}${number}`, passwordHash,
@@ -3954,6 +3964,7 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
         positiveInt(b.ranking, Number(current.ranking)),
         positiveInt(b.power, Number(current.power || 0)),
         Number(b.public_profile ?? current.public_profile) ? 1 : 0,
+        Number(b.active ?? current.active ?? 1) ? 1 : 0,
         id
       ]
     );
@@ -3984,6 +3995,7 @@ app.put("/api/admin/players/:id", requireAdmin, async (req, res) => {
     if(Number(current.ranking||0)!==positiveInt(b.ranking,Number(current.ranking))) changes.push(`Ranking: ${Number(current.ranking||0)} → ${positiveInt(b.ranking,Number(current.ranking))}`);
     if(Number(current.power||0)!==positiveInt(b.power,Number(current.power||0))) changes.push(`Força: ${Number(current.power||0)} → ${positiveInt(b.power,Number(current.power||0))}`);
     if(Number(current.public_profile)!==Number(b.public_profile ?? current.public_profile)) changes.push(`Perfil ${Number(b.public_profile ?? current.public_profile)?"publicado":"ocultado"}`);
+    if(Number(current.active ?? 1)!==Number(b.active ?? current.active ?? 1)) changes.push(`Acesso ${Number(b.active ?? current.active ?? 1)?"ativado":"suspenso"}`);
     if(String(b.password||"").length>0) changes.push("Senha alterada");
 
     if(changes.length){
@@ -4057,12 +4069,26 @@ app.delete("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   try {
-    await pool.query("DELETE FROM players WHERE id=$1", [id]);
-    res.json({ ok: true });
+    const result=await pool.query("UPDATE players SET active=0, updated_at=NOW() WHERE id=$1 RETURNING id", [id]);
+    if(!result.rows[0]) return res.status(404).json({error:"Jogador não encontrado."});
+    await pool.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'SUSPENSÃO','Acesso do jogador suspenso pela administração. O cadastro e o histórico foram preservados.')`,[id]);
+    res.json({ ok: true, archived: true });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Erro ao excluir jogador." });
+    res.status(500).json({ error: "Erro ao suspender jogador." });
   }
+});
+
+app.post("/api/admin/players/:id/status", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  const active=Number(req.body?.active)?1:0;
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Jogador inválido."});
+  try{
+    const result=await pool.query("UPDATE players SET active=$1,updated_at=NOW() WHERE id=$2 RETURNING *",[active,id]);
+    if(!result.rows[0])return res.status(404).json({error:"Jogador não encontrado."});
+    await pool.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,$2,$3)`,[id,active?"ATIVAÇÃO":"SUSPENSÃO",active?"Acesso do jogador reativado pela administração.":"Acesso do jogador suspenso pela administração."]);
+    res.json({ok:true,player:{...publicPlayer(result.rows[0]),active}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao alterar status do jogador."});}
 });
 
 app.post("/api/admin/news", requireAdmin, async (req, res) => {
