@@ -1,6 +1,6 @@
 {
   "name": "portal-spade-rpg",
-  "version": "52.0.1",
+  "version": "52.1.1",
   "private": true,
   "description": "Portal oficial do RPG - Reino Spade",
   "main": "server.js",
