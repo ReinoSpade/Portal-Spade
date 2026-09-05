@@ -52,6 +52,24 @@ function readPlayerToken(req) {
   return Number(id);
 }
 
+function makeAdminToken(adminId) {
+  const payload = `${adminId}.${Date.now()}`;
+  return `${payload}.${sign(payload)}`;
+}
+
+function readAdminToken(req) {
+  const token = req.cookies.spade_admin;
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [id, ts, sig] = parts;
+  const payload = `${id}.${ts}`;
+  if (sign(payload) !== sig) return null;
+  if (!Number.isFinite(Number(id)) || !Number.isFinite(Number(ts))) return null;
+  if (Date.now() - Number(ts) > 1000 * 60 * 60 * 24 * 7) return null;
+  return Number(id);
+}
+
 function publicPlayer(row) {
   if (!row) return null;
   return {
@@ -75,11 +93,28 @@ function publicPlayer(row) {
   };
 }
 
-function requireAdmin(req, res, next) {
-  if (req.header("x-admin-key") !== ADMIN_KEY) {
-    return res.status(401).json({ error: "Acesso administrativo negado." });
+async function resolveAdmin(req) {
+  const tokenId = readAdminToken(req);
+  if (tokenId) {
+    const r = await pool.query("SELECT id,username,display_name,active FROM admin_users WHERE id=$1 AND active=1 LIMIT 1", [tokenId]);
+    if (r.rows[0]) return r.rows[0];
   }
-  next();
+  if (req.header("x-admin-key") === ADMIN_KEY) {
+    return { id: 0, username: "master-key", display_name: "Chave principal", active: 1, legacy: true };
+  }
+  return null;
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const admin = await resolveAdmin(req);
+    if (!admin) return res.status(401).json({ error: "Acesso administrativo negado." });
+    req.admin = admin;
+    next();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Não foi possível validar o acesso administrativo." });
+  }
 }
 
 function positiveInt(v, fallback = 0) {
@@ -114,6 +149,17 @@ async function initDatabase() {
       public_profile INTEGER DEFAULT 1 CHECK (public_profile IN (0,1)),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      display_name TEXT DEFAULT '',
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      last_login TIMESTAMPTZ
     );
 
     CREATE TABLE IF NOT EXISTS news (
@@ -724,7 +770,105 @@ async function initDatabase() {
       ]
     );
   }
+
+  // Bootstrap the first named administrator from environment variables.
+  // This keeps the legacy ADMIN_KEY working while providing a normal username/password login.
+  const adminUsername = String(process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
+  const adminPassword = String(process.env.ADMIN_PASSWORD || ADMIN_KEY || "");
+  if (adminUsername && adminPassword) {
+    const existingAdmin = await pool.query("SELECT id FROM admin_users WHERE username=$1 LIMIT 1", [adminUsername]);
+    if (!existingAdmin.rows[0]) {
+      const hash = await bcrypt.hash(adminPassword, 12);
+      await pool.query(
+        `INSERT INTO admin_users(username,password_hash,display_name,active) VALUES($1,$2,$3,1)`,
+        [adminUsername, hash, process.env.ADMIN_DISPLAY_NAME || "Administrador principal"]
+      );
+    }
+  }
 }
+
+app.post("/api/admin/login", async (req,res)=>{
+  const username=String(req.body?.username||"").trim().toLowerCase();
+  const password=String(req.body?.password||"");
+  if(!username||!password)return res.status(400).json({error:"Informe usuário e senha."});
+  try{
+    const r=await pool.query("SELECT * FROM admin_users WHERE username=$1 AND active=1 LIMIT 1",[username]);
+    const admin=r.rows[0];
+    if(!admin || !(await bcrypt.compare(password,admin.password_hash))){
+      return res.status(401).json({error:"Usuário ou senha administrativos incorretos."});
+    }
+    await pool.query("UPDATE admin_users SET last_login=NOW(),updated_at=NOW() WHERE id=$1",[admin.id]);
+    res.cookie("spade_admin",makeAdminToken(Number(admin.id)),{
+      httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",maxAge:1000*60*60*24*7
+    });
+    res.json({admin:{id:Number(admin.id),username:admin.username,display_name:admin.display_name||admin.username,active:true}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao realizar login administrativo."});}
+});
+
+app.post("/api/admin/logout", (req,res)=>{
+  res.clearCookie("spade_admin");
+  res.json({ok:true});
+});
+
+app.get("/api/admin/me", requireAdmin, async (req,res)=>{
+  res.json({admin:{id:Number(req.admin.id),username:req.admin.username,display_name:req.admin.display_name||req.admin.username,active:true,legacy:Boolean(req.admin.legacy)}});
+});
+
+app.get("/api/admin/admins", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT id,username,display_name,active,created_at,updated_at,last_login FROM admin_users ORDER BY lower(username)`);
+    res.json({admins:r.rows.map(a=>({...a,id:Number(a.id),active:Boolean(a.active)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar administradores."});}
+});
+
+app.post("/api/admin/admins", requireAdmin, async (req,res)=>{
+  const username=String(req.body?.username||"").trim().toLowerCase();
+  const displayName=String(req.body?.display_name||username).trim();
+  const password=String(req.body?.password||"");
+  if(!/^[a-z0-9._-]{3,40}$/.test(username))return res.status(400).json({error:"Usuário inválido. Use 3–40 caracteres: letras, números, ponto, hífen ou sublinhado."});
+  if(password.length<8)return res.status(400).json({error:"A senha deve ter pelo menos 8 caracteres."});
+  try{
+    const hash=await bcrypt.hash(password,12);
+    const r=await pool.query(`INSERT INTO admin_users(username,password_hash,display_name,active) VALUES($1,$2,$3,1) RETURNING id,username,display_name,active,created_at,last_login`,[username,hash,displayName]);
+    res.json({admin:{...r.rows[0],id:Number(r.rows[0].id),active:Boolean(r.rows[0].active)}});
+  }catch(e){
+    if(e.code==="23505")return res.status(409).json({error:"Esse usuário administrativo já existe."});
+    console.error(e);res.status(500).json({error:"Erro ao criar administrador."});
+  }
+});
+
+app.put("/api/admin/admins/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  const displayName=String(req.body?.display_name||"").trim();
+  const hasPassword=Object.prototype.hasOwnProperty.call(req.body||{},"password");
+  const password=String(req.body?.password||"");
+  const active=req.body?.active===undefined?null:(req.body.active?1:0);
+  if(hasPassword && password && password.length<8)return res.status(400).json({error:"A senha deve ter pelo menos 8 caracteres."});
+  if(active===0 && Number(req.admin.id)===id)return res.status(400).json({error:"Você não pode desativar o administrador que está usando."});
+  try{
+    const fields=[];const values=[];let n=1;
+    if(displayName){fields.push(`display_name=$${n++}`);values.push(displayName);}
+    if(active!==null){fields.push(`active=$${n++}`);values.push(active);}
+    if(hasPassword && password){fields.push(`password_hash=$${n++}`);values.push(await bcrypt.hash(password,12));}
+    if(!fields.length)return res.status(400).json({error:"Nenhuma alteração informada."});
+    fields.push("updated_at=NOW()");values.push(id);
+    const r=await pool.query(`UPDATE admin_users SET ${fields.join(",")} WHERE id=$${n} RETURNING id,username,display_name,active,created_at,updated_at,last_login`,values);
+    if(!r.rows[0])return res.status(404).json({error:"Administrador não encontrado."});
+    res.json({admin:{...r.rows[0],id:Number(r.rows[0].id),active:Boolean(r.rows[0].active)}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar administrador."});}
+});
+
+app.delete("/api/admin/admins/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  if(Number(req.admin.id)===id)return res.status(400).json({error:"Você não pode remover seu próprio acesso."});
+  try{
+    const r=await pool.query("UPDATE admin_users SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id",[id]);
+    if(!r.rows[0])return res.status(404).json({error:"Administrador não encontrado."});
+    res.json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao desativar administrador."});}
+});
 
 app.get("/api/health", async (req, res) => {
   try {
