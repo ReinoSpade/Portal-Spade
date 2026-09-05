@@ -851,7 +851,7 @@ function renderPlayerCards(cards){
           <h3>${escapeHtml(c.name_pt||c.name)}</h3>
           ${c.name_jp?`<div class="card-jp-name">${escapeHtml(c.name_jp)}</div>`:""}
           <p>${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
-          <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${c.element_type==="ELEMENTAL"&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
+          <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>Dano: <b>${Number(c.damage_value||0)}</b></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${c.element_type==="ELEMENTAL"&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
           ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
           <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}</div>
         </article>`).join("")}
@@ -2018,15 +2018,15 @@ function populateCardSelects(){
 }
 function resetCardForm(){
   const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";populateCardSelects();
-  qs("#adminCardCategory").value="Outros";qs("#cardOrigin").value="Exclusivo";qs("#cardElementType").value="NAO_ELEMENTAL";qs("#cardCostType").value="SEM_CUSTO";qs("#cardStatus").value="ATIVO";qs("#cardPower").value=0;qs("#cardSaveBtn").textContent="Criar card";qs("#cardError").textContent="";
+  qs("#adminCardCategory").value="Outros";qs("#cardOrigin").value="Exclusivo";qs("#cardElementType").value="NAO_ELEMENTAL";qs("#cardCostType").value="SEM_CUSTO";qs("#cardStatus").value="ATIVO";qs("#cardPower").value=0;qs("#cardDamage").value=0;qs("#cardSaveBtn").textContent="Criar card";qs("#cardError").textContent="";
 }
 function editCardForm(id){
   const c=state.adminCards.find(x=>Number(x.id)===id);if(!c)return;
-  qs("#cardId").value=c.id;qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
+  qs("#cardId").value=c.id;qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardDamage").value=c.damage_value||0;qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
 }
 function renderAdminCardCatalog(){
   const list=qs("#adminCardCatalogList");if(!list)return;populateCardSelects();
-  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item"><div><b>${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
+  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item"><div><b>${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
   qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
 }
 async function deleteCard(id){const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;if(!confirm(`Excluir o card "${c.name_pt||c.name}"?`))return;try{await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});if(Number(qs("#cardId").value)===id)resetCardForm();await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);alert("Card excluído.");}catch(e){alert(e.message)}}
@@ -2534,6 +2534,7 @@ qs("#cardForm").addEventListener("submit",async e=>{
   e.preventDefault();
   const b=Object.fromEntries(new FormData(e.target).entries());
   b.power_value=Number(b.power_value||0);
+  b.damage_value=Number(b.damage_value||0);
   try{
     if(b.id)await adminApi(`/api/admin/cards/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
     else await adminApi("/api/admin/cards",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
