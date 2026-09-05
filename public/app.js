@@ -70,7 +70,7 @@ function go(page){
   if(page==="ranking") loadRanking();
   if(page==="hierarquia") loadHierarchy();
   if(page==="biblioteca") loadLibrary();
-  if(page==="dashboard"){ if(state.me) renderDashboard(); else refreshDashboard(); }
+  if(page==="dashboard"){ if(state.me) loadPlayerDashboardData(); else refreshDashboard(); }
   if(page==="cards"){ if(state.me) loadPlayerCards(); else { state.page="login"; return go("login"); } }
   if(page==="admin"){ if(state.admin) initAdmin(); else go("admin-login"); }
   if(page==="admin-login") refreshAdminSession();
@@ -865,7 +865,7 @@ async function refreshDashboardStateOnly(){
   try{
     const d=await api("/api/me");
     state.me=d.player;
-    if(state.page==="dashboard"){ renderDashboard(); }
+    if(state.page==="dashboard"){ await loadPlayerDashboardData(); }
   }catch{}
 }
 
@@ -874,7 +874,7 @@ async function refreshDashboard(){
     const d=await api("/api/me");
     state.me=d.player;
     setPlayerNav();
-    renderDashboard();
+    await loadPlayerDashboardData();
   }catch(e){
     state.me=null;
     setLoginNav();
@@ -882,14 +882,62 @@ async function refreshDashboard(){
   }
 }
 
+async function loadPlayerDashboardData(){
+  try{
+    const d=await api("/api/me/dashboard");
+    state.dashboardData=d;
+    state.me=d.player||state.me;
+    renderDashboard();
+  }catch(e){
+    if(state.page==="dashboard"){
+      const el=qs("#dash");
+      if(el)el.innerHTML=`<div class="panel"><h3>Não foi possível carregar seu painel.</h3><p>${escapeHtml(e.message)}</p></div>`;
+    }
+  }
+}
+
+function dashboardDateLabel(v){
+  if(!v)return "";
+  const s=String(v).slice(0,10);const [y,m,d]=s.split('-');
+  return y&&m&&d?`${d}/${m}`:s;
+}
+function dashboardTimeLabel(v){return v?String(v).slice(0,5):"";}
 function renderDashboard(){
- if(!state.me)return go("login");
- qs("#dashName").textContent=`Bem-vindo, ${state.me.nick}.`;
- qs("#dash").innerHTML=`<div class="dash-grid"><div class="dash-main"><div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(displayPlayerName(state.me))}</h2><p>${escapeHtml(state.me.patent)} • ${escapeHtml(state.me.house||"Casa não definida")}</p></div></div><div class="profile-lines"><div><small>Cargos</small><b>${state.me.roles?.length?state.me.roles.map(r=>escapeHtml(r.name)).join(" • "):"Não definido"}</b></div><div><small>Grimório</small><b>${escapeHtml(state.me.grimoire||"Não definido")}</b></div></div><div class="profile-lines"><div><small>Casa</small><b>${escapeHtml(state.me.house||"Não definida")}</b></div><div><small>Ranking</small><b>${state.me.ranking||"—"}</b></div></div></div><div class="dash-status"><p class="eyebrow">STATUS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${state.me.hp}</b></div><div class="stat"><small>♦️ Mana</small><b>${state.me.mana}</b></div><div class="stat"><small>📋 Missões</small><b>${state.me.missions}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(state.me.yuls)}</b></div></div></div></div><div class="panel" style="margin-top:12px"><p class="eyebrow">CONQUISTAS</p><h3>${state.me.achievements} conquistas registradas</h3><p>Os dados serão atualizados pela administração do RPG.</p></div>`;
- loadPlayerYuls();
- loadPlayerMissions();
- loadPlayerAlerts();
- loadTodayStatus();
+  if(!state.me)return go("login");
+  const d=state.dashboardData||{};
+  const p=d.player||state.me,c=d.cards||{},r=d.rankings||{};
+  qs("#dashName").textContent=`Bem-vindo, ${displayPlayerName(p)}.`;
+  const active=[...(d.activeEvents||[])].map(x=>`<article class="dashboard-live-item"><div><span class="tag">🎪 ${escapeHtml(x.event_type||"EVENTO")}</span><h4>${escapeHtml(x.title)}</h4><p>Encerramento: ${escapeHtml(dashboardDateLabel(x.end_date))}</p></div><button class="outline dark-outline small" type="button" data-dashboard-page="eventos">Ver evento</button></article>`).join("");
+  const upcoming=[...(d.upcoming||[])].map(x=>`<div class="dashboard-upcoming-item"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.activity_type||"ATIVIDADE")}</small></div><span>${escapeHtml(dashboardDateLabel(x.activity_date))}${x.start_time?` • ${escapeHtml(dashboardTimeLabel(x.start_time))}`:""}</span></div>`).join("");
+  const notes=[...(d.notifications||[])].slice(0,3).map(n=>`<div class="dashboard-note-item ${n.read?"":"unread"}"><span class="dashboard-note-dot"></span><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.body||"")}</small></div></div>`).join("");
+  const status=d.todayStatus?.message?`<div class="dashboard-status-preview"><small>💬 SEU STATUS DE HOJE</small><p>${escapeHtml(d.todayStatus.message)}</p><button class="text-button" type="button" data-dashboard-page="status">Ver mural</button></div>`:`<div class="dashboard-status-preview empty"><small>💬 STATUS DE HOJE</small><p>Você ainda não publicou seu status de hoje.</p><button class="gold small" type="button" data-dashboard-page="status">Publicar status</button></div>`;
+  qs("#dash").innerHTML=`
+    <div class="dashboard-hero-grid">
+      <section class="dash-main dashboard-profile-card">
+        <div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(displayPlayerName(p))}</h2><p>${escapeHtml(p.patent||"Patente não definida")} • ${escapeHtml(p.house||"Casa não definida")}</p></div></div>
+        <div class="dashboard-profile-tags"><span>📜 ${escapeHtml(p.grimoire||"Grimório não definido")}</span><span>👑 ${escapeHtml((p.roles||[]).map(x=>x.name).join(" • ")||"Sem cargo")}</span></div>
+        <div class="profile-lines"><div><small>EXP</small><b>${money(p.exp||0)}</b></div><div><small>Conquistas</small><b>${money(p.achievements||0)}</b></div></div>
+      </section>
+      <section class="dash-status dashboard-resource-card"><p class="eyebrow">MEUS RECURSOS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${money(p.hp)}</b></div><div class="stat"><small>♦️ Mana</small><b>${money(p.mana)}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(p.yuls)}</b></div><div class="stat"><small>🃏 Cards</small><b>${money(c.count)}</b></div></div></section>
+    </div>
+    <div class="dashboard-rank-grid">
+      <div class="dashboard-rank-card"><small>⚡ PODER</small><strong>#${r.power||"—"}</strong><span>${money(c.power)} de Poder</span></div>
+      <div class="dashboard-rank-card"><small>⚔️ SKILL SC</small><strong>#${r.sc||"—"}</strong><span>Ranking atual</span></div>
+      <div class="dashboard-rank-card"><small>🏟️ SKILL VT</small><strong>#${r.vt||"—"}</strong><span>Ranking atual</span></div>
+      <div class="dashboard-rank-card"><small>💬 NOTIFICAÇÕES</small><strong>${d.unreadNotifications||0}</strong><span>não lidas</span></div>
+    </div>
+    <section class="dashboard-live panel">
+      <div class="panel-head"><div><p class="eyebrow">ACONTECENDO AGORA</p><h3>O Reino está em movimento</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Ver cronograma</button></div>
+      <div class="dashboard-live-list">${active||`<div class="dashboard-empty-state"><span>✦</span><div><b>Nenhum evento ativo agora.</b><p>Você pode conferir as próximas atividades no cronograma.</p></div></div>`}</div>
+    </section>
+    <div class="dashboard-two-col">
+      <section class="panel"><div class="panel-head"><div><p class="eyebrow">PRÓXIMOS</p><h3>Agenda pessoal</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Tudo</button></div><div class="dashboard-upcoming-list">${upcoming||`<div class="dashboard-empty-state"><span>📅</span><div><b>Sem próximas atividades.</b><p>O calendário será atualizado pela Administração.</p></div></div>`}</div></section>
+      <section class="panel"><div class="panel-head"><div><p class="eyebrow">ATENÇÃO</p><h3>Notificações</h3></div><button class="text-button" type="button" data-dashboard-page="notificacoes">Ver todas</button></div><div class="dashboard-note-list">${notes||`<div class="dashboard-empty-state"><span>✓</span><div><b>Tudo em ordem.</b><p>Nenhuma notificação recente.</p></div></div>`}</div></section>
+    </div>
+    ${status}
+    <div class="panel" style="margin-top:12px"><p class="eyebrow">ATIVIDADE</p><h3>${money(p.missions||0)} missões registradas</h3><p>Seu painel reúne sua situação atual e os atalhos para o que importa no Reino.</p></div>`;
+  qsa('[data-dashboard-page]').forEach(b=>b.onclick=()=>go(b.dataset.dashboardPage));
+  loadPlayerYuls();loadPlayerMissions();loadPlayerAlerts();loadTodayStatus();
 }
 
 async function tryMe(){
