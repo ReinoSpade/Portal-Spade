@@ -36,10 +36,12 @@ const ADMIN_PERMISSION_DEFS = {
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
 function adminPermissionForRequest(req) {
-  const path = req.path || "";
+  const rawPath = req.path || "";
+  const path = rawPath.startsWith("/api/admin") ? (rawPath.slice("/api/admin".length) || "/") : rawPath;
   if (path === "/me") return null;
   if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users";
   if (path === "/reports") return "reports";
+  if (path === "/audit") return "audit";
   if (path === "/overview") return "dashboard";
   if (path.startsWith("/players")) {
     if (path.includes("/cards") || path.includes("/cards/")) return "cards";
@@ -82,6 +84,73 @@ app.use(express.json({ limit: "2mb" }));
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
+
+// V48: generic audit trail for administrative write actions.
+// Detailed domain histories (players, Cards, rankings, economy, houses) remain intact;
+// this log adds a unified security trail with actor, route and HTTP result.
+function auditEntityFromRequest(req) {
+  const body = req.body || {};
+  const p = req.params || {};
+  if (p.id) return { id: String(p.id), type: routeEntityType(req.path) };
+  const candidates = [
+    ['player_id','jogador'], ['card_id','card'], ['event_id','evento'], ['mission_id','missao'],
+    ['house_id','casa'], ['admin_id','administrador'], ['edition_id','edicao'], ['article_id','materia'],
+    ['player_ids','jogadores'], ['card_ids','cards']
+  ];
+  for (const [key,type] of candidates) {
+    if (body[key] !== undefined && body[key] !== null && String(body[key]).trim() !== '') {
+      const value = Array.isArray(body[key]) ? body[key].map(String).join(',') : String(body[key]);
+      return { id: value, type };
+    }
+  }
+  return { id: '', type: routeEntityType(req.path) };
+}
+
+function routeEntityType(pathname) {
+  const p = pathname || '';
+  if (p.includes('/players')) return 'jogador';
+  if (p.includes('/cards')) return 'card';
+  if (p.includes('/missions')) return 'missao';
+  if (p.includes('/events')) return 'evento';
+  if (p.includes('/schedule')) return 'cronograma';
+  if (p.includes('/houses')) return 'casa';
+  if (p.includes('/ranking')) return 'ranking';
+  if (p.includes('/economy')) return 'economia';
+  if (p.includes('/library')) return 'biblioteca';
+  if (p.includes('/articles') || p.includes('/editions') || p.includes('/news')) return 'jornal';
+  if (p.includes('/notifications')) return 'notificacao';
+  if (p.includes('/admins') || p.includes('/permissions')) return 'administrador';
+  if (p.includes('/hierarchy') || p.includes('/patents') || p.includes('/roles')) return 'hierarquia';
+  return 'sistema';
+}
+
+function safeAuditDetail(req) {
+  const body = { ...(req.body || {}) };
+  for (const key of ['password','password_hash','admin_password','new_password','senha']) delete body[key];
+  const detail = JSON.stringify(body);
+  return detail.length > 1800 ? detail.slice(0, 1800) + '…' : detail;
+}
+
+app.use((req,res,next)=>{
+  res.on('finish', async ()=>{
+    const pathName=req.path || '';
+    const mutating=['POST','PUT','PATCH','DELETE'].includes(req.method);
+    if (!mutating || pathName==='/api/admin/login' || pathName==='/api/admin/logout' || !pathName.startsWith('/api/admin/')) return;
+    try {
+      const entity=auditEntityFromRequest(req);
+      const actor=req.admin && !req.admin.legacy ? Number(req.admin.id) : null;
+      const action=`${req.method} ${pathName}`;
+      await pool.query(
+        `INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [actor, action, req.method, pathName, entity.type, entity.id, res.statusCode, safeAuditDetail(req), req.ip || '', String(req.headers['user-agent'] || '').slice(0,500)]
+      );
+    } catch (e) {
+      console.error('Audit log error:', e.message);
+    }
+  });
+  next();
+});
 
 function sign(value) {
   return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("hex");
@@ -232,6 +301,21 @@ async function initDatabase() {
       admin_id BIGINT PRIMARY KEY REFERENCES admin_users(id) ON DELETE CASCADE,
       permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
       updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      method TEXT NOT NULL,
+      route TEXT NOT NULL,
+      entity_type TEXT DEFAULT '',
+      entity_id TEXT DEFAULT '',
+      status_code INTEGER NOT NULL DEFAULT 200,
+      detail TEXT DEFAULT '',
+      ip_address TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS news (
@@ -754,6 +838,8 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_announcements_public ON announcements(published, featured, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_admin_history ON player_admin_history(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_log_admin ON audit_log(admin_id, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_ranking_battles_status ON ranking_battles(status, ranking_type, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ranking_battles_players ON ranking_battles(challenger_id, opponent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ranking_history_player ON ranking_history(player_id, ranking_type, id DESC);
@@ -1070,6 +1156,14 @@ async function initDatabase() {
   const admins = await pool.query("SELECT id FROM admin_users");
   for (const a of admins.rows) {
     await pool.query(`INSERT INTO admin_permissions(admin_id,permissions) VALUES($1,$2::jsonb) ON CONFLICT (admin_id) DO NOTHING`, [a.id, JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+  }
+  // Add any newly introduced permission keys for existing admins without
+  // overriding permissions that were explicitly set to false.
+  for (const [key] of Object.entries(ADMIN_PERMISSION_DEFS)) {
+    await pool.query(
+      `UPDATE admin_permissions SET permissions = jsonb_set(permissions, ARRAY[$1], 'true'::jsonb, true), updated_at=NOW() WHERE NOT (permissions ? $1)`,
+      [key]
+    );
   }
 }
 
@@ -3304,6 +3398,48 @@ app.get("/api/admin/overview", requireAdmin, async (req, res) => {
   }
 });
 
+
+app.get("/api/admin/audit", requireAdmin, async (req,res)=>{
+  try {
+    const limit=Math.min(200, Math.max(10, Number(req.query.limit||100)));
+    const q=String(req.query.q||'').trim();
+    const source=String(req.query.source||'').trim().toLowerCase();
+    const from=String(req.query.from||'').trim();
+    const to=String(req.query.to||'').trim();
+    const sql=`
+      SELECT * FROM (
+        SELECT a.id, COALESCE(u.display_name,u.username,'Chave principal') AS actor, 'AUDITORIA' AS source, a.action,
+               a.entity_type AS entity, a.entity_id, a.status_code, a.detail, a.created_at
+          FROM audit_log a LEFT JOIN admin_users u ON u.id=a.admin_id
+        UNION ALL
+        SELECT h.id, 'Administração' AS actor, 'JOGADOR' AS source, h.action, 'jogador' AS entity, h.player_id::text AS entity_id, 200 AS status_code, h.description AS detail, h.created_at
+          FROM player_admin_history h
+        UNION ALL
+        SELECT h.id, 'Administração' AS actor, 'CARD' AS source, h.action, 'card' AS entity, h.card_id::text AS entity_id, 200 AS status_code,
+               CONCAT(COALESCE(h.acquisition_name,''), CASE WHEN h.notes<>'' THEN ' — '||h.notes ELSE '' END) AS detail, h.created_at
+          FROM player_card_history h
+        UNION ALL
+        SELECT h.id, 'Administração' AS actor, 'RANKING' AS source, h.reason AS action, h.ranking_type AS entity, h.player_id::text AS entity_id, 200 AS status_code,
+               CONCAT('pontuação ',h.score_before,' → ',h.score_after, CASE WHEN h.battle_id IS NOT NULL THEN ' • batalha #'||h.battle_id ELSE '' END) AS detail, h.created_at
+          FROM ranking_history h
+        UNION ALL
+        SELECT h.id, 'Administração' AS actor, 'CASA' AS source, h.event_type AS action, 'casa' AS entity, h.house_id::text AS entity_id, 200 AS status_code,
+               CONCAT(h.title, CASE WHEN h.description<>'' THEN ' — '||h.description ELSE '' END) AS detail, h.created_at
+          FROM house_history h
+      ) x
+      WHERE ($1='' OR lower(COALESCE(x.actor,'' )||' '||COALESCE(x.source,'')||' '||COALESCE(x.action,'')||' '||COALESCE(x.entity,'')||' '||COALESCE(x.entity_id,'')||' '||COALESCE(x.detail,'')) LIKE lower('%'||$1||'%'))
+        AND ($2='' OR lower(x.source)=lower($2))
+        AND ($3='' OR x.created_at::date >= $3::date)
+        AND ($4='' OR x.created_at::date <= $4::date)
+      ORDER BY x.created_at DESC, x.id DESC
+      LIMIT $5`;
+    const r=await pool.query(sql,[q,source,from,to,limit]);
+    res.json({entries:r.rows.map(x=>({...x,id:Number(x.id),status_code:Number(x.status_code)}))});
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({error:'Erro ao carregar a auditoria.'});
+  }
+});
 
 app.get("/api/admin/reports", requireAdmin, async (req,res)=>{
   try{
