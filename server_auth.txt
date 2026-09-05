@@ -1,0 +1,626 @@
+    ["III","RANK III — COORDENAÇÃO",
+     "Cargos destinados à organização, supervisão ou execução de atividades relevantes para o funcionamento do RPG.",
+     "Experiência ou conhecimento equivalente aos requisitos do Rank IV e pelo menos 15 dias de experiência em cargo anterior; domínio das regras do setor; organização e regularidade; capacidade de coordenar atividades e solucionar problemas; cumprir prazos e registros; responsabilidade; histórico satisfatório. Nomeação depende de aprovação do Conselho.",
+     3],
+    ["IV","RANK IV — ESPECIALIZAÇÃO",
+     "Cargos que dependem de habilidades específicas para produção ou execução de trabalhos especializados.",
+     "Domínio da atividade; conhecimento das regras necessárias; autonomia; regularidade; qualidade compatível; cumprimento dos registros ou procedimentos. O Conselho poderá solicitar avaliação.",
+     4],
+    ["V","RANK V — OPERACIONAL",
+     "Cargos voltados à execução direta de tarefas práticas e atividades operacionais.",
+     "Estar ativo no RPG; conhecer as regras básicas; demonstrar disponibilidade; cumprir atividades; manter organização; respeitar orientações do Conselho. Não é exigida experiência anterior.",
+     5]
+  ];
+  for(const rank of rankDefinitions){
+    await pool.query(
+      `INSERT INTO role_ranks(code,name,description,requirements,sort_order)
+       VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT(code) DO UPDATE SET
+         name=EXCLUDED.name,description=EXCLUDED.description,requirements=EXCLUDED.requirements,
+         sort_order=EXCLUDED.sort_order,updated_at=NOW()`,
+      rank
+    );
+  }
+
+  const officialRoles = [
+    ["Contador de Yuls","V","até 02 por Reino","Por atualização","150, 50, 04 por atualização (máximo de 02 pagamentos por semana por reino).","Função de atualização das Listas de Yuls e EXP, duas vezes por semana, nos períodos definidos no regulamento.","Card Personalizado “+20 de Vida e +10 Mana” ou “+30 de Vida” ou “+20 de Mana” por Listas sem Atrasos; progressão do bônus prevista.","Reino",1],
+    ["Contador de EXP","V","até 02 por Reino","Por atualização","120, 40, 03 por atualização (máximo de 02 pagamentos por semana por reino).","Função de atualização das Listas de Yuls e EXP, duas vezes por semana, nos períodos definidos no regulamento.","Card Personalizado conforme bônus operacional das listas sem atrasos.","Reino",2],
+    ["Contador de Saldo das Organizações","V","01 por Reino","Por atualização","175, 60, 05 por atualização (01 pagamento por semana).","Manutenção da Lista de Saldo das Organizações até o fim do sábado.","Card Personalizado conforme bônus operacional de listas sem atrasos.","Reino",3],
+    ["Contador de Dracmas","V","01 por Reino","Por atualização","150, 50, 4 por atualização (01 pagamento por semana).","Manutenção das listas de saldo e de Dracmas até o fim do sábado.","Card Personalizado conforme bônus operacional de listas sem atrasos.","Reino",4],
+    ["Contador de Ajudas por Luta","V","01 por Reino","Por produção","10, 5 e 1 a cada 10 ajudas contadas.","Contabilizar ajudas enviadas no dia posterior ao fim da missão.","Card Personalizado “+20 de Aumento de Dano” ou “+10 de Redução de Dano” conforme bônus operacional.","Reino",5],
+    ["Vendedor de Itens da Loja Mágica","V","01 por Reino","Por semana e produção","100, 30 e 3 por semana + 75 e 15 a cada 5 vendas na mesma semana.","Enviar as fichas de venda no grupo pertinente no momento da venda, observadas as restrições previstas.","Card Personalizado conforme bônus operacional de vendas, entregas e relatórios no prazo.","Reino",6],
+    ["Contador de Missões","V","01 por Reino","Por produção","50, 25 e 3 a cada 50 magos em missão + 20 e 10 por andamento com diferença de 2 horas entre si ou a cada 15 magos.","Mínimo de 2 andamentos por dia de missão e entrega do resultado padronizado; missões revezadas entre Reinos.","Card Personalizado conforme bônus operacional de contabilizações/entregas/relatórios no prazo.","Reino",7],
+    ["Crupiê/Mestre de Apostas do Cassino","V","04 por Reino","Por abertura e participante","80, 20 e 3 por abertura de jogo + 20 e 10 por pessoa em seu jogo que participe.","Caso fique sem abrir jogos por 15 dias será retirado da função.","Card Personalizado conforme bônus operacional de abertura em todas as edições do cassino no mês.","Reino",8],
+    ["Editor de Imagens","V","02 por organização em cada Reino","Por produção","75, 25 e 4 por conjunto de imagens editadas e postadas com aprovação do Conselho (máximo de 02 pagamentos por semana).","Produção e postagem de conjuntos de imagens com aprovação do Conselho.","Card Personalizado conforme bônus operacional aplicável.","Organização",9],
+
+    ["Desenhista","IV","02 por Organização na Forja do Reino e 01 por Organização na Forja Central","Por produção","50, 30, 03 e 01 por card produzido + 10, 5 por cada troca de elemento.","Desenhos submetidos conforme o fluxo e prazos da Forja do Reino/Forja Central.","Card Personalizado “Dreno 20 de Vida e 10 Mana” ou “Dreno de 30 de Vida” ou “Dreno 20 de Mana” conforme o bônus operacional.","Organização",10],
+    ["Criador de Imagens e Vídeos","IV","Membros que também exercem a função de Editores de Imagem","Por produção","50, 30, 03 e 01 por imagem produzida e postada no Feed sobre assunto relevante do RPG e aprovada pelo Parlamento.","Solicitações no grupo de divulgação; prazo mínimo de 48 horas para envio.","Card Personalizado conforme regra ³ do bônus operacional.","Organização",11],
+    ["Organizador de Eventos","IV","02 por Organização","Por evento e participante","70, 35, 05 e 01 por evento produzido sem reclamações ou indícios de imparcialidade + 10 e 5 a cada 10 participantes devidamente comprovados.","Organizar os eventos distribuídos no planejamento mensal do Reino.","Card Personalizado conforme regra ³ do bônus operacional.","Organização",12],
+    ["Jornalistas","IV","02 vagas por organização","Por matéria","75, 25, 03 por matéria pública com correlação ao RPG e aprovada; 50, 15 e 02 por matéria sem correlação e aprovada; 25, 5 e 01 por matéria não aprovada (máximo de 03 pagamentos por semana).","Enviar matérias até o dia anterior à publicação, conforme planejamento do jornal.","Card Personalizado conforme regra ³ do bônus operacional.","Organização",13],
+    ["Recuperadores de Card","IV","02 vagas por Reino","Por produção","40, 20 e 1 a cada 20 Cards Recuperados.","Demandas rotativas entre recuperadores e membros dos respectivos Reinos; período de 15 dias para fins de pagamento.","Card Personalizado conforme regra ³ do bônus operacional.","Reino",14],
+    ["Juízes de Lutas","IV","De acordo com sua patente","Por atividade","De acordo com a tabela dos juízes.","Aplicação das regras de ajuizamento, estrelas e restrições conforme tipo e complexidade das lutas.","Card Personalizado da regra ⁴ para os 05 com maior quantidade de lutas ajuizadas sem reclamações.","Reino",15],
+
+    ["Coordenador de Forja","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Forja e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",16],
+    ["Coordenador de Divulgação","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Divulgação e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",17],
+    ["Coordenador de Eventos","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Eventos e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",18],
+    ["Coordenador de Jornal","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Jornal e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",19],
+    ["Coordenador de Catalogação de Card’s","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena a Catalogação de Cards e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",20],
+    ["Coordenador de Ajuizamento","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o Ajuizamento e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",21],
+    ["Coordenador de Cassino","III","01 por Reino","Conforme atividade","De acordo com sua atividade e nunca somando rendimentos acima do rendimento base dos Coordenadores.","Coordena o setor de Cassino e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",22],
+
+    ["Líder de Casa","II","03 por Casa (01 líder e 02 vice-líderes)","Mensal e por meta","250, 150, 5 por meta batida mensalmente + pagamentos individuais por magos sem organizações participantes de missões, torneios, eventos e treinados.","Liderança da Casa e acompanhamento de metas e participação.","Card Personalizado “Aumento 30 de Vida, Aumento 30 de Mana e Aumento 30 de Dano”; progressão e Card único Rank SS conforme regulamento.","Casa",23],
+    ["Dirigente de Organização","II","02 por Organização","Por missão","150, 100 e 4 por missão com todos os membros participantes.","Direção da Organização e acompanhamento das missões com participação dos membros.","Card Personalizado conforme regra ⁶, com progressão e Card único Rank SS após 6 meses consecutivos.","Organização",24],
+
+    ["Administrador de Reino","I","01 por patente, por Reino","Por produção de metas","500, 250 e 10 a cada 100 magos em missão, inscritos em torneio e inscritos em exame.","Administração de recursos, informações ou estruturas importantes do Reino.","Card Personalizado Rank SS caso bata as metas estabelecidas, sem aumento de efeitos e permanente após 03 vezes consecutivas.","Reino",25],
+    ["Imperador Supremo","I","01 por patente, por Reino","Por produção de metas","500, 250 e 10 a cada 100 magos em missão, inscritos em torneio e inscritos em exame.","Exercício da autoridade máxima prevista para o cargo no Reino.","Card Personalizado Rank SS caso bata as metas estabelecidas, sem aumento de efeitos e permanente após 03 vezes consecutivas.","Reino",26]
+  ];
+
+  for(const role of officialRoles){
+    const [name,rank,vacancies,paymentMode,remunerationDetail,responsibilities,benefits,scope,sortOrder]=role;
+    const requirements=["III","II","I"].includes(rank)
+      ? "Aplicam-se também os requisitos do respectivo Rank; nomeação/aprovação conforme o regulamento."
+      : "";
+    await pool.query(
+      `INSERT INTO roles(name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope,active)
+       VALUES($1,$2,0,$3,$4,$5,$6,$7,$8,$9,$10,1)
+       ON CONFLICT(name) DO UPDATE SET
+         description=EXCLUDED.description,
+         sort_order=EXCLUDED.sort_order,
+         rank_code=EXCLUDED.rank_code,
+         vacancies=EXCLUDED.vacancies,
+         payment_mode=EXCLUDED.payment_mode,
+         remuneration_detail=EXCLUDED.remuneration_detail,
+         requirements=EXCLUDED.requirements,
+         benefits=EXCLUDED.benefits,
+         scope=EXCLUDED.scope,
+         active=1,
+         updated_at=NOW()`,
+      [name,responsibilities,sortOrder,rank,vacancies,paymentMode,remunerationDetail,requirements,benefits,scope]
+    );
+  }
+
+  async function seedDigitalEditionOne(){
+    const ed=await pool.query(`SELECT id FROM editions WHERE published=1 ORDER BY id ASC LIMIT 1`);
+    if(!ed.rows[0])return;
+    const editionId=Number(ed.rows[0].id);
+    const articles=[
+      ["Editorial — O nascimento de Spade","A primeira página de uma história que ainda está sendo escrita.","Redação The King Magazine","EDITORIAL","Há Reinos que nascem com glórias. Outros nascem com promessas. Spade nasceu com trabalho.",`Quando os primeiros membros chegaram, ainda não havia tradição, prestígio ou história para contar. Havia apenas um Reino novo, Casas começando a criar raízes, Legiões tomando forma e gente disposta — ou curiosa o bastante — a descobrir até onde aquilo poderia chegar.\n\nOs primeiros dias trouxeram aquilo que todo Reino recém-nascido precisa enfrentar: regras, organização, competição, recrutamento, dúvidas e a velha vontade de descobrir quem conseguiria chegar primeiro.\n\nAgora já existem nomes, rivalidades, vitórias, fracassos, cargos, Cards, missões e algumas boas histórias. Esta é a primeira edição. E talvez seja justamente por isso a mais importante.\n\nPorque daqui para frente, tudo o que acontecer terá passado a fazer parte da história de Spade.`],
+      ["O nascimento de um Reino","Como Spade começou a ganhar forma.","Redação The King Magazine","HISTÓRIA","Os primeiros dias foram suficientes para mostrar que o novo Reino não pretendia ficar parado.",`Spade começou como começo de todo grande ciclo: pequeno, barulhento e cheio de possibilidades. Antes que a rotina pudesse se instalar, o Reino já organizava missões, exames, eventos, recrutamentos e atividades que colocavam os jogadores diante de escolhas e desafios.\n\nA estrutura surgiu depressa. Casas passaram a reunir seus membros, Legiões começaram a selecionar seus combatentes, e o cronograma deixou de ser apenas uma lista para se tornar uma espécie de relógio do Reino.\n\nO que parecia um conjunto de atividades isoladas rapidamente virou uma comunidade com memória própria.`],
+      ["Os primeiros dias","Da Trívia às primeiras grandes provas.","Redação The King Magazine","RETROSPECTIVA","Missões, exames e eventos deram aos primeiros dias de Spade um ritmo que não demorou a acelerar.",`O começo de Spade não teve tempo para ser silencioso. Missões de Trívia, provas de admissão, desafios de Rank, eventos e recrutamentos se sucederam enquanto os jogadores ainda descobriam os caminhos do novo Reino.\n\nFoi nesse período que a participação começou a ganhar peso. Não bastava estar presente: era preciso fazer, disputar, vencer, organizar e aprender.\n\nOs primeiros resultados ainda eram modestos, mas já anunciavam uma característica que acompanharia Spade: o Reino se movimentava quando seus jogadores decidiam se movimentar.`],
+      ["As Casas que deram rosto ao Reino","As moradas onde a história começou a se dividir.","Redação The King Magazine","CASAS","Muito antes de existirem números consolidados, existiam bandeiras, nomes e lideranças.",`Cada Casa começou a construir sua própria maneira de existir. Algumas buscaram recrutamento, outras apostaram em atividade, outras encontraram sua força na organização.\n\nEssa diferença é importante. Um Reino pode reunir centenas de nomes, mas são as suas Casas que dão rosto à comunidade. É nelas que surgem rivalidades, alianças, lideranças, erros, recomeços e aquela saudável vontade de provar que a própria bandeira consegue chegar mais longe.\n\nNo Portal, essa história agora pode ser acompanhada por membros, missões, Yuls e outros números. Mas os números contam apenas uma parte dela. O restante está nas pessoas.`],
+      ["As Três Legiões","Destruição, Conquista e Extermínio.","Redação The King Magazine","LEGIÕES","Três caminhos diferentes para representar a mesma vontade: conquistar um lugar na história de Spade.",`As Legiões nasceram para organizar forças que não poderiam permanecer dispersas. Destruição, Conquista e Extermínio assumiram identidades próprias e começaram a reunir jogadores ao redor de objetivos diferentes.\n\nO primeiro período de seleção já mostrou que uma Legião não é apenas um nome bonito. Ela exige disciplina, participação, comunicação e, acima de tudo, disposição para trabalhar como grupo.\n\nCom o tempo, as três forças passaram a representar mais do que funções. Tornaram-se parte da identidade do Reino.`],
+      ["O primeiro grande torneio","Quando a competição deixou de ser promessa.","Redação The King Magazine","TORNEIO","O primeiro grande torneio colocou os nomes do novo Reino frente a frente.",`Todo Reino precisa de um momento em que a promessa vira competição real. Em Spade, esse momento chegou com o primeiro grande Torneio de Reino.\n\nFases, disputas e resultados deram aos jogadores a oportunidade de descobrir não apenas quem tinha força, mas quem conseguia manter a cabeça no lugar quando a pressão aparecia.\n\nÉ fácil ser promissor quando ninguém está olhando. O torneio serviu para descobrir quem continuava sendo perigoso quando todos estavam olhando.`],
+      ["Quando participar passou a valer","Fichas, leilões, recompensas e a economia do Reino.","Redação The King Magazine","ECONOMIA","Em Spade, participar começou a significar progresso — e, em alguns casos, uma boa oportunidade de gastar.",`A criação das Fichas de Participação mudou a relação dos jogadores com as atividades. Eventos, missões, torneios e outras ações passaram a alimentar um sistema em que presença podia se transformar em recurso.\n\nDepois vieram as trocas, os leilões e a circulação de recompensas. A comunidade descobriu rapidamente que uma boa estratégia também podia existir fora da luta.\n\nFoi assim que Spade começou a construir sua própria economia: com atividade, recompensa e aquela inevitável vontade de descobrir o que dava para comprar.`],
+      ["O nascimento da imprensa","Antes da primeira edição, já havia gente cobrando pelo jornal.","Redação The King Magazine","JORNAL","O jornal foi anunciado cedo — e a comunidade tratou de lembrar que promessa de jornalista também tem prazo.",`Um Reino que começa a criar história precisa de alguém disposto a registrá-la. Foi assim que a ideia do The King Magazine apareceu ainda nos primeiros movimentos de Spade.\n\nVieram recrutamento, planejamento, cobrança, discussão sobre matérias e, naturalmente, a pergunta inevitável: “cadê o jornal?”.\n\nA imprensa de Spade nasceu, portanto, de uma necessidade simples: se os acontecimentos estavam acontecendo rápido demais, alguém precisava contar essa história antes que a comunidade começasse a esquecer o que tinha acabado de viver.`],
+      ["Da Forja à Torre de Grimórios","Criação, treinamento e o desejo de construir mais do que números.","Redação The King Magazine","SISTEMAS","Forja, Grimórios e outras atividades começaram a ampliar o repertório de Spade.",`A história de um Reino não pode depender apenas de combates. Em determinado momento, é preciso criar. A Forja trouxe exatamente essa camada: transformar ideias em objetos, Cards e recursos que passam a fazer parte do próprio universo.\n\nA Torre de Grimórios acrescentou outro símbolo forte. Treinar e descobrir mais sobre a própria magia faz parte da construção do personagem e também da construção do Reino.\n\nEntre uma missão e outra, Spade começou a descobrir que sua história também seria feita por aquilo que os jogadores fossem capazes de criar.`],
+      ["Um Reino aprende a se organizar","A administração que nasceu junto com a comunidade.","Redação The King Magazine","ADMINISTRAÇÃO","Quando o Reino cresce, boa vontade deixa de ser suficiente e estrutura passa a ser necessidade.",`Atualizar listas, julgar lutas, coordenar eventos, administrar Casas, cuidar do jornal, organizar Cards e manter os registros em ordem são trabalhos que raramente aparecem na frente do palco — até o dia em que deixam de existir.\n\nFoi dessa necessidade que nasceu uma estrutura administrativa mais clara, com Ranks, funções, responsabilidades e formas de remuneração.\n\nO objetivo não é transformar pessoas em números. É dar nome, responsabilidade e reconhecimento a quem mantém o Reino funcionando quando a maioria só enxerga o resultado.`],
+      ["Vozes de Spade","O Reino também é feito pelo que seus jogadores dizem.","Redação The King Magazine","COMUNIDADE","Uma história fica melhor quando aqueles que a vivem também ganham espaço para contar o que pensam.",`Entre anúncios, missões, disputas e cobranças, existe uma camada que nenhum ranking consegue medir: a voz dos jogadores.\n\nÉ nas conversas rápidas, nas comemorações, nas reclamações, nos conselhos e nas piadas que a comunidade revela o que realmente pensa do Reino.\n\nEsta coluna foi criada para isso. Nas próximas edições, o mural de Status do Portal e os registros da comunidade poderão trazer essas vozes para o centro da revista.`],
+      ["Dizem por aí...","Porque todo Reino que se preze precisa de um corredor cheio de fofocas.","Redação The King Magazine","FOFOCAS","Há coisas que não aparecem no relatório. Ainda bem.",`Dizem por aí que ninguém lê fofoca até perceber que o próprio nome apareceu nela.\n\nDizem também que alguns jogadores começam dizendo que não se importam com ranking e terminam atualizando a página cinco vezes. Que certas Casas juram que não existe rivalidade alguma — desde que ninguém toque no assunto. E que toda grande reforma administrativa encontra, em algum canto, alguém perguntando: “mas isso vai dar Yuls?”.\n\nA verdade? Talvez metade seja exagero. A outra metade provavelmente estará no próximo comunicado.`],
+      ["O próximo capítulo","O primeiro ciclo terminou. A história, não.","Redação The King Magazine","ENCERRAMENTO","A primeira edição registra onde chegamos. O restante ainda está sendo escrito.",`Spade começou há pouco, mas já tem memória. Tem Casas, Legiões, jogadores, histórias, Cards, eventos, missões, conquistas e um calendário cheio de coisas por acontecer.\n\nO Portal agora passa a guardar não apenas números, mas também a narrativa do Reino. O cronograma aponta para o futuro. O Ranking mostra o presente. O Jornal registra aquilo que não podemos deixar desaparecer.\n\nEste foi apenas o primeiro capítulo. O próximo depende de todos nós.`]
+    ];
+    for(let i=0;i<articles.length;i++){
+      const a=articles[i];
+      const existing=await pool.query(`SELECT id FROM articles WHERE title=$1 ORDER BY id DESC LIMIT 1`,[a[0]]);
+      let articleId;
+      if(existing.rows[0]) articleId=Number(existing.rows[0].id);
+      else {
+        const created=await pool.query(`INSERT INTO articles(title,subtitle,author,category,excerpt,body,date,published) VALUES($1,$2,$3,$4,$5,$6,(NOW() AT TIME ZONE 'America/Sao_Paulo')::date,1) RETURNING id`,a);
+        articleId=Number(created.rows[0].id);
+      }
+      await pool.query(`INSERT INTO edition_articles(edition_id,article_id,sort_order) VALUES($1,$2,$3) ON CONFLICT (edition_id,article_id) DO UPDATE SET sort_order=EXCLUDED.sort_order`,[editionId,articleId,(i+1)*10]);
+    }
+    await pool.query(`UPDATE editions SET title=CASE WHEN title='' THEN 'The King Magazine — Setembro 2026' ELSE title END, description=CASE WHEN description='' THEN 'A primeira edição digital do The King Magazine: o nascimento de Spade.' ELSE description END WHERE id=$1`,[editionId]);
+  }
+
+  await seedDigitalEditionOne();
+
+  const defaultPatents = [
+    "Cavaleiro Mágico Junior",
+    "Cavaleiro Mágico",
+    "Cavaleiro Mágico Sênior",
+    "Senior"
+  ];
+  for (const name of defaultPatents) {
+    await pool.query(
+      `INSERT INTO patents(name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [name]
+    );
+  }
+
+  const defaultHouses = [
+    "Casa Mars",
+    "Casa Voltia",
+    "Casa Kruger",
+    "Casa Whomalt",
+    "Casa Faust",
+    "Casa Vermillion",
+    "Casa Silvamillion",
+    "Casa Silva",
+    "Casa Mariella"
+  ];
+  for (const name of defaultHouses) {
+    await pool.query(
+      `INSERT INTO houses(name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [name]
+    );
+  }
+
+  const defaultCards = [
+    ["Falha Simples 40/00","Falha","40/00","Cancela ataques do oponente conforme as regras do RPG.",10],
+    ["Falha Simples 50/00","Falha","50/00","Versão de 50 pontos da Falha Simples.",20],
+    ["Falha Ilusão 50/00","Falha","50/00","Falha aplicada contra ilusões.",30],
+    ["Fuga Simples 40/00","Fuga","40/00","Fuga simples; não pode ser falhada.",40],
+    ["Camuflagem 50/00","Fuga","50/00","Camuflagem para evasão conforme as regras do RPG.",50],
+    ["Ataque/Defesa 100/100","Ataque/Defesa","100/100","Ataca e defende simultaneamente.",60],
+    ["Barreira com Dano 50 em TC","Barreira","50/00","Barreira que causa 50 de dano em Técnica Comum.",70],
+    ["Paralisia Simples","Paralisia","70/70","Paralisa o oponente na rodada seguinte.",80],
+    ["Paralisia Falha-Ataque","Paralisia","","Falha ataques e aplica a paralisação conforme as regras.",90],
+    ["Paralisia Dano 70/70","Paralisia","70/70","Causa dano e anula técnicas ou magias menores.",100],
+    ["Magia Ofensiva 50/50","Magia Ofensiva","50/50","Magia ofensiva de 50 pontos.",110],
+    ["Magia Ofensiva 200/200","Magia Ofensiva","200/200","Magia ofensiva de 200 pontos.",120],
+    ["Refletivo de Magia Ofensiva a Distância","Magia Ofensiva","40","Reflete Magia Ofensiva a Distância.",130],
+    ["Réplica do Reino","Réplica","50","Réplica do Reino; custo de 50.",140],
+    ["Réplica Kruger","Réplica","50","Réplica Kruger; causa 50 de dano em Técnica Comum quando aplicada conforme as regras.",150],
+    ["Técnica Especial Corporal (TCE)","Técnica","00/130","Técnica Especial Corporal.",160],
+    ["Técnica Comum Corporal (TC)","Técnica","00/130","Técnica Comum Corporal.",170],
+    ["Técnica Comum a Distância (TD)","Técnica","00/130","Técnica Comum a Distância.",180],
+    ["Ativação","Ativação","-10 Mana/rodada","Torna o usuário imune a Técnicas Básicas e Ilusões enquanto ativa.",190]
+  ];
+  for (const [name,type,cost,description,sort_order] of defaultCards) {
+    await pool.query(
+      `INSERT INTO cards(name,type,category,name_pt,cost,cost_type,description,sort_order,origin,power_value)
+       VALUES ($1,$2,$2,$1,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (name) DO NOTHING`,
+      [name,type,cost,cost ? (String(cost).includes('Mana') ? 'MANA' : 'SEM_CUSTO') : 'SEM_CUSTO',description,sort_order,'SC Junior',0]
+    );
+  }
+
+  const cardCategorySeeds=['Falha','Fuga','Ataque/Defesa','Barreira','Paralisia','Magia Ofensiva','Réplica','Técnica','Ativação','Invocação','Ilusão','Regeneração','Outros'];
+  for (let i=0;i<cardCategorySeeds.length;i++) {
+    await pool.query(`INSERT INTO card_categories(name,sort_order) VALUES($1,$2) ON CONFLICT(name) DO NOTHING`,[cardCategorySeeds[i],i+1]);
+  }
+
+  // The announcements table definitely exists at this point.
+  const announcementCount = await pool.query(
+    "SELECT COUNT(*)::int AS c FROM announcements"
+  );
+  if (announcementCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO announcements(title,category,priority,body,featured,published)
+       VALUES ($1,$2,$3,$4,1,1)`,
+      [
+        "Bem-vindos ao Portal Spade",
+        "REINO SPADE",
+        "INFORMATIVO",
+        "Este espaço será usado para os comunicados oficiais do Reino."
+      ]
+    );
+  }
+
+  const newsCount = await pool.query("SELECT COUNT(*)::int AS c FROM news");
+  if (newsCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO news(title,category,excerpt,body) VALUES ($1,$2,$3,$4)`,
+      [
+        "O Portal Spade está oficialmente aberto",
+        "REINO SPADE",
+        "O centro digital do RPG começa uma nova fase.",
+        "Esta é uma notícia inicial de teste. Substitua pelo comunicado oficial."
+      ]
+    );
+  }
+
+  const editionCount = await pool.query("SELECT COUNT(*)::int AS c FROM editions");
+  if (editionCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO editions(title,edition,description) VALUES ($1,$2,$3)`,
+      [
+        "The King Magazine — Setembro 2026",
+        "EDIÇÃO 01",
+        "A edição de estreia do novo ciclo de Spade."
+      ]
+    );
+  }
+
+  // V49: centralized portal configuration. Defaults are created once; existing values are preserved.
+  const settingMeta={
+    kingdom_name:'Nome oficial do Reino', kingdom_motto:'Lema do Reino', timezone:'Fuso horário principal', footer_text:'Texto do rodapé',
+    mission_types:'Tipos de missão aceitos', event_types:'Tipos de evento aceitos', card_origins:'Origens de Cards', card_elements:'Elementos cadastráveis', visibility_scopes:'Escopos de visibilidade'
+  };
+  for(const [key,value] of Object.entries(DEFAULT_PORTAL_SETTINGS)){
+    await pool.query(`INSERT INTO portal_settings(key,value,description) VALUES($1,$2::jsonb,$3) ON CONFLICT(key) DO NOTHING`,[key,JSON.stringify(value),settingMeta[key]||'Configuração do Portal']);
+  }
+  await loadPortalSettings();
+
+  // Bootstrap the first named administrator from environment variables.
+  // This keeps the legacy ADMIN_KEY working while providing a normal username/password login.
+  const adminUsername = String(process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
+  const adminPassword = String(process.env.ADMIN_PASSWORD || ADMIN_KEY || "");
+  if (adminUsername && adminPassword) {
+    const existingAdmin = await pool.query("SELECT id FROM admin_users WHERE username=$1 LIMIT 1", [adminUsername]);
+    if (!existingAdmin.rows[0]) {
+      const hash = await bcrypt.hash(adminPassword, 12);
+      await pool.query(
+        `INSERT INTO admin_users(username,password_hash,display_name,active) VALUES($1,$2,$3,1)`,
+        [adminUsername, hash, process.env.ADMIN_DISPLAY_NAME || "Administrador principal"]
+      );
+    }
+  }
+  // Every existing administrator starts with full access; permissions can then be restricted.
+  const admins = await pool.query("SELECT id FROM admin_users");
+  for (const a of admins.rows) {
+    await pool.query(`INSERT INTO admin_permissions(admin_id,permissions) VALUES($1,$2::jsonb) ON CONFLICT (admin_id) DO NOTHING`, [a.id, JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+  }
+  // Add any newly introduced permission keys for existing admins without
+  // overriding permissions that were explicitly set to false.
+  for (const [key] of Object.entries(ADMIN_PERMISSION_DEFS)) {
+    await pool.query(
+      `UPDATE admin_permissions SET permissions = jsonb_set(permissions, ARRAY[$1], 'true'::jsonb, true), updated_at=NOW() WHERE NOT (permissions ? $1)`,
+      [key]
+    );
+  }
+}
+
+app.get("/api/settings", async (req,res)=>{
+  res.json({kingdom_name:portalSettings.kingdom_name, kingdom_motto:portalSettings.kingdom_motto, timezone:portalSettings.timezone, footer_text:portalSettings.footer_text, visibility_scopes:portalSettings.visibility_scopes});
+});
+
+app.get("/api/admin/settings", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query('SELECT key,value,description,updated_at,updated_by_admin_id FROM portal_settings ORDER BY key');
+    res.json({settings:r.rows});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar configurações do Portal.'});}
+});
+
+app.put("/api/admin/settings/:key", requireAdmin, async (req,res)=>{
+  const key=String(req.params.key||'').trim();
+  const allowed=new Set(Object.keys(DEFAULT_PORTAL_SETTINGS));
+  if(!allowed.has(key)) return res.status(400).json({error:'Configuração não reconhecida.'});
+  const value=req.body?.value;
+  try{
+    if(['mission_types','event_types','card_origins','card_elements','visibility_scopes'].includes(key)){
+      const next=cleanStringList(value,DEFAULT_PORTAL_SETTINGS[key]);
+      if(['mission_types','event_types','card_origins'].includes(key)){
+        const previous=portalSettings[key]||[];
+        const removed=previous.filter(x=>!next.includes(x));
+        if(key==='mission_types' && removed.length){
+          const used=await pool.query('SELECT COUNT(*)::int AS c FROM mission_activities WHERE mission_type = ANY($1)',[removed]);
+          if(Number(used.rows[0].c)>0) return res.status(400).json({error:`Não é possível remover tipos de missão que já possuem registros (${removed.join(', ')}).`});
+        }
+        if(key==='event_types' && removed.length){
+          const used=await pool.query('SELECT COUNT(*)::int AS c FROM events WHERE event_type = ANY($1)',[removed]);
+          if(Number(used.rows[0].c)>0) return res.status(400).json({error:`Não é possível remover tipos de evento que já possuem registros (${removed.join(', ')}).`});
+        }
+        if(key==='card_origins' && removed.length){
+          const used=await pool.query('SELECT COUNT(*)::int AS c FROM cards WHERE origin = ANY($1)',[removed]);
+          if(Number(used.rows[0].c)>0) return res.status(400).json({error:`Não é possível remover origens de Card já utilizadas (${removed.join(', ')}).`});
+        }
+      }
+      await pool.query(`INSERT INTO portal_settings(key,value,updated_by_admin_id,updated_at) VALUES($1,$2::jsonb,$3,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by_admin_id=EXCLUDED.updated_by_admin_id,updated_at=NOW()`,[key,JSON.stringify(next),req.admin?.id||null]);
+      applyPortalSetting(key,next);
+      return res.json({key,value:portalSettings[key]});
+    }
+    const next=String(value??'').trim();
+    if(!next) return res.status(400).json({error:'O valor não pode ficar vazio.'});
+    await pool.query(`INSERT INTO portal_settings(key,value,updated_by_admin_id,updated_at) VALUES($1,$2::jsonb,$3,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by_admin_id=EXCLUDED.updated_by_admin_id,updated_at=NOW()`,[key,JSON.stringify(next),req.admin?.id||null]);
+    applyPortalSetting(key,next);
+    res.json({key,value:portalSettings[key]});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao salvar configuração.'});}
+});
+
+app.get("/api/admin/permissions/definitions", requireAdmin, async (req,res)=>{
+  res.json({permissions: ADMIN_PERMISSION_DEFS});
+});
+
+app.get("/api/admin/permissions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  try {
+    const r=await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1",[id]);
+    res.json({permissions:r.rows[0]?.permissions||ALL_ADMIN_PERMISSIONS});
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar permissões."});}
+});
+
+app.put("/api/admin/permissions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  if(Number(req.admin.id)===id && req.body?.permissions && Object.values(req.body.permissions).some(v=>v===false)) return res.status(400).json({error:"Você não pode remover suas próprias permissões."});
+  try {
+    const requested=req.body?.permissions||{};
+    const permissions={};
+    for(const key of Object.keys(ADMIN_PERMISSION_DEFS)) permissions[key]=requested[key]===true;
+    const r=await pool.query(`INSERT INTO admin_permissions(admin_id,permissions,updated_at) VALUES($1,$2::jsonb,NOW()) ON CONFLICT (admin_id) DO UPDATE SET permissions=EXCLUDED.permissions,updated_at=NOW() RETURNING permissions`,[id,JSON.stringify(permissions)]);
+    res.json({permissions:r.rows[0].permissions});
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao salvar permissões."});}
+});
+
+app.post("/api/admin/login", async (req,res)=>{
+  const username=String(req.body?.username||"").trim().toLowerCase();
+  const password=String(req.body?.password||"");
+  if(!username||!password)return res.status(400).json({error:"Informe usuário e senha."});
+  try{
+    const r=await pool.query("SELECT * FROM admin_users WHERE username=$1 AND active=1 LIMIT 1",[username]);
+    const admin=r.rows[0];
+    if(!admin || !(await bcrypt.compare(password,admin.password_hash))){
+      return res.status(401).json({error:"Usuário ou senha administrativos incorretos."});
+    }
+    await pool.query("UPDATE admin_users SET last_login=NOW(),updated_at=NOW() WHERE id=$1",[admin.id]);
+    res.cookie("spade_admin",makeAdminToken(Number(admin.id)),{
+      httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",maxAge:1000*60*60*24*7
+    });
+    const pr=await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1",[admin.id]);
+    res.json({admin:{id:Number(admin.id),username:admin.username,display_name:admin.display_name||admin.username,active:true,permissions:pr.rows[0]?.permissions||ALL_ADMIN_PERMISSIONS}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao realizar login administrativo."});}
+});
+
+app.post("/api/admin/logout", (req,res)=>{
+  res.clearCookie("spade_admin");
+  res.json({ok:true});
+});
+
+app.get("/api/admin/me", requireAdmin, async (req,res)=>{
+  res.json({admin:{id:Number(req.admin.id),username:req.admin.username,display_name:req.admin.display_name||req.admin.username,active:true,legacy:Boolean(req.admin.legacy),permissions:req.admin.permissions||ALL_ADMIN_PERMISSIONS}});
+});
+
+app.get("/api/admin/admins", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT a.id,a.username,a.display_name,a.active,a.created_at,a.updated_at,a.last_login,COALESCE(p.permissions,$1::jsonb) AS permissions FROM admin_users a LEFT JOIN admin_permissions p ON p.admin_id=a.id ORDER BY lower(a.username)`,[JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+    res.json({admins:r.rows.map(a=>({...a,id:Number(a.id),active:Boolean(a.active)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar administradores."});}
+});
+
+app.post("/api/admin/admins", requireAdmin, async (req,res)=>{
+  const username=String(req.body?.username||"").trim().toLowerCase();
+  const displayName=String(req.body?.display_name||username).trim();
+  const password=String(req.body?.password||"");
+  if(!/^[a-z0-9._-]{3,40}$/.test(username))return res.status(400).json({error:"Usuário inválido. Use 3–40 caracteres: letras, números, ponto, hífen ou sublinhado."});
+  if(password.length<8)return res.status(400).json({error:"A senha deve ter pelo menos 8 caracteres."});
+  try{
+    const hash=await bcrypt.hash(password,12);
+    const r=await pool.query(`INSERT INTO admin_users(username,password_hash,display_name,active) VALUES($1,$2,$3,1) RETURNING id,username,display_name,active,created_at,last_login`,[username,hash,displayName]);
+    await pool.query(`INSERT INTO admin_permissions(admin_id,permissions) VALUES($1,$2::jsonb) ON CONFLICT (admin_id) DO NOTHING`,[r.rows[0].id,JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+    res.json({admin:{...r.rows[0],id:Number(r.rows[0].id),active:Boolean(r.rows[0].active),permissions:ALL_ADMIN_PERMISSIONS}});
+  }catch(e){
+    if(e.code==="23505")return res.status(409).json({error:"Esse usuário administrativo já existe."});
+    console.error(e);res.status(500).json({error:"Erro ao criar administrador."});
+  }
+});
+
+app.put("/api/admin/admins/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  const displayName=String(req.body?.display_name||"").trim();
+  const hasPassword=Object.prototype.hasOwnProperty.call(req.body||{},"password");
+  const password=String(req.body?.password||"");
+  const active=req.body?.active===undefined?null:(req.body.active?1:0);
+  if(hasPassword && password && password.length<8)return res.status(400).json({error:"A senha deve ter pelo menos 8 caracteres."});
+  if(active===0 && Number(req.admin.id)===id)return res.status(400).json({error:"Você não pode desativar o administrador que está usando."});
+  try{
+    const fields=[];const values=[];let n=1;
+    if(displayName){fields.push(`display_name=$${n++}`);values.push(displayName);}
+    if(active!==null){fields.push(`active=$${n++}`);values.push(active);}
+    if(hasPassword && password){fields.push(`password_hash=$${n++}`);values.push(await bcrypt.hash(password,12));}
+    if(!fields.length)return res.status(400).json({error:"Nenhuma alteração informada."});
+    fields.push("updated_at=NOW()");values.push(id);
+    const r=await pool.query(`UPDATE admin_users SET ${fields.join(",")} WHERE id=$${n} RETURNING id,username,display_name,active,created_at,updated_at,last_login`,values);
+    if(!r.rows[0])return res.status(404).json({error:"Administrador não encontrado."});
+    res.json({admin:{...r.rows[0],id:Number(r.rows[0].id),active:Boolean(r.rows[0].active)}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar administrador."});}
+});
+
+app.delete("/api/admin/admins/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  if(Number(req.admin.id)===id)return res.status(400).json({error:"Você não pode remover seu próprio acesso."});
+  try{
+    const r=await pool.query("UPDATE admin_users SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id",[id]);
+    if(!r.rows[0])return res.status(404).json({error:"Administrador não encontrado."});
+    res.json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao desativar administrador."});}
+});
+
+app.get("/api/health", async (req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ ok: true, database: "connected" });
+  } catch (e) {
+    console.error(e);
+    res.status(503).json({ ok: false, database: "error" });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  const identifier = String(req.body.identifier || "").trim();
+  const password = String(req.body.password || "");
+  if (!identifier) return res.status(400).json({ error: "Informe seu login." });
+  if (!password) return res.status(400).json({ error: "Informe sua senha." });
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM players WHERE (lower(nick)=lower($1) OR lower(identifier)=lower($1)) AND public_profile=1 AND active=1 LIMIT 1",
+      [identifier]
+    );
+    const player = result.rows[0];
+    if (!player) return res.status(401).json({ error: "Login ou senha incorretos." });
+    if (!player.password_hash) {
+      return res.status(403).json({ error: "Sua senha ainda não foi cadastrada. Procure a administração do RPG." });
+    }
+
+    const valid = await bcrypt.compare(password, player.password_hash);
+    if (!valid) return res.status(401).json({ error: "Login ou senha incorretos." });
+    player.roles=await getPlayerRoles(player.id);
+
+    res.cookie("spade_player", makePlayerToken(Number(player.id)), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 1000 * 60 * 60 * 24 * 7
+    });
+    res.json({ player: publicPlayer(player) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao realizar login." });
+  }
+});
+
+app.post("/api/logout", (req, res) => {
+  res.clearCookie("spade_player");
+  res.json({ ok: true });
+});
+
+app.get("/api/me", async (req, res) => {
+  const id = readPlayerToken(req);
+  if (!id) return res.status(401).json({ error: "Não autenticado." });
+  try {
+    const result = await pool.query("SELECT * FROM players WHERE id=$1 AND active=1", [id]);
+    const player = result.rows[0];
+    if (!player) return res.status(401).json({ error: "Sessão inválida." });
+    player.roles=await getPlayerRoles(id);
+    res.json({ player: publicPlayer(player) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao carregar perfil." });
+  }
+});
+
+app.get("/api/me/dashboard", async (req,res)=>{
+  const id=readPlayerToken(req);
+  if(!id)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const [playerR, cardsR, rankingsR, activeR, scheduleR, notesR, statusR] = await Promise.all([
+      pool.query(`SELECT id,nick,house,patent,grimoire,hp,mana,yuls,missions,achievements,exp,active FROM players WHERE id=$1 AND active=1 LIMIT 1`,[id]),
+      pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(c.power_value),0)::bigint AS power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[id]),
+      pool.query(`WITH powers AS (SELECT p.id,COALESCE(SUM(c.power_value),0)::bigint AS score FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.active=1 AND p.public_profile=1 GROUP BY p.id), sc AS (SELECT id,skill_sc AS score FROM players WHERE active=1 AND public_profile=1), vt AS (SELECT id,skill_vt AS score FROM players WHERE active=1 AND public_profile=1) SELECT (SELECT COUNT(*)+1 FROM powers WHERE score>(SELECT score FROM powers WHERE id=$1))::int AS power_rank,(SELECT COUNT(*)+1 FROM sc WHERE score>(SELECT score FROM sc WHERE id=$1))::int AS sc_rank,(SELECT COUNT(*)+1 FROM vt WHERE score>(SELECT score FROM vt WHERE id=$1))::int AS vt_rank`,[id]),
+      pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND status='ATIVO' ORDER BY end_date ASC,id ASC LIMIT 4`),
+      pool.query(`SELECT s.id,s.title,s.activity_type,s.activity_date,s.start_time,s.end_time,s.status,s.event_id,s.mission_id,e.title AS event_title FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND s.activity_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 5`),
+      pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id=$1 ORDER BY id DESC LIMIT 5`,[id]),
+      pool.query(`SELECT id,message,status_date,created_at,updated_at FROM player_statuses WHERE player_id=$1 AND status_date=(NOW() AT TIME ZONE 'America/Sao_Paulo')::date LIMIT 1`,[id])
+    ]);
+    const player=playerR.rows[0];
+    if(!player)return res.status(401).json({error:"Sessão inválida."});
+    const roles=await getPlayerRoles(id);
+    res.json({
+      player:{...publicPlayer({...player,roles})},
+      cards:{count:Number(cardsR.rows[0]?.count||0),power:Number(cardsR.rows[0]?.power||0)},
+      rankings:{power:Number(rankingsR.rows[0]?.power_rank||0),sc:Number(rankingsR.rows[0]?.sc_rank||0),vt:Number(rankingsR.rows[0]?.vt_rank||0)},
+      activeEvents:activeR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||"EVENTO",status:x.status,start_date:x.start_date,end_date:x.end_date})),
+      upcoming:scheduleR.rows.map(x=>({id:Number(x.id),title:x.title,activity_type:x.activity_type||"ATIVIDADE",activity_date:x.activity_date,start_time:x.start_time,end_time:x.end_time,status:x.status,event_id:x.event_id?Number(x.event_id):null,mission_id:x.mission_id?Number(x.mission_id):null,event_title:x.event_title||""})),
+      notifications:notesR.rows.map(x=>({id:Number(x.id),title:x.title,body:x.body,type:x.type,link_page:x.link_page||"",read:Boolean(x.read_at),created_at:x.created_at})),
+      unreadNotifications:notesR.rows.filter(x=>!x.read_at).length,
+      todayStatus:statusR.rows[0]?{id:Number(statusR.rows[0].id),message:statusR.rows[0].message,status_date:statusR.rows[0].status_date,created_at:statusR.rows[0].created_at,updated_at:statusR.rows[0].updated_at}:null
+    });
+  }catch(e){console.error("Erro em /api/me/dashboard:",e);res.status(500).json({error:"Erro ao carregar seu painel."});}
+});
+
+
+function saoPauloTodaySql(){ return "((NOW() AT TIME ZONE 'America/Sao_Paulo')::date)"; }
+
+app.get("/api/me/status/today", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const r=await pool.query(`
+      SELECT ps.id,ps.status_date,ps.message,ps.created_at,ps.updated_at,p.nick,p.house
+      FROM player_statuses ps
+      JOIN players p ON p.id=ps.player_id
+      WHERE ps.player_id=$1 AND ps.status_date=${saoPauloTodaySql()}
+      LIMIT 1`,[playerId]);
+    const x=r.rows[0];
+    res.json({status:x?{
+      id:Number(x.id),status_date:x.status_date,message:x.message,
+      created_at:x.created_at,updated_at:x.updated_at,nick:x.nick,house:x.house||""
+    }:null});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seu status de hoje."});}
+});
+
+app.post("/api/me/status", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const message=String(req.body?.message||"").trim();
+  if(!message)return res.status(400).json({error:"Escreva uma mensagem antes de publicar."});
+  if(message.length>280)return res.status(400).json({error:"O status pode ter no máximo 280 caracteres."});
+  try{
+    const r=await pool.query(`
+      INSERT INTO player_statuses(player_id,status_date,message,created_at,updated_at)
+      VALUES($1,${saoPauloTodaySql()},$2,NOW(),NOW())
+      ON CONFLICT(player_id,status_date)
+      DO UPDATE SET message=EXCLUDED.message,updated_at=NOW()
+      RETURNING id,status_date,message,created_at,updated_at`,
+      [playerId,message]
+    );
+    const player=await pool.query("SELECT nick,house FROM players WHERE id=$1",[playerId]);
+    res.json({status:{...r.rows[0],id:Number(r.rows[0].id),nick:player.rows[0]?.nick||"",house:player.rows[0]?.house||""}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao publicar seu status."});}
+});
+
+app.get("/api/status-board", async (req,res)=>{
+  const viewerId=readPlayerToken(req);
+  if(!viewerId)return res.status(401).json({error:"Faça login para visualizar o quadro de status."});
+  try{
+    const days=Math.min(14,Math.max(1,Number(req.query?.days||7)));
+    const r=await pool.query(`
+      SELECT ps.id,ps.player_id,ps.status_date,ps.message,ps.created_at,ps.updated_at,
+             p.nick,p.house,p.patent,p.public_profile,
+             COALESCE((SELECT COUNT(*) FROM status_reactions sr WHERE sr.status_id=ps.id),0) AS reaction_count,
+             COALESCE((SELECT COUNT(*) FROM status_comments sc WHERE sc.status_id=ps.id),0) AS comment_count,
+             EXISTS(SELECT 1 FROM status_reactions sr2 WHERE sr2.status_id=ps.id AND sr2.player_id=$2 AND sr2.reaction='❤️') AS reacted
+      FROM player_statuses ps
+      JOIN players p ON p.id=ps.player_id
+      WHERE ps.status_date >= (${saoPauloTodaySql()} - $1::int) AND COALESCE(p.active,1)=1
+      ORDER BY ps.status_date DESC,ps.updated_at DESC,ps.id DESC
+      LIMIT 500`,[days-1,viewerId]);
+    res.json({statuses:r.rows.map(x=>({
+      id:Number(x.id),player_id:Number(x.player_id),status_date:x.status_date,
+      message:x.message,created_at:x.created_at,updated_at:x.updated_at,
+      nick:x.nick,house:x.house||"",patent:x.patent||"",
+      reaction_count:Number(x.reaction_count||0),comment_count:Number(x.comment_count||0),reacted:Boolean(x.reacted),
+      mine:Number(x.player_id)===Number(viewerId)
+    }))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar quadro de status."});}
+});
+
+app.post("/api/status/:id/react", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const statusId=Number(req.params.id);
+  if(!Number.isFinite(statusId))return res.status(400).json({error:"Status inválido."});
+  try{
+    const exists=await pool.query("SELECT id FROM player_statuses WHERE id=$1",[statusId]);
+    if(!exists.rows[0])return res.status(404).json({error:"Status não encontrado."});
+    const q=await pool.query("SELECT id FROM status_reactions WHERE status_id=$1 AND player_id=$2 AND reaction='❤️'",[statusId,playerId]);
+    if(q.rows[0]) await pool.query("DELETE FROM status_reactions WHERE id=$1",[q.rows[0].id]);
+    else await pool.query("INSERT INTO status_reactions(status_id,player_id,reaction) VALUES($1,$2,'❤️') ON CONFLICT DO NOTHING",[statusId,playerId]);
+    const c=await pool.query("SELECT COUNT(*) FROM status_reactions WHERE status_id=$1",[statusId]);
+    res.json({reacted:!q.rows[0],count:Number(c.rows[0].count)});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível atualizar a reação."});}
+});
+
+app.get("/api/status/:id/comments", async (req,res)=>{
+  const viewer=readPlayerToken(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  const statusId=Number(req.params.id);
+  try{
+    const r=await pool.query(`SELECT sc.id,sc.player_id,sc.message,sc.created_at,p.nick,p.house
+      FROM status_comments sc JOIN players p ON p.id=sc.player_id
+      WHERE sc.status_id=$1 ORDER BY sc.created_at ASC LIMIT 100`,[statusId]);
+    res.json({comments:r.rows.map(x=>({id:Number(x.id),player_id:Number(x.player_id),message:x.message,created_at:x.created_at,nick:x.nick,house:x.house||"",mine:Number(x.player_id)===Number(viewer)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível carregar os comentários."});}
+});
+
+app.post("/api/status/:id/comments", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const statusId=Number(req.params.id);
+  const message=String(req.body?.message||"").trim();
+  if(!message)return res.status(400).json({error:"Escreva um comentário."});
+  if(message.length>280)return res.status(400).json({error:"O comentário pode ter no máximo 280 caracteres."});
+  try{
+    const r=await pool.query("INSERT INTO status_comments(status_id,player_id,message) SELECT $1,$2,$3 WHERE EXISTS(SELECT 1 FROM player_statuses WHERE id=$1) RETURNING id,created_at",[statusId,playerId,message]);
+    if(!r.rows[0])return res.status(404).json({error:"Status não encontrado."});
+    const p=await pool.query("SELECT nick,house FROM players WHERE id=$1",[playerId]);
+    res.json({comment:{id:Number(r.rows[0].id),player_id:playerId,message,created_at:r.rows[0].created_at,nick:p.rows[0]?.nick||"",house:p.rows[0]?.house||"",mine:true}});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível publicar o comentário."});}
+});
+
+
+async function applyEconomyTransaction(client, tx, adminId) {
