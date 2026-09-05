@@ -14,7 +14,7 @@
   <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
   <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
   <nav id="nav">
-    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button>
+    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button><button data-page="biblioteca">📚 Biblioteca</button>
     <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
@@ -78,7 +78,14 @@
     <div class="section-head journal-section-head" style="margin-top:45px"><div><p class="eyebrow">NOTÍCIAS</p><h2>Últimos acontecimentos</h2></div></div>
     <div id="journalNews" class="news-grid journal-news-grid"></div>
   </div>
-</section><section class="page" id="comunicados">
+</section><section class="page" id="biblioteca">
+  <div class="subhero"><p class="eyebrow">ARQUIVO DO REINO</p><h1>Biblioteca de <em>Spade.</em></h1><p>Regras, manuais, Databook e materiais permanentes do Reino em um só lugar.</p></div>
+  <div class="content">
+    <div class="library-toolbar"><input id="librarySearch" class="search" placeholder="🔎 Buscar na Biblioteca..."><select id="libraryCategory" class="admin-filter"><option value="">Todas as categorias</option></select></div>
+    <div id="libraryGrid" class="library-grid"></div>
+  </div>
+</section>
+<section class="page" id="comunicados">
   <div class="subhero">
     <p class="eyebrow">MURAL OFICIAL</p>
     <h1>Comunicados do <em>Reino.</em></h1>
@@ -644,6 +651,26 @@
       </div>
     </div>
   </div>
+  <div class="admin-library-panel panel" id="adminLibraryPanel">
+    <div class="panel-head"><div><p class="eyebrow">CONHECIMENTO</p><h3>Biblioteca do Reino</h3></div><span>Materiais permanentes, regras e manuais</span></div>
+    <div class="admin-users-layout">
+      <form id="adminLibraryForm" class="admin-form admin-user-form">
+        <input type="hidden" id="adminLibraryId">
+        <input id="adminLibraryTitle" placeholder="Título do material" required>
+        <input id="adminLibraryCategory" placeholder="Categoria (ex.: Databook)">
+        <input id="adminLibraryIcon" placeholder="Ícone" value="📚">
+        <input id="adminLibraryOrder" type="number" placeholder="Ordem" value="0">
+        <input id="adminLibraryUrl" class="full" placeholder="Link do material (opcional)">
+        <textarea id="adminLibraryDescription" class="full" placeholder="Descrição curta"></textarea>
+        <textarea id="adminLibraryContent" class="full" placeholder="Conteúdo/resumo para leitura no Portal (opcional)"></textarea>
+        <label class="full"><input type="checkbox" id="adminLibraryPublished" checked> Publicar material</label>
+        <div class="editor-actions full"><button class="gold" type="submit">＋ Salvar material</button><button class="outline dark-outline" type="button" id="adminLibraryClear">Limpar</button></div>
+        <div class="error full" id="adminLibraryError"></div>
+      </form>
+      <div><div class="eyebrow">BANCO DA BIBLIOTECA</div><div id="adminLibraryList" class="editorial-list"></div></div>
+    </div>
+  </div>
+
   <div class="admin-users-panel panel">
     <div class="panel-head"><div><p class="eyebrow">ACESSOS</p><h3>Administradores</h3></div><span>Contas individuais para a equipe do Portal</span></div>
     <div class="admin-users-layout">
