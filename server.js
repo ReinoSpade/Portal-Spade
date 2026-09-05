@@ -448,6 +448,26 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS mission_activities (
+      id BIGSERIAL PRIMARY KEY,
+      mission_type TEXT NOT NULL DEFAULT 'Luta',
+      start_at TIMESTAMPTZ NOT NULL,
+      end_at TIMESTAMPTZ NOT NULL,
+      description TEXT DEFAULT '',
+      instructions TEXT DEFAULT '',
+      reward_yuls BIGINT DEFAULT 0 CHECK (reward_yuls >= 0),
+      reward_exp BIGINT DEFAULT 0 CHECK (reward_exp >= 0),
+      reward_cards TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'AGENDADA',
+      published INTEGER NOT NULL DEFAULT 1 CHECK (published IN (0,1)),
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      CHECK (end_at > start_at)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mission_activities_dates ON mission_activities(start_at,end_at,status);
+
     CREATE TABLE IF NOT EXISTS houses (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -1314,6 +1334,72 @@ const EVENT_REWARD_TYPES=["YULS","EXP","CARD"];
 const EVENT_RESULT_SLOTS=["WINNER_1","WINNER_2","WINNER_3","HONOR_1","HONOR_2","HONOR_3"];
 const SCHEDULE_STATUSES=["AGENDADA","EM_ANDAMENTO","CONCLUIDA","CANCELADA"];
 
+
+const MISSION_TYPES=["Luta","Trívia","História","Treinamento","Recrutamento","Outro"];
+const MISSION_STATUSES=["AGENDADA","EM_ANDAMENTO","CONCLUIDA","CANCELADA"];
+
+function missionStatusFromDates(startAt,endAt,status){
+  if(status==="CANCELADA"||status==="CONCLUIDA") return status;
+  const now=Date.now(),s=new Date(startAt).getTime(),e=new Date(endAt).getTime();
+  if(now<s) return "AGENDADA";
+  if(now<e) return "EM_ANDAMENTO";
+  return "CONCLUIDA";
+}
+
+app.get("/api/missions", async (req,res)=>{
+  const viewer=readPlayerToken(req);
+  if(!viewer) return res.status(401).json({error:"Faça login para visualizar as missões."});
+  try{
+    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published FROM mission_activities WHERE published=1 ORDER BY start_at DESC,id DESC LIMIT 100`);
+    res.json({missions:r.rows.map(m=>({...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0),status:missionStatusFromDates(m.start_at,m.end_at,m.status)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar missões."});}
+});
+
+app.get("/api/missions/active", async (req,res)=>{
+  const viewer=readPlayerToken(req);
+  if(!viewer) return res.status(401).json({active:null});
+  try{
+    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status FROM mission_activities WHERE published=1 AND status<>\'CANCELADA\' AND start_at<=NOW() AND end_at>NOW() ORDER BY end_at ASC,id ASC LIMIT 1`);
+    const m=r.rows[0];
+    res.json({active:m?{...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0)}:null});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao verificar missão ativa."});}
+});
+
+app.get("/api/admin/missions", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_at,updated_at FROM mission_activities ORDER BY start_at DESC,id DESC LIMIT 300`);
+    res.json({types:MISSION_TYPES,statuses:MISSION_STATUSES,missions:r.rows.map(m=>({...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0),status:missionStatusFromDates(m.start_at,m.end_at,m.status)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar missões administrativas."});}
+});
+
+app.post("/api/admin/missions", requireAdmin, async (req,res)=>{
+  const b=req.body||{}; const type=String(b.mission_type||"Luta").trim();
+  const start=new Date(b.start_at), end=new Date(b.end_at);
+  if(!MISSION_TYPES.includes(type)) return res.status(400).json({error:"Tipo de missão inválido."});
+  if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime())||end<=start) return res.status(400).json({error:"Informe início e encerramento válidos."});
+  try{
+    const r=await pool.query(`INSERT INTO mission_activities(mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[type,start.toISOString(),end.toISOString(),String(b.description||""),String(b.instructions||""),Math.max(0,Number(b.reward_yuls||0)),Math.max(0,Number(b.reward_exp||0)),String(b.reward_cards||""),String(b.status||"AGENDADA"),b.published===false?0:1,req.admin?.id||null]);
+    res.json({mission:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao criar missão."});}
+});
+
+app.put("/api/admin/missions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id); if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Missão inválida."});
+  const b=req.body||{}; const type=String(b.mission_type||"Luta").trim();
+  const start=new Date(b.start_at), end=new Date(b.end_at);
+  if(!MISSION_TYPES.includes(type)) return res.status(400).json({error:"Tipo de missão inválido."});
+  if(Number.isNaN(start.getTime())||Number.isNaN(end.getTime())||end<=start)return res.status(400).json({error:"Informe início e encerramento válidos."});
+  try{
+    const r=await pool.query(`UPDATE mission_activities SET mission_type=$1,start_at=$2,end_at=$3,description=$4,instructions=$5,reward_yuls=$6,reward_exp=$7,reward_cards=$8,status=$9,published=$10,updated_at=NOW() WHERE id=$11 RETURNING *`,[type,start.toISOString(),end.toISOString(),String(b.description||""),String(b.instructions||""),Math.max(0,Number(b.reward_yuls||0)),Math.max(0,Number(b.reward_exp||0)),String(b.reward_cards||""),String(b.status||"AGENDADA"),b.published===false?0:1,id]);
+    if(!r.rowCount)return res.status(404).json({error:"Missão não encontrada."}); res.json({mission:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar missão."});}
+});
+
+app.delete("/api/admin/missions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id); if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Missão inválida."});
+  try{ const r=await pool.query(`UPDATE mission_activities SET status='CANCELADA',published=0,updated_at=NOW() WHERE id=$1 RETURNING id`,[id]); if(!r.rowCount)return res.status(404).json({error:"Missão não encontrada."}); res.json({ok:true}); }
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao encerrar missão."});}
+});
 
 app.get("/api/events", async (req,res)=>{
   try{
