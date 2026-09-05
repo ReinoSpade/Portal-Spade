@@ -302,12 +302,29 @@ async function initDatabase() {
       CHECK (char_length(message) BETWEEN 1 AND 280)
     );
 
+    CREATE TABLE IF NOT EXISTS card_categories (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS cards (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
+      name_jp TEXT DEFAULT '',
+      name_pt TEXT DEFAULT '',
       type TEXT NOT NULL DEFAULT 'Outros',
       category TEXT,
+      element_type TEXT NOT NULL DEFAULT 'NAO_ELEMENTAL' CHECK (element_type IN ('ELEMENTAL','NAO_ELEMENTAL')),
+      element TEXT DEFAULT '',
+      cost_type TEXT NOT NULL DEFAULT 'SEM_CUSTO' CHECK (cost_type IN ('MANA','VIDA','SEM_CUSTO')),
       cost TEXT DEFAULT '',
+      power_value INTEGER NOT NULL DEFAULT 0 CHECK (power_value >= 0),
+      origin TEXT NOT NULL DEFAULT 'Exclusivo',
+      status TEXT NOT NULL DEFAULT 'ATIVO',
       description TEXT DEFAULT '',
       sort_order INTEGER DEFAULT 0,
       active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
@@ -653,6 +670,14 @@ async function initDatabase() {
       `);
   await pool.query(`
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS category TEXT;
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS name_jp TEXT DEFAULT '';
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS name_pt TEXT DEFAULT '';
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS element_type TEXT DEFAULT 'NAO_ELEMENTAL';
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS element TEXT DEFAULT '';
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS cost_type TEXT DEFAULT 'SEM_CUSTO';
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS power_value INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS origin TEXT DEFAULT 'Exclusivo';
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ATIVO';
     ALTER TABLE player_cards ADD COLUMN IF NOT EXISTS acquisition_type TEXT DEFAULT 'OUTRO';
     ALTER TABLE player_cards ADD COLUMN IF NOT EXISTS acquisition_id BIGINT;
     ALTER TABLE player_cards ADD COLUMN IF NOT EXISTS acquisition_name TEXT DEFAULT '';
@@ -664,8 +689,15 @@ async function initDatabase() {
 
   await pool.query(`
     UPDATE cards
-    SET category=COALESCE(NULLIF(category,''),type,'Outros')
+    SET category=COALESCE(NULLIF(category,''),type,'Outros'),
+        name_pt=COALESCE(NULLIF(name_pt,''),name),
+        status=COALESCE(NULLIF(status,''),'ATIVO'),
+        origin=COALESCE(NULLIF(origin,''),'Exclusivo'),
+        element_type=COALESCE(NULLIF(element_type,''),'NAO_ELEMENTAL'),
+        cost_type=COALESCE(NULLIF(cost_type,''),'SEM_CUSTO')
     WHERE COALESCE(category,'')='';
+
+    UPDATE cards SET name_pt=COALESCE(NULLIF(name_pt,''),name) WHERE COALESCE(name_pt,'')='';
 
     UPDATE player_cards
     SET quantity=1
@@ -924,11 +956,16 @@ async function initDatabase() {
   ];
   for (const [name,type,cost,description,sort_order] of defaultCards) {
     await pool.query(
-      `INSERT INTO cards(name,type,category,cost,description,sort_order)
-       VALUES ($1,$2,$2,$3,$4,$5)
+      `INSERT INTO cards(name,type,category,name_pt,cost,cost_type,description,sort_order,origin,power_value)
+       VALUES ($1,$2,$2,$1,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (name) DO NOTHING`,
-      [name,type,cost,description,sort_order]
+      [name,type,cost,cost ? (String(cost).includes('Mana') ? 'MANA' : 'SEM_CUSTO') : 'SEM_CUSTO',description,sort_order,'SC Junior',0]
     );
+  }
+
+  const cardCategorySeeds=['Falha','Fuga','Ataque/Defesa','Barreira','Paralisia','Magia Ofensiva','Réplica','Técnica','Ativação','Invocação','Ilusão','Regeneração','Outros'];
+  for (let i=0;i<cardCategorySeeds.length;i++) {
+    await pool.query(`INSERT INTO card_categories(name,sort_order) VALUES($1,$2) ON CONFLICT(name) DO NOTHING`,[cardCategorySeeds[i],i+1]);
   }
 
   // The announcements table definitely exists at this point.
@@ -1333,17 +1370,17 @@ app.get("/api/me/cards", async (req,res)=>{
   if(!id)return res.status(401).json({error:"Não autenticado."});
   try{
     const r=await pool.query(
-      `SELECT c.id,c.name,COALESCE(c.category,c.type) AS category,c.cost,c.description,c.sort_order,
+      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.origin,c.status,c.description,c.sort_order,
               pc.acquisition_type,pc.acquisition_name,pc.acquisition_id,pc.acquired_at,pc.updated_at
        FROM player_cards pc
        JOIN cards c ON c.id=pc.card_id
-       WHERE pc.player_id=$1 AND c.active=1
+       WHERE pc.player_id=$1
        ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,
       [id]
     );
     res.json({
       cards:r.rows.map(c=>({
-        id:Number(c.id),name:c.name,category:c.category||"Outros",cost:c.cost||"",
+        id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
         description:c.description||"",
         acquisition_type:c.acquisition_type||"OUTRO",
         acquisition_name:c.acquisition_name||"",
@@ -1942,13 +1979,13 @@ app.get("/api/hierarchy", async (req,res) => {
 app.get("/api/rankings", async (req, res) => {
   try {
     const [powerResult, scResult, vtResult, missionsResult, wealthResult, activityResult, houseResult] = await Promise.all([
-      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY power DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT p.id,p.nick,p.number,p.identifier,p.house,COALESCE(SUM(c.power_value),0)::bigint AS power,p.missions,p.achievements,p.yuls FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.public_profile=1 AND p.active=1 GROUP BY p.id ORDER BY power DESC, p.missions DESC, p.nick COLLATE "C" ASC LIMIT 75`),
       pool.query(`SELECT id,nick,number,identifier,house,skill_sc AS score,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_sc DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
       pool.query(`SELECT id,nick,number,identifier,house,skill_vt AS score,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_vt DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
       pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY missions DESC, achievements DESC, nick COLLATE "C" ASC LIMIT 75`),
       pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY yuls DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
       pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY (missions + achievements * 3) DESC, missions DESC, achievements DESC, nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT h.id,h.name,h.emblem,h.leader,h.vice_leader,COUNT(p.id)::int AS members,COALESCE(SUM(p.missions),0)::bigint AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls,COALESCE(SUM(p.power),0)::bigint AS power FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1 AND p.active=1 WHERE h.active=1 GROUP BY h.id ORDER BY power DESC, missions DESC, members DESC, h.name ASC LIMIT 20`)
+      pool.query(`SELECT h.id,h.name,h.emblem,h.leader,h.vice_leader,COUNT(p.id)::int AS members,COALESCE(SUM(p.missions),0)::bigint AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls,COALESCE(SUM(cp.card_power),0)::bigint AS power FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1 AND p.active=1 LEFT JOIN LATERAL (SELECT COALESCE(SUM(c.power_value),0)::bigint AS card_power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=p.id) cp ON TRUE WHERE h.active=1 GROUP BY h.id ORDER BY power DESC, missions DESC, members DESC, h.name ASC LIMIT 20`)
     ]);
     const mapPlayer=p=>({id:Number(p.id),nick:p.nick,number:p.number,identifier:p.identifier,house:p.house||"",power:Number(p.power||0),score:Number(p.score||0),missions:Number(p.missions||0),achievements:Number(p.achievements||0),yuls:Number(p.yuls||0)});
     res.json({
@@ -2452,104 +2489,84 @@ app.delete("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
 });
 
 
-const CARD_CATEGORIES=[
-  "Falha","Fuga","Ataque/Defesa","Barreira","Paralisia",
-  "Magia Ofensiva","Réplica","Técnica","Ativação",
-  "Invocação","Ilusão","Regeneração","Outros"
-];
+const CARD_CATEGORIES=["Falha","Fuga","Ataque/Defesa","Barreira","Paralisia","Magia Ofensiva","Réplica","Técnica","Ativação","Invocação","Ilusão","Regeneração","Outros"];
+const CARD_ORIGINS=["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"];
+const CARD_ELEMENT_TYPES=["ELEMENTAL","NAO_ELEMENTAL"];
+const CARD_COST_TYPES=["MANA","VIDA","SEM_CUSTO"];
+const CARD_STATUSES=["ATIVO","INATIVO"];
+
+app.post("/api/admin/card-categories", requireAdmin, async (req,res)=>{
+  const name=String(req.body?.name||"").trim();
+  if(!name)return res.status(400).json({error:"Nome da categoria é obrigatório."});
+  try{const r=await pool.query(`INSERT INTO card_categories(name,sort_order) VALUES($1,COALESCE((SELECT MAX(sort_order)+1 FROM card_categories),1)) RETURNING *`,[name]);res.json({category:r.rows[0]});}
+  catch(e){if(e.code==="23505")return res.status(400).json({error:"Essa categoria já existe."});res.status(500).json({error:"Erro ao criar categoria."});}
+});
 
 app.get("/api/admin/cards", requireAdmin, async (req,res)=>{
   try{
-    const r=await pool.query(
-      `SELECT c.id,c.name,COALESCE(c.category,c.type) AS category,c.cost,c.description,c.sort_order,c.active,
-              COUNT(pc.player_id)::int AS players
-       FROM cards c
-       LEFT JOIN player_cards pc ON pc.card_id=c.id
-       GROUP BY c.id
-       ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`
-    );
+    const [r,cats]=await Promise.all([
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.origin,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players
+                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id
+                  GROUP BY c.id ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`),
+      pool.query(`SELECT name FROM card_categories WHERE active=1 ORDER BY sort_order,name COLLATE "C"`)
+    ]);
     res.json({
-      categories:CARD_CATEGORIES,
-      cards:r.rows.map(c=>({
-        id:Number(c.id),name:c.name,category:c.category||"Outros",
-        cost:c.cost||"",description:c.description||"",sort_order:Number(c.sort_order||0),
-        active:Number(c.active),players:Number(c.players||0)
-      }))
+      categories:cats.rows.map(x=>x.name),origins:CARD_ORIGINS,element_types:CARD_ELEMENT_TYPES,cost_types:CARD_COST_TYPES,statuses:CARD_STATUSES,
+      cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_jp:c.name_jp||"",name_pt:c.name_pt||c.name,category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Exclusivo",status:c.status||"ATIVO",description:c.description||"",sort_order:Number(c.sort_order||0),active:Number(c.active),players:Number(c.players||0)}))
     });
-  }catch(e){
-    console.error(e);
-    res.status(500).json({error:"Erro ao carregar banco de cards."});
-  }
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar banco de cards."});}
 });
 
 app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
   const b=req.body||{};
-  const name=String(b.name||"").trim();
+  const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
   const category=String(b.category||"Outros").trim();
+  const elementType=String(b.element_type||"NAO_ELEMENTAL").toUpperCase();
+  const element=String(b.element||"").trim();
+  const costType=String(b.cost_type||"SEM_CUSTO").toUpperCase();
   const cost=String(b.cost||"").trim();
+  const power=Math.max(0,Math.round(Number(b.power_value||0)));
+  const origin=String(b.origin||"Exclusivo").trim();
+  const status=String(b.status||"ATIVO").toUpperCase();
   const description=String(b.description||"").trim();
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
-  if(!name)return res.status(400).json({error:"Nome do card é obrigatório."});
+  if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
   if(!CARD_CATEGORIES.includes(category))return res.status(400).json({error:"Categoria de card inválida."});
+  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
   try{
-    const r=await pool.query(
-      `INSERT INTO cards(name,type,category,cost,description,sort_order)
-       VALUES ($1,$2,$2,$3,$4,$5) RETURNING *`,
-      [name,category,cost,description,sort_order]
-    );
+    const r=await pool.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,origin,status,description,sort_order,active)
+      VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,origin,status,description,sort_order,status==="ATIVO"?1:0]);
     res.json({card:r.rows[0]});
-  }catch(e){
-    console.error(e);
-    if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});
-    res.status(500).json({error:"Erro ao criar card."});
-  }
+  }catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});res.status(500).json({error:"Erro ao criar card."});}
 });
 
 app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id),b=req.body||{};
-  const name=String(b.name||"").trim();
-  const category=String(b.category||"Outros").trim();
-  const cost=String(b.cost||"").trim();
-  const description=String(b.description||"").trim();
+  const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
+  const category=String(b.category||"Outros").trim(),elementType=String(b.element_type||"NAO_ELEMENTAL").toUpperCase(),element=String(b.element||"").trim(),costType=String(b.cost_type||"SEM_CUSTO").toUpperCase(),cost=String(b.cost||"").trim();
+  const power=Math.max(0,Math.round(Number(b.power_value||0))),origin=String(b.origin||"Exclusivo").trim(),status=String(b.status||"ATIVO").toUpperCase(),description=String(b.description||"").trim();
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
-  const active=Number(b.active??1)?1:0;
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
-  if(!name)return res.status(400).json({error:"Nome do card é obrigatório."});
-  if(!CARD_CATEGORIES.includes(category))return res.status(400).json({error:"Categoria de card inválida."});
+  if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
+  if(!CARD_CATEGORIES.includes(category)||!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
   try{
-    const r=await pool.query(
-      `UPDATE cards
-       SET name=$1,type=$2,category=$2,cost=$3,description=$4,sort_order=$5,active=$6,updated_at=NOW()
-       WHERE id=$7 RETURNING *`,
-      [name,category,cost,description,sort_order,active,id]
-    );
+    const r=await pool.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,origin=$9,status=$10,description=$11,sort_order=$12,active=$13,updated_at=NOW() WHERE id=$14 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
     if(!r.rows[0])return res.status(404).json({error:"Card não encontrado."});
     res.json({card:r.rows[0]});
-  }catch(e){
-    console.error(e);
-    if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});
-    res.status(500).json({error:"Erro ao atualizar card."});
-  }
+  }catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});res.status(500).json({error:"Erro ao atualizar card."});}
 });
 
 app.delete("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
   try{
-    const used=await pool.query("SELECT COUNT(*)::int AS players FROM player_cards WHERE card_id=$1",[id]);
-    if(Number(used.rows[0].players)>0){
-      return res.status(400).json({error:"Este card está no inventário de jogadores. Remova-o dos inventários ou desative-o antes de excluir."});
-    }
-    const r=await pool.query("DELETE FROM cards WHERE id=$1",[id]);
-    if(!r.rowCount)return res.status(404).json({error:"Card não encontrado."});
-    res.json({ok:true});
-  }catch(e){
-    console.error(e);
-    res.status(500).json({error:"Erro ao excluir card."});
-  }
+    const r=await pool.query(`UPDATE cards SET active=0,status='INATIVO',updated_at=NOW() WHERE id=$1 RETURNING id,name,name_pt`,[id]);
+    if(!r.rows[0])return res.status(404).json({error:"Card não encontrado."});
+    res.json({ok:true,card:r.rows[0],message:"Card desativado. O histórico e a posse existente foram preservados."});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao desativar card."});}
 });
-
-
 
 app.get("/api/admin/events", requireAdmin, async (req,res)=>{
   try{
@@ -3739,6 +3756,10 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
 
 
 
+async function refreshPlayerCardPower(client, playerId){
+  await client.query(`UPDATE players p SET power=COALESCE((SELECT SUM(c.power_value) FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=p.id),0),updated_at=NOW() WHERE p.id=$1`,[playerId]);
+}
+
 app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
   const body=req.body||{};
   const playerIds=[...new Set((Array.isArray(body.player_ids)?body.player_ids:[])
@@ -3819,6 +3840,7 @@ app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
       added.push({player_id:Number(pr.id),nick:pr.nick});
     }
 
+    for(const pr of prs.rows){ await refreshPlayerCardPower(client, pr.id); }
     await client.query("COMMIT");
     res.json({
       ok:true,
@@ -3966,6 +3988,7 @@ app.post("/api/admin/players/:id/cards", requireAdmin, async (req,res)=>{
       );
     }
 
+    await refreshPlayerCardPower(client, playerId);
     await client.query("COMMIT");
     res.json({ok:true,card:{
       id:Number(cr.rows[0].id),name:cr.rows[0].name,category:cr.rows[0].category||"Outros"
