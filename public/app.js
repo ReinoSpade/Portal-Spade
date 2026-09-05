@@ -166,10 +166,11 @@ function renderAnnouncements(items){
 }
 
 function renderHomeActiveActivities(items){
-  const el=qs("#homeActiveActivities"); if(!el)return;
-  el.innerHTML=(items||[]).length?`<div class="home-active-wrap"><div class="section-head"><div><p class="eyebrow">♠️ ATIVIDADE OFICIAL</p><h2>Acontecendo agora</h2></div><button class="outline dark-outline" data-page="cronograma">Ver cronograma</button></div><div class="home-active-grid">${items.slice(0,4).map(a=>{const kind=a.mission_type?`Missão de ${a.mission_type}`:(a.event_title?`Evento: ${a.event_title}`:(a.activity_type||"Atividade"));const end=a.end_time?String(a.end_time).slice(0,5):(a.mission_end_at?new Date(a.mission_end_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"");return `<article class="home-active-card"><span class="tag">ACONTECENDO AGORA</span><h3>${escapeHtml(a.title||kind)}</h3><p>${escapeHtml(a.description||kind)}</p>${end?`<small>Encerra às <b>${escapeHtml(end)}</b></small>`:""}<button class="gold small" data-page="cronograma">Ver atividade</button></article>`}).join("")}</div></div>`:"";
+  const el=qs("#homeActiveActivities");if(!el)return;
+  const arr=(items||[]).slice(0,6);
+  el.innerHTML=arr.length?`<div class="home-active-wrap"><div class="section-head"><div><p class="eyebrow">♠️ ATIVIDADE OFICIAL</p><h2>Acontecendo agora</h2></div><button class="outline dark-outline" data-page="cronograma">Ver cronograma</button></div><div class="home-active-grid">${arr.map(a=>{const icon=a.source==='MISSION'?'⚔️':a.source==='EVENT'?'🎪':'📅',label=a.source==='MISSION'?'MISSÃO':a.source==='EVENT'?'EVENTO':'CRONOGRAMA',end=a.end_label||a.end_time?String(a.end_time||a.end_label||''):'',action=a.source==='EVENT'?`<button class="gold small" data-home-open-event="${Number(a.event_id||a.id)}">Ver evento</button>`:a.source==='MISSION'?`<button class="gold small" data-page="missoes">Ver missão</button>`:`<button class="gold small" data-page="cronograma">Ver atividade</button>`;return `<article class="home-active-card"><span class="tag">${icon} ${label} • ACONTECENDO AGORA</span><h3>${escapeHtml(a.title)}</h3><p>${escapeHtml(a.description||a.activity_type||'Atividade oficial')}</p>${end?`<small>Encerramento: <b>${escapeHtml(end)}</b></small>`:''}${action}</article>`}).join('')}</div></div>`:"";
+  qsa('[data-home-open-event]').forEach(b=>b.onclick=()=>openPublicEvent(Number(b.dataset.homeOpenEvent)));
 }
-
 function renderHomeAnnouncements(items){
   const el=qs("#homeAnnouncements");if(!el)return;
   const arr=(items||[]).slice(0,3);
@@ -375,7 +376,7 @@ async function openPublicEvent(id){
   try{
     const d=await api(`/api/events/${id}`),e=d.event;
     const actions=(d.actions||[]).map(a=>`<div class="event-action-public"><div><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.description||"")}</small></div><span>${a.points} pts</span></div>`).join("")||`<p style="font-size:10px;color:#888">Nenhuma ação cadastrada.</p>`;
-    const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA" && state.me?.account_type!=="ALLY"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`;
+    const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA" && state.me?.account_type!=="ALLY"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||(state.me?`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`:`<p style="font-size:10px;color:#888">Recompensas em Cards estão visíveis somente a jogadores de Spade e Aliados.</p>`);
     wrap.innerHTML=`<div class="event-public-detail">
       <button class="journal-close" id="closeEventReader">×</button>
       <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span></div>
@@ -728,18 +729,18 @@ function playerAlertStorageKey(id){
 }
 
 function playerAlertDismissed(id){
-  try{return localStorage.getItem(playerAlertStorageKey(id))==="1"}catch{return false}
+  try{return localStorage.getItem(playerAlertStorageKey(String(id)))==="1"}catch{return false}
 }
 
 function dismissPlayerAlert(id){
-  try{localStorage.setItem(playerAlertStorageKey(id),"1")}catch{}
-  const el=qs(`[data-player-alert="${id}"]`);
+  try{localStorage.setItem(playerAlertStorageKey(String(id)),"1")}catch{}
+  const el=qsa('[data-player-alert]').find(x=>x.dataset.playerAlert===String(id));
   if(el)el.remove();
 }
 
 async function loadPlayerAlerts(){
   const wrap=qs("#playerAlerts");
-  if(!wrap)return;
+  if(!wrap||!state.me)return;
   try{
     const d=await api("/api/me/alerts");
     const alerts=(d.alerts||[]).filter(a=>!playerAlertDismissed(a.id));
@@ -752,7 +753,7 @@ async function loadPlayerAlerts(){
               <h3>${escapeHtml(a.title)}</h3>
               <p>${escapeHtml(a.body||"")}</p>
               <div class="player-alert-date">${escapeHtml(a.category||"")} • ${escapeHtml(String(a.date||""))}</div>
-              <a class="player-alert-link" href="#comunicados">Ver mural de comunicados →</a>
+              <a class="player-alert-link" href="#${escapeHtml(a.link_page||'comunicados')}">Ver conteúdo →</a>
             </div>
             <button class="player-alert-close" type="button" data-close-player-alert="${a.id}" aria-label="Fechar aviso">×</button>
           </div>`;
@@ -950,7 +951,7 @@ function renderDashboard(){
     </div>
     <section class="dashboard-live panel">
       <div class="panel-head"><div><p class="eyebrow">ACONTECENDO AGORA</p><h3>O Reino está em movimento</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Ver cronograma</button></div>
-      <div class="dashboard-live-list">${active||`<div class="dashboard-empty-state"><span>✦</span><div><b>Nenhum evento ativo agora.</b><p>Você pode conferir as próximas atividades no cronograma.</p></div></div>`}</div>
+      <div class="dashboard-live-list">${(d.activeActivities||[]).map(x=>`<article class="dashboard-live-item"><div><span class="tag">${x.source==='MISSION'?'⚔️ MISSÃO':x.source==='EVENT'?'🎪 EVENTO':'📅 CRONOGRAMA'}</span><h4>${escapeHtml(x.title)}</h4><p>${escapeHtml(x.end_label||x.description||'Em andamento')}</p></div>${x.source==='EVENT'?`<button class="outline dark-outline small" type="button" data-dashboard-event="${Number(x.event_id||x.id)}">Ver evento</button>`:`<button class="outline dark-outline small" type="button" data-dashboard-page="${x.source==='MISSION'?'missoes':'cronograma'}">Acompanhar</button>`}</article>`).join('')||`<div class="dashboard-empty-state"><span>✦</span><div><b>Nenhuma atividade ativa agora.</b><p>Você pode conferir as próximas atividades no cronograma.</p></div></div>`}</div>
     </section>
     <div class="dashboard-two-col">
       <section class="panel"><div class="panel-head"><div><p class="eyebrow">PRÓXIMOS</p><h3>Agenda pessoal</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Tudo</button></div><div class="dashboard-upcoming-list">${upcoming||`<div class="dashboard-empty-state"><span>📅</span><div><b>Sem próximas atividades.</b><p>O calendário será atualizado pela Administração.</p></div></div>`}</div></section>
@@ -959,6 +960,7 @@ function renderDashboard(){
     ${status}
     <div class="panel" style="margin-top:12px"><p class="eyebrow">ATIVIDADE</p><h3>${money(p.missions||0)} missões registradas</h3><p>Seu painel reúne sua situação atual e os atalhos para o que importa no Reino.</p></div>`;
   qsa('[data-dashboard-page]').forEach(b=>b.onclick=()=>go(b.dataset.dashboardPage));
+  qsa('[data-dashboard-event]').forEach(b=>b.onclick=()=>openPublicEvent(Number(b.dataset.dashboardEvent)));
   loadPlayerYuls();loadPlayerMissions();loadPlayerAlerts();loadTodayStatus();
 }
 
