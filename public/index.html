@@ -13,6 +13,11 @@
 <header class="top">
   <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
   <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
+  <div class="global-search" id="globalSearchWrap">
+    <label class="sr-only" for="globalSearchInput">Pesquisar no Portal</label>
+    <input id="globalSearchInput" class="global-search-input" type="search" autocomplete="off" placeholder="🔎 Pesquisar no Portal..." aria-label="Pesquisar no Portal">
+    <div id="globalSearchResults" class="global-search-results" hidden></div>
+  </div>
   <nav id="nav">
     <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="notificacoes" id="notificationsNav" class="player-only-nav" style="display:none">🔔 Avisos <span id="notificationBadge" class="notification-badge" style="display:none">0</span></button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button><button data-page="biblioteca">📚 Biblioteca</button>
     <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
