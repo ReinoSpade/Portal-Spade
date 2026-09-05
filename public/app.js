@@ -45,10 +45,21 @@ async function api(url,options={}){
 async function loadHome(){
   try{
     const d=await api("/api/home");state.data=d;renderHomeAnnouncements(d.announcements||[]);
-    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
+    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url(\'${escapeHtml(n.image_url)}\')`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
     const e=d.editions[0];qs("#editionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
+    try{ const ev=await api("/api/events"); state.events=ev.events||[]; renderHomeEventAlert(state.events); }catch{}
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
 }
+
+function renderHomeEventAlert(items){
+  const el=qs("#homeEventAlert"); if(!el)return;
+  const active=(items||[]).filter(e=>e.status==="ATIVO");
+  if(!active.length){el.innerHTML="";return;}
+  const e=active[0];
+  el.innerHTML=`<div class="event-live-alert"><div class="event-live-alert-icon">🎪</div><div class="event-live-alert-main"><p class="eyebrow">ACONTECENDO AGORA</p><h3>${escapeHtml(e.title)}</h3><p>${escapeHtml(e.description||"Um evento oficial de Spade está acontecendo agora.")}</p><small>${e.end_date?`Encerra em ${escapeHtml(statusDateLabel(e.end_date))}`:"Consulte as informações do evento."}</small></div><button class="gold small" type="button" data-home-event-open="${e.id}">Ver evento</button></div>`;
+  qs("[data-home-event-open]")?.addEventListener("click",()=>openPublicEvent(Number(e.id)));
+}
+
 
 async function loadAnnouncements(){
   try{
@@ -296,7 +307,7 @@ async function openPublicEvent(id){
     const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`;
     wrap.innerHTML=`<div class="event-public-detail">
       <button class="journal-close" id="closeEventReader">×</button>
-      <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span></div>
+      <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span>${e.status==="ATIVO"?`<span class="event-live-pill">🎪 ACONTECENDO AGORA</span>`:""}</div>
       <h2>${escapeHtml(e.title)}</h2><p>${escapeHtml(e.description||"")}</p>${e.rules?`<div style="margin-top:12px;font-size:10px;color:#666;white-space:pre-line"><b>Regras:</b><br>${escapeHtml(e.rules)}</div>`:""}</div>
       <div class="event-public-section"><h3>Como ganhar</h3><div class="event-action-list">${actions}</div></div>
       <div class="event-public-section"><h3>Cards disponíveis</h3><div class="event-reward-list">${rewards}</div></div>
