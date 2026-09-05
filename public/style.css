@@ -1195,3 +1195,6 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-2;ba
 .role-occupant b{display:block;font:600 11px Cinzel;color:#2b2824}
 .role-occupant small{display:block;color:#7a736a;font-size:8px;margin-top:4px}
 @media(max-width:600px){.role-occupants-list{grid-template-columns:1fr}}
+
+.dashboard-logout-btn{margin-top:12px}
+@media(max-width:600px){.dashboard-logout-btn{width:100%;margin-top:10px}}
