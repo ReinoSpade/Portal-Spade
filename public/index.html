@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Portal Spade — The King Magazine</title>
+<title>Portal Spade — Reino Spade</title>
 <meta name="description" content="Portal oficial do RPG — Reino Spade">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -775,6 +775,39 @@
     <div class="admin-permissions-help">Cada administrador começa com acesso completo. Você pode restringir módulos de outros administradores. O próprio acesso não pode ser removido.</div>
     <div id="adminPermissionEditor" class="admin-permission-editor"><p class="admin-history-empty">Selecione “Permissões” em um administrador para editar.</p></div>
   </div>
+
+  <section class="admin-settings-panel panel" id="adminSettingsPanel">
+    <div class="panel-head"><div><p class="eyebrow">CONFIGURAÇÃO DO REINO</p><h3>Configurações Gerais</h3></div><span>Altere a estrutura configurável do Portal sem editar o código</span></div>
+    <div class="settings-grid">
+      <form id="portalIdentityForm" class="admin-form settings-card">
+        <p class="eyebrow">IDENTIDADE</p>
+        <input id="settingKingdomName" placeholder="Nome oficial do Reino" required>
+        <input id="settingKingdomMotto" placeholder="Lema do Reino" required>
+        <input id="settingTimezone" placeholder="Fuso horário (ex.: America/Sao_Paulo)" required>
+        <input id="settingFooter" placeholder="Texto do rodapé" required>
+        <div class="editor-actions"><button class="gold" type="submit">💾 Salvar identidade</button><span class="error" id="portalIdentityError"></span></div>
+      </form>
+      <div class="settings-card">
+        <p class="eyebrow">MOEDAS</p>
+        <h4>🪙 Yuls</h4><p>Moeda principal do Reino para pagamentos, recompensas e Loja Mágica.</p>
+        <h4>💠 Dracmas</h4><p>Moeda independente utilizada pelo Mercado Negro. Nunca é somada aos Yuls.</p>
+        <div class="settings-rule">🔒 A separação entre Yuls e Dracmas é estrutural e não pode ser alterada nesta tela.</div>
+      </div>
+    </div>
+    <div class="settings-lists-grid">
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">MISSÕES</p><h4>Tipos de missão</h4></div><span>Usados no cadastro e validação de missões</span></div><div class="settings-add-row"><input id="newMissionType" placeholder="Novo tipo"><button class="outline dark-outline small" type="button" data-settings-add="mission_types">＋ Adicionar</button></div><div id="settingsMissionTypes" class="settings-chips"></div></section>
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">EVENTOS</p><h4>Tipos de evento</h4></div><span>Jogo, Especial, Temporada e Legião</span></div><div class="settings-add-row"><input id="newEventType" placeholder="Novo tipo (ex.: DESAFIO)"><button class="outline dark-outline small" type="button" data-settings-add="event_types">＋ Adicionar</button></div><div id="settingsEventTypes" class="settings-chips"></div></section>
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">CARDS</p><h4>Origens</h4></div><span>Fonte oficial de aquisição</span></div><div class="settings-add-row"><input id="newCardOrigin" placeholder="Nova origem"><button class="outline dark-outline small" type="button" data-settings-add="card_origins">＋ Adicionar</button></div><div id="settingsCardOrigins" class="settings-chips"></div></section>
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">CARDS</p><h4>Elementos</h4></div><span>Elementos disponíveis para Cards elementais</span></div><div class="settings-add-row"><input id="newCardElement" placeholder="Novo elemento"><button class="outline dark-outline small" type="button" data-settings-add="card_elements">＋ Adicionar</button></div><div id="settingsCardElements" class="settings-chips"></div></section>
+    </div>
+    <div class="settings-links">
+      <div><b>🃏 Categorias de Cards</b><p>Continue usando o gerenciador de categorias dentro do módulo de Cards.</p></div>
+      <div><b>👑 Patentes e Cargos</b><p>Continuam sendo administrados na área Cargos & Patentes, com histórico e permissões próprios.</p></div>
+      <div><b>🔐 Visibilidade</b><p>🌎 Público • ♠️ Spade • 🤝 Aliado • 👑 Administração. Cards permanecem restritos a Spade, Aliados e Administração.</p></div>
+    </div>
+    <div class="error" id="settingsGlobalError"></div>
+  </section>
+
   <div class="panel admin-notification-panel" id="adminNotificationPanel">
   <div class="panel-head"><div><p class="eyebrow">CENTRAL DE ALERTAS</p><h3>Enviar notificação</h3></div><span>Envie um aviso para um jogador ou para todos os ativos</span></div>
   <form id="adminNotificationForm" class="admin-form">
@@ -794,6 +827,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=45.0"></script>
+<script src="/app.js?v=49.0"></script>
 </body>
 </html>
