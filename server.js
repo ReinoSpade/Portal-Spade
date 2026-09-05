@@ -1528,56 +1528,36 @@ app.get("/api/me", async (req, res) => {
 });
 
 app.get("/api/me/dashboard", async (req,res)=>{
-  const viewer=await resolveViewer(req);
-  if(!viewer)return res.status(401).json({error:"Não autenticado."});
-  if(viewer.type==="ALLY") {
-    try{
-      const [cardsR, activeR, scheduleR, notesR]=await Promise.all([
-        pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(c.power_value),0)::bigint AS power FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1`,[viewer.id]),
-        pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND status='ATIVO' ORDER BY end_date ASC,id ASC LIMIT 4`),
-        pool.query(`SELECT s.id,s.title,s.activity_type,s.activity_date,s.start_time,s.end_time,s.status,s.event_id,s.mission_id,e.title AS event_title FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND s.activity_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 5`,[]),
-        pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id IS NULL ORDER BY id DESC LIMIT 5`).catch(()=>({rows:[]}))
-      ]);
-      res.json({
-        account_type:"ALLY",read_only:true,
-        player:{id:Number(viewer.id),nick:viewer.data.display_name,identifier:viewer.data.username,house:viewer.data.origin_house||"",patent:viewer.data.patent||"",role:viewer.data.role||"",grimoire:"",hp:0,mana:0,yuls:0,missions:0,achievements:0,ranking:0,power:0,active:1,exp:0,roles:[],account_type:"ALLY",read_only:true,origin_kingdom:viewer.data.origin_kingdom||"",origin_house:viewer.data.origin_house||"",description:viewer.data.description||""},
-        cards:{count:Number(cardsR.rows[0]?.count||0),power:Number(cardsR.rows[0]?.power||0)},
-        rankings:{power:0,sc:0,vt:0},
-        activeEvents:activeR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||"EVENTO",status:x.status,start_date:x.start_date,end_date:x.end_date})),
-        upcoming:scheduleR.rows.map(x=>({id:Number(x.id),title:x.title,activity_type:x.activity_type||"ATIVIDADE",activity_date:x.activity_date,start_time:x.start_time,end_time:x.end_time,status:x.status,event_id:x.event_id?Number(x.event_id):null,mission_id:x.mission_id?Number(x.mission_id):null,event_title:x.event_title||""})),
-        notifications:[],unreadNotifications:0,todayStatus:null
-      });
-    }catch(e){console.error(e);return res.status(500).json({error:"Erro ao carregar seu painel de aliado."});}
-  }
-  const id=viewer.id;
+  const viewer=await resolveViewer(req); if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  const isAlly=viewer.type==='ALLY', playerId=isAlly?null:viewer.id;
   try{
-    const [playerR, cardsR, rankingsR, activeR, scheduleR, notesR, statusR] = await Promise.all([
-      pool.query(`SELECT id,nick,house,patent,grimoire,hp,mana,yuls,missions,achievements,exp,active FROM players WHERE id=$1 AND active=1 LIMIT 1`,[id]),
-      pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(c.power_value),0)::bigint AS power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[id]),
-      pool.query(`WITH powers AS (SELECT p.id,COALESCE(SUM(c.power_value),0)::bigint AS score FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.active=1 AND p.public_profile=1 GROUP BY p.id), sc AS (SELECT id,skill_sc AS score FROM players WHERE active=1 AND public_profile=1), vt AS (SELECT id,skill_vt AS score FROM players WHERE active=1 AND public_profile=1) SELECT (SELECT COUNT(*)+1 FROM powers WHERE score>(SELECT score FROM powers WHERE id=$1))::int AS power_rank,(SELECT COUNT(*)+1 FROM sc WHERE score>(SELECT score FROM sc WHERE id=$1))::int AS sc_rank,(SELECT COUNT(*)+1 FROM vt WHERE score>(SELECT score FROM vt WHERE id=$1))::int AS vt_rank`,[id]),
-      pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND status='ATIVO' ORDER BY end_date ASC,id ASC LIMIT 4`),
-      pool.query(`SELECT s.id,s.title,s.activity_type,s.activity_date,s.start_time,s.end_time,s.status,s.event_id,s.mission_id,e.title AS event_title FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND s.activity_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 5`),
-      pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id=$1 ORDER BY id DESC LIMIT 5`,[id]),
-      pool.query(`SELECT id,message,status_date,created_at,updated_at FROM player_statuses WHERE player_id=$1 AND status_date=(NOW() AT TIME ZONE 'America/Sao_Paulo')::date LIMIT 1`,[id])
+    const [playerR,cardsR,rankR,eventR,missionR,scheduleR,notesR,statusR]=await Promise.all([
+      isAlly?Promise.resolve({rows:[]}):pool.query(`SELECT id,nick,house,patent,grimoire,hp,mana,yuls,missions,achievements,exp,active,power FROM players WHERE id=$1 AND active=1 LIMIT 1`,[playerId]),
+      isAlly?pool.query(`SELECT COUNT(*)::int AS count,COALESCE(SUM(c.power_value),0)::bigint AS power FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1`,[viewer.id]):pool.query(`SELECT COUNT(*)::int AS count,COALESCE(SUM(c.power_value),0)::bigint AS power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[playerId]),
+      isAlly?Promise.resolve({rows:[{power_rank:0,sc_rank:0,vt_rank:0}]}):pool.query(`WITH powers AS (SELECT p.id,COALESCE(SUM(c.power_value),0)::bigint AS score FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.active=1 AND p.public_profile=1 GROUP BY p.id), sc AS (SELECT id,skill_sc AS score FROM players WHERE active=1 AND public_profile=1), vt AS (SELECT id,skill_vt AS score FROM players WHERE active=1 AND public_profile=1) SELECT (SELECT COUNT(*)+1 FROM powers WHERE score>(SELECT score FROM powers WHERE id=$1))::int AS power_rank,(SELECT COUNT(*)+1 FROM sc WHERE score>(SELECT score FROM sc WHERE id=$1))::int AS sc_rank,(SELECT COUNT(*)+1 FROM vt WHERE score>(SELECT score FROM vt WHERE id=$1))::int AS vt_rank`,[playerId]),
+      pool.query(`SELECT id,title,event_type,description,start_date,end_date,status FROM events WHERE published=1 AND status NOT IN ('CANCELADO','CANCELADA') AND ${eventIsLiveSql('events')} ORDER BY end_date ASC NULLS LAST,id ASC LIMIT 8`),
+      pool.query(`SELECT id,mission_type,start_at,end_at,description,status FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND start_at<=NOW() AND end_at>NOW() ORDER BY end_at ASC,id ASC LIMIT 8`),
+      pool.query(`SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,s.status,s.event_id,s.mission_id,e.title AS event_title,ma.mission_type,ma.end_at AS mission_end_at FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id LEFT JOIN mission_activities ma ON ma.id=s.mission_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND s.activity_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 10`),
+      playerId?pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id=$1 ORDER BY id DESC LIMIT 5`,[playerId]):Promise.resolve({rows:[]}),
+      playerId?pool.query(`SELECT id,message,status_date,created_at,updated_at FROM player_statuses WHERE player_id=$1 AND status_date=(NOW() AT TIME ZONE 'America/Sao_Paulo')::date LIMIT 1`,[playerId]):Promise.resolve({rows:[]})
     ]);
-    const player=playerR.rows[0];
-    if(!player)return res.status(401).json({error:"Sessão inválida."});
-    const roles=await getPlayerRoles(id);
-    res.json({
-      player:{...publicPlayer({...player,roles})},
-      cards:{count:Number(cardsR.rows[0]?.count||0),power:Number(cardsR.rows[0]?.power||0)},
-      rankings:{power:Number(rankingsR.rows[0]?.power_rank||0),sc:Number(rankingsR.rows[0]?.sc_rank||0),vt:Number(rankingsR.rows[0]?.vt_rank||0)},
-      activeEvents:activeR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||"EVENTO",status:x.status,start_date:x.start_date,end_date:x.end_date})),
-      upcoming:scheduleR.rows.map(x=>({id:Number(x.id),title:x.title,activity_type:x.activity_type||"ATIVIDADE",activity_date:x.activity_date,start_time:x.start_time,end_time:x.end_time,status:x.status,event_id:x.event_id?Number(x.event_id):null,mission_id:x.mission_id?Number(x.mission_id):null,event_title:x.event_title||""})),
-      notifications:notesR.rows.map(x=>({id:Number(x.id),title:x.title,body:x.body,type:x.type,link_page:x.link_page||"",read:Boolean(x.read_at),created_at:x.created_at})),
-      unreadNotifications:notesR.rows.filter(x=>!x.read_at).length,
-      todayStatus:statusR.rows[0]?{id:Number(statusR.rows[0].id),message:statusR.rows[0].message,status_date:statusR.rows[0].status_date,created_at:statusR.rows[0].created_at,updated_at:statusR.rows[0].updated_at}:null
-    });
-  }catch(e){console.error("Erro em /api/me/dashboard:",e);res.status(500).json({error:"Erro ao carregar seu painel."});}
+    const activeActivities=mergeLiveActivities(scheduleR.rows,eventR.rows,missionR.rows).slice(0,10);
+    const seenEvent=new Set(scheduleR.rows.filter(x=>x.event_id).map(x=>Number(x.event_id))),seenMission=new Set(scheduleR.rows.filter(x=>x.mission_id).map(x=>Number(x.mission_id)));
+    const upcoming=scheduleR.rows.map(x=>({source:'SCHEDULE',id:Number(x.id),title:x.title,activity_type:x.activity_type||'ATIVIDADE',activity_date:x.activity_date,start_time:x.start_time,end_time:x.end_time,status:x.status,event_id:x.event_id?Number(x.event_id):null,mission_id:x.mission_id?Number(x.mission_id):null,event_title:x.event_title||''}));
+    const nextEvents=await pool.query(`SELECT id,title,event_type,start_date,end_date,status FROM events WHERE published=1 AND status NOT IN ('CANCELADO','CANCELADA') AND (start_date IS NULL OR start_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date) ORDER BY start_date ASC NULLS LAST,id ASC LIMIT 10`);
+    for(const e of nextEvents.rows)if(!seenEvent.has(Number(e.id)))upcoming.push({source:'EVENT',id:Number(e.id),title:e.title,activity_type:e.event_type||'EVENTO',activity_date:e.start_date,start_time:null,end_time:null,status:eventDisplayStatus(e),event_id:Number(e.id),mission_id:null,event_title:e.title});
+    const nextMissions=await pool.query(`SELECT id,mission_type,start_at,end_at,status FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND start_at>NOW() ORDER BY start_at ASC,id ASC LIMIT 10`);
+    for(const m of nextMissions.rows)if(!seenMission.has(Number(m.id)))upcoming.push({source:'MISSION',id:Number(m.id),title:`Missão de ${m.mission_type||'Missão'}`,activity_type:m.mission_type||'MISSÃO',activity_date:m.start_at,start_time:null,end_time:null,status:missionStatusFromDates(m.start_at,m.end_at,m.status),event_id:null,mission_id:Number(m.id),event_title:''});
+    upcoming.sort((a,b)=>new Date(a.activity_date||'2999-01-01').getTime()-new Date(b.activity_date||'2999-01-01').getTime());
+    if(isAlly){
+      const c=cardsR.rows[0]||{};
+      return res.json({account_type:'ALLY',read_only:true,player:{id:Number(viewer.id),nick:viewer.data.display_name,identifier:viewer.data.username,house:viewer.data.origin_house||'',patent:viewer.data.patent||'',role:viewer.data.role||'',grimoire:'',hp:0,mana:0,yuls:0,missions:0,achievements:0,ranking:0,power:0,active:1,exp:0,roles:[],account_type:'ALLY',read_only:true,origin_kingdom:viewer.data.origin_kingdom||'',origin_house:viewer.data.origin_house||'',description:viewer.data.description||''},cards:{count:Number(c.count||0),power:Number(c.power||0)},rankings:{power:0,sc:0,vt:0},activeEvents:eventR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||'EVENTO',description:x.description||'',status:eventDisplayStatus(x),start_date:x.start_date,end_date:x.end_date})),activeMissions:missionR.rows.map(x=>({id:Number(x.id),title:`Missão de ${x.mission_type||'Missão'}`,mission_type:x.mission_type||'',description:x.description||'',status:missionStatusFromDates(x.start_at,x.end_at,x.status),start_at:x.start_at,end_at:x.end_at})),activeActivities,upcoming:upcoming.slice(0,10),notifications:[],unreadNotifications:0,todayStatus:null});
+    }
+    const p=playerR.rows[0]; if(!p)return res.status(401).json({error:'Sessão inválida.'});
+    const roles=await getPlayerRoles(playerId),c=cardsR.rows[0]||{},r=rankR.rows[0]||{};
+    res.json({player:{...publicPlayer({...p,roles})},cards:{count:Number(c.count||0),power:Number(c.power||0)},rankings:{power:Number(r.power_rank||0),sc:Number(r.sc_rank||0),vt:Number(r.vt_rank||0)},activeEvents:eventR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||'EVENTO',description:x.description||'',status:eventDisplayStatus(x),start_date:x.start_date,end_date:x.end_date})),activeMissions:missionR.rows.map(x=>({id:Number(x.id),title:`Missão de ${x.mission_type||'Missão'}`,mission_type:x.mission_type||'',description:x.description||'',status:missionStatusFromDates(x.start_at,x.end_at,x.status),start_at:x.start_at,end_at:x.end_at})),activeActivities,upcoming:upcoming.slice(0,10),notifications:notesR.rows.map(x=>({id:Number(x.id),title:x.title,body:x.body,type:x.type,link_page:x.link_page||'',read:Boolean(x.read_at),created_at:x.created_at})),unreadNotifications:notesR.rows.filter(x=>!x.read_at).length,todayStatus:statusR.rows[0]?{id:Number(statusR.rows[0].id),message:statusR.rows[0].message,status_date:statusR.rows[0].status_date,created_at:statusR.rows[0].created_at,updated_at:statusR.rows[0].updated_at}:null});
+  }catch(e){console.error('Erro em /api/me/dashboard:',e);res.status(500).json({error:'Erro ao carregar seu painel.'});}
 });
-
-
-function saoPauloTodaySql(){ return "((NOW() AT TIME ZONE 'America/Sao_Paulo')::date)"; }
 
 app.get("/api/me/status/today", async (req,res)=>{
   const viewer=await resolveViewer(req);
@@ -1895,35 +1875,20 @@ app.get("/api/announcements", async (req,res)=>{
 });
 
 app.get("/api/me/alerts", async (req,res)=>{
-  const id=readPlayerToken(req);
-  if(!id)return res.status(401).json({error:"Não autenticado."});
+  const viewer=await resolveViewer(req); if(!viewer)return res.status(401).json({error:"Não autenticado."});
   try{
-    const r=await pool.query(
-      `SELECT id,title,category,priority,body,date,featured
-       FROM announcements
-       WHERE published=1
-         AND priority IN ('URGENTE','IMPORTANTE')
-       ORDER BY CASE priority WHEN 'URGENTE' THEN 1 WHEN 'IMPORTANTE' THEN 2 ELSE 3 END,
-                featured DESC,id DESC
-       LIMIT 20`
-    );
-    res.json({
-      alerts:r.rows.map(a=>({
-        id:Number(a.id),
-        title:a.title,
-        category:a.category||"INFORMATIVO",
-        priority:a.priority||"INFORMATIVO",
-        body:a.body||"",
-        date:a.date,
-        featured:Boolean(a.featured)
-      }))
-    });
-  }catch(e){
-    console.error("Erro em /api/me/alerts:",e);
-    res.status(500).json({error:"Erro ao carregar avisos."});
-  }
+    const [ann,eventR,missionR]=await Promise.all([
+      pool.query(`SELECT id,title,category,priority,body,date,featured FROM announcements WHERE published=1 AND priority IN ('URGENTE','IMPORTANTE') ORDER BY CASE priority WHEN 'URGENTE' THEN 1 WHEN 'IMPORTANTE' THEN 2 ELSE 3 END,featured DESC,id DESC LIMIT 20`),
+      pool.query(`SELECT id,title,event_type,description,start_date,end_date,status FROM events WHERE published=1 AND status NOT IN ('CANCELADO','CANCELADA') AND ${eventIsLiveSql('events')} ORDER BY end_date ASC NULLS LAST,id ASC LIMIT 10`),
+      pool.query(`SELECT id,mission_type,start_at,end_at,description,status FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND start_at<=NOW() AND end_at>NOW() ORDER BY end_at ASC,id ASC LIMIT 10`)
+    ]);
+    const out=[];
+    ann.rows.forEach(x=>out.push({id:`announcement-${Number(x.id)}`,title:x.title,category:x.category||'INFORMATIVO',priority:x.priority||'IMPORTANTE',body:x.body||'',date:x.date,featured:Boolean(x.featured),kind:'ANNOUNCEMENT',link_page:'comunicados'}));
+    eventR.rows.forEach(x=>out.push({id:`event-${Number(x.id)}`,title:`🎪 ${x.title}`,category:'EVENTO ATIVO',priority:'IMPORTANTE',body:x.description||'Um evento está acontecendo agora no Reino.',date:x.start_date,featured:false,kind:'EVENT',link_page:'eventos'}));
+    missionR.rows.forEach(x=>out.push({id:`mission-${Number(x.id)}`,title:`⚔️ Missão de ${x.mission_type||'Missão'} ativa`,category:'MISSÃO ATIVA',priority:'IMPORTANTE',body:x.description||'Uma missão está acontecendo agora no Reino.',date:x.start_at,featured:false,kind:'MISSION',link_page:'missoes'}));
+    res.json({alerts:out});
+  }catch(e){console.error('Erro em /api/me/alerts:',e);res.status(500).json({error:'Erro ao carregar avisos.'});}
 });
-
 
 app.get("/api/me/notifications", async (req,res)=>{
   const id=readPlayerToken(req); if(!id)return res.status(401).json({error:"Não autenticado."});
@@ -2085,7 +2050,7 @@ function missionStatusFromDates(startAt,endAt,status){
 }
 
 app.get("/api/missions", async (req,res)=>{
-  const viewer=readPlayerToken(req);
+  const viewer=await resolveViewer(req);
   if(!viewer) return res.status(401).json({error:"Faça login para visualizar as missões."});
   try{
     const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published FROM mission_activities WHERE published=1 ORDER BY start_at DESC,id DESC LIMIT 100`);
@@ -2094,12 +2059,10 @@ app.get("/api/missions", async (req,res)=>{
 });
 
 app.get("/api/missions/active", async (req,res)=>{
-  const viewer=readPlayerToken(req);
-  if(!viewer) return res.status(401).json({active:null});
+  const viewer=await resolveViewer(req); if(!viewer)return res.json({active:null});
   try{
-    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status FROM mission_activities WHERE published=1 AND status<>\'CANCELADA\' AND start_at<=NOW() AND end_at>NOW() ORDER BY end_at ASC,id ASC LIMIT 1`);
-    const m=r.rows[0];
-    res.json({active:m?{...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0)}:null});
+    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND start_at<=NOW() AND end_at>NOW() ORDER BY end_at ASC,id ASC LIMIT 1`);
+    const m=r.rows[0]; res.json({active:m?{...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0),status:missionStatusFromDates(m.start_at,m.end_at,m.status)}:null});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao verificar missão ativa."});}
 });
 
@@ -2153,7 +2116,7 @@ app.get("/api/events", async (req,res)=>{
     `);
     res.json({events:r.rows.map(e=>({
       id:Number(e.id),title:e.title,event_type:e.event_type,description:e.description||"",
-      rules:e.rules||"",start_date:e.start_date,end_date:e.end_date,status:e.status,
+      rules:e.rules||"",start_date:e.start_date,end_date:e.end_date,status:eventDisplayStatus(e),
       image_url:e.image_url||"",featured:Boolean(e.featured)
     }))});
   }catch(e){
@@ -2163,6 +2126,8 @@ app.get("/api/events", async (req,res)=>{
 
 app.get("/api/events/:id", async (req,res)=>{
   const id=Number(req.params.id);
+  const viewer=await resolveViewer(req);
+  const cardVisibilityAllowed=!!viewer;
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Evento inválido."});
   try{
     const er=await pool.query(
@@ -2196,9 +2161,9 @@ app.get("/api/events/:id", async (req,res)=>{
     ]);
 
     res.json({
-      event:{...er.rows[0],id:Number(er.rows[0].id),featured:Boolean(er.rows[0].featured)},
+      event:{...er.rows[0],id:Number(er.rows[0].id),status:eventDisplayStatus(er.rows[0]),featured:Boolean(er.rows[0].featured)},
       actions:actions.rows.map(a=>({id:Number(a.id),name:a.name,description:a.description||"",points:Number(a.points),sort_order:Number(a.sort_order||0)})),
-      card_rewards:rewards.rows.map(r=>({card_id:Number(r.card_id),points_cost:Number(r.points_cost||0),description:r.description||"",name:r.name,category:r.category||"Outros",cost:r.cost||""})),
+      card_rewards:cardVisibilityAllowed?rewards.rows.map(r=>({card_id:Number(r.card_id),points_cost:Number(r.points_cost||0),description:r.description||"",name:r.name,category:r.category||"Outros",cost:r.cost||""})):[],
       results:results.rows.map(r=>({
         slot:r.slot,player_id:Number(r.player_id),nick:r.nick,house:r.house||"",patent:r.patent||"",
         reward_yuls:r.slot==="WINNER_1"?100:r.slot==="WINNER_2"?80:r.slot==="WINNER_3"?50:0,reward_exp:r.slot.startsWith("WINNER_")?Number(r.reward_exp||0):0,published:Number(r.published)
@@ -2287,18 +2252,13 @@ app.get("/api/schedule", async (req,res)=>{
 
 app.get("/api/active-activities", async (req,res)=>{
   try{
-    const r=await pool.query(`
-      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,s.location,s.link,s.status,
-             s.event_id,s.mission_id,e.title AS event_title,ma.mission_type,ma.end_at AS mission_end_at
-      FROM schedule_activities s
-      LEFT JOIN events e ON e.id=s.event_id
-      LEFT JOIN mission_activities ma ON ma.id=s.mission_id
-      WHERE s.published=1 AND (
-        (s.activity_date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (s.start_time IS NULL OR s.start_time <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time) AND (s.end_time IS NULL OR s.end_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time))
-        OR s.status='EM_ANDAMENTO'
-      )
-      ORDER BY s.featured DESC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 20`);
-    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null}))});
+    const viewer=await resolveViewer(req);
+    const [scheduleR,eventR,missionR]=await Promise.all([
+      pool.query(`SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,s.location,s.link,s.status,s.event_id,s.mission_id,e.title AS event_title,ma.mission_type,ma.end_at AS mission_end_at FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id LEFT JOIN mission_activities ma ON ma.id=s.mission_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND ((s.activity_date=(NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (s.start_time IS NULL OR s.start_time <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time) AND (s.end_time IS NULL OR s.end_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time)) OR s.status='EM_ANDAMENTO') ORDER BY s.featured DESC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 20`),
+      pool.query(`SELECT id,title,event_type,description,start_date,end_date,status FROM events WHERE published=1 AND status NOT IN ('CANCELADO','CANCELADA') AND ${eventIsLiveSql('events')} ORDER BY end_date ASC NULLS LAST,id ASC LIMIT 20`),
+      viewer?pool.query(`SELECT id,mission_type,start_at,end_at,description,status FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND start_at<=NOW() AND end_at>NOW() ORDER BY end_at ASC,id ASC LIMIT 20`):Promise.resolve({rows:[]})
+    ]);
+    res.json({activities:mergeLiveActivities(scheduleR.rows,eventR.rows,missionR.rows)});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar atividades em andamento."});}
 });
 
@@ -2336,7 +2296,7 @@ app.get("/api/search", async (req,res)=>{
       pool.query(`SELECT id,nick,house,patent FROM players WHERE public_profile=1 AND active=1 AND (nick ILIKE $1 OR house ILIKE $1 OR patent ILIKE $1) ORDER BY nick ASC LIMIT 8`,[like]),
       pool.query(`SELECT id,name,emblem FROM houses WHERE active=1 AND (name ILIKE $1 OR description ILIKE $1 OR motto ILIKE $1) ORDER BY name ASC LIMIT 8`,[like]),
       pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND (title ILIKE $1 OR description ILIKE $1 OR event_type ILIKE $1) ORDER BY CASE status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,start_date DESC,id DESC LIMIT 8`,[like]),
-      pool.query(`SELECT id,mission_type,start_at,end_at,status,description FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND (mission_type ILIKE $1 OR description ILIKE $1 OR instructions ILIKE $1) ORDER BY start_at DESC,id DESC LIMIT 8`,[like]),
+      (playerId || (await resolveAlly(req))) ? pool.query(`SELECT id,mission_type,start_at,end_at,status,description FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND (mission_type ILIKE $1 OR description ILIKE $1 OR instructions ILIKE $1) ORDER BY start_at DESC,id DESC LIMIT 8`,[like]) : Promise.resolve({rows:[]}),
       pool.query(`SELECT id,title,activity_type,activity_date,start_time,end_time,status FROM schedule_activities WHERE published=1 AND (title ILIKE $1 OR activity_type ILIKE $1 OR description ILIKE $1) ORDER BY activity_date DESC,start_time DESC NULLS LAST,id DESC LIMIT 8`,[like]),
       pool.query(`SELECT id,title,subtitle,category,excerpt,date FROM articles WHERE published=1 AND (title ILIKE $1 OR subtitle ILIKE $1 OR category ILIKE $1 OR excerpt ILIKE $1 OR body ILIKE $1) ORDER BY date DESC,id DESC LIMIT 8`,[like]),
       pool.query(`SELECT id,title,category,description FROM library_items WHERE published=1 AND (title ILIKE $1 OR category ILIKE $1 OR description ILIKE $1 OR content ILIKE $1) ORDER BY sort_order ASC,title ASC LIMIT 8`,[like])
@@ -4344,12 +4304,9 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
     }
 
     if(action==="set_power"){
-      const amount=Math.round(Number(b.amount||0));
-      if(!Number.isFinite(amount)||amount<0){
-        await client.query("ROLLBACK");
-        return res.status(400).json({error:"Valor de força inválido."});
+      for(const playerId of ids){
+        await client.query(`UPDATE players p SET power=COALESCE((SELECT SUM(c.power_value) FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=p.id),0),updated_at=NOW() WHERE p.id=$1`,[playerId]);
       }
-      await client.query("UPDATE players SET power=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[amount,ids]);
     }
 
     if(action==="set_public"){
