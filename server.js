@@ -1248,6 +1248,35 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
+app.get("/api/me/dashboard", async (req,res)=>{
+  const id=readPlayerToken(req);
+  if(!id)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const [playerR, cardsR, rankingsR, activeR, scheduleR, notesR, statusR] = await Promise.all([
+      pool.query(`SELECT id,nick,house,patent,grimoire,hp,mana,yuls,missions,achievements,exp,active FROM players WHERE id=$1 AND active=1 LIMIT 1`,[id]),
+      pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(c.power_value),0)::bigint AS power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[id]),
+      pool.query(`WITH powers AS (SELECT p.id,COALESCE(SUM(c.power_value),0)::bigint AS score FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.active=1 AND p.public_profile=1 GROUP BY p.id), sc AS (SELECT id,skill_sc AS score FROM players WHERE active=1 AND public_profile=1), vt AS (SELECT id,skill_vt AS score FROM players WHERE active=1 AND public_profile=1) SELECT (SELECT COUNT(*)+1 FROM powers WHERE score>(SELECT score FROM powers WHERE id=$1))::int AS power_rank,(SELECT COUNT(*)+1 FROM sc WHERE score>(SELECT score FROM sc WHERE id=$1))::int AS sc_rank,(SELECT COUNT(*)+1 FROM vt WHERE score>(SELECT score FROM vt WHERE id=$1))::int AS vt_rank`,[id]),
+      pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND status='ATIVO' ORDER BY end_date ASC,id ASC LIMIT 4`),
+      pool.query(`SELECT s.id,s.title,s.activity_type,s.activity_date,s.start_time,s.end_time,s.status,s.event_id,s.mission_id,e.title AS event_title FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND s.activity_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 5`),
+      pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id=$1 ORDER BY id DESC LIMIT 5`,[id]),
+      pool.query(`SELECT id,message,status_date,created_at,updated_at FROM player_statuses WHERE player_id=$1 AND status_date=(NOW() AT TIME ZONE 'America/Sao_Paulo')::date LIMIT 1`,[id])
+    ]);
+    const player=playerR.rows[0];
+    if(!player)return res.status(401).json({error:"Sessão inválida."});
+    const roles=await getPlayerRoles(id);
+    res.json({
+      player:{...publicPlayer({...player,roles})},
+      cards:{count:Number(cardsR.rows[0]?.count||0),power:Number(cardsR.rows[0]?.power||0)},
+      rankings:{power:Number(rankingsR.rows[0]?.power_rank||0),sc:Number(rankingsR.rows[0]?.sc_rank||0),vt:Number(rankingsR.rows[0]?.vt_rank||0)},
+      activeEvents:activeR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||"EVENTO",status:x.status,start_date:x.start_date,end_date:x.end_date})),
+      upcoming:scheduleR.rows.map(x=>({id:Number(x.id),title:x.title,activity_type:x.activity_type||"ATIVIDADE",activity_date:x.activity_date,start_time:x.start_time,end_time:x.end_time,status:x.status,event_id:x.event_id?Number(x.event_id):null,mission_id:x.mission_id?Number(x.mission_id):null,event_title:x.event_title||""})),
+      notifications:notesR.rows.map(x=>({id:Number(x.id),title:x.title,body:x.body,type:x.type,link_page:x.link_page||"",read:Boolean(x.read_at),created_at:x.created_at})),
+      unreadNotifications:notesR.rows.filter(x=>!x.read_at).length,
+      todayStatus:statusR.rows[0]?{id:Number(statusR.rows[0].id),message:statusR.rows[0].message,status_date:statusR.rows[0].status_date,created_at:statusR.rows[0].created_at,updated_at:statusR.rows[0].updated_at}:null
+    });
+  }catch(e){console.error("Erro em /api/me/dashboard:",e);res.status(500).json({error:"Erro ao carregar seu painel."});}
+});
+
 
 function saoPauloTodaySql(){ return "((NOW() AT TIME ZONE 'America/Sao_Paulo')::date)"; }
 
