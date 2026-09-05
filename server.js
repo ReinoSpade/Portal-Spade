@@ -38,6 +38,7 @@ function adminPermissionForRequest(req) {
   const path = req.path || "";
   if (path === "/me") return null;
   if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users";
+  if (path === "/reports") return "reports";
   if (path === "/overview") return "dashboard";
   if (path.startsWith("/players")) {
     if (path.includes("/cards") || path.includes("/cards/")) return "cards";
@@ -3175,6 +3176,29 @@ app.get("/api/admin/overview", requireAdmin, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao carregar administração." });
+  }
+});
+
+
+app.get("/api/admin/reports", requireAdmin, async (req,res)=>{
+  try{
+    const [players,houses,cards,economy,missions,events,battles,statuses,topPower,topActivity,houseStats] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE active=1)::int AS active, COUNT(*) FILTER (WHERE active=0)::int AS suspended, COUNT(*) FILTER (WHERE public_profile=1)::int AS public_profiles FROM players`),
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE COALESCE(status,'ATIVA')='ATIVA')::int AS active FROM houses`),
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE active=1)::int AS active, COALESCE(SUM(power_value) FILTER (WHERE active=1),0)::bigint AS catalog_power FROM cards`),
+      pool.query(`SELECT COALESCE(SUM(yuls),0)::bigint AS yuls, COALESCE(SUM(dracmas),0)::bigint AS dracmas FROM players`),
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status='EM_ANDAMENTO')::int AS ongoing, COUNT(*) FILTER (WHERE status='CONCLUIDA')::int AS completed FROM mission_activities`),
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status='EM_ANDAMENTO')::int AS ongoing, COUNT(*) FILTER (WHERE status='CONCLUIDO')::int AS completed FROM events`),
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status='AGUARDANDO_ADMIN')::int AS pending, COUNT(*) FILTER (WHERE status='APROVADA')::int AS approved, COUNT(*) FILTER (WHERE status='REJEITADA')::int AS rejected FROM ranking_battles`),
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE created_at::date=CURRENT_DATE)::int AS today FROM player_statuses`),
+      pool.query(`SELECT id,nick,house,COALESCE(power,0)::bigint AS power FROM players WHERE active=1 ORDER BY COALESCE(power,0) DESC,nick LIMIT 10`),
+      pool.query(`SELECT id,nick,house,missions,achievements,(missions+achievements*3)::bigint AS activity FROM players WHERE active=1 ORDER BY activity DESC,nick LIMIT 10`),
+      pool.query(`SELECT h.id,h.name,h.emblem,COUNT(p.id)::int AS members,COALESCE(SUM(p.missions),0)::bigint AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls,COALESCE(SUM(p.power),0)::bigint AS power FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.active=1 GROUP BY h.id,h.name,h.emblem ORDER BY power DESC,name`)
+    ]);
+    res.json({players:players.rows[0],houses:houses.rows[0],cards:cards.rows[0],economy:economy.rows[0],missions:missions.rows[0],events:events.rows[0],battles:battles.rows[0],statuses:statuses.rows[0],topPower:topPower.rows,topActivity:topActivity.rows,houseStats:houseStats.rows});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao gerar os relatórios do Reino."});
   }
 });
 
