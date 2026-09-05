@@ -11,6 +11,51 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_KEY = process.env.ADMIN_KEY || "troque-esta-chave";
 const SESSION_SECRET = process.env.SESSION_SECRET || "troque-este-segredo";
+
+const ADMIN_PERMISSION_DEFS = {
+  dashboard: "Painel geral",
+  players: "Jogadores",
+  cards: "Cards",
+  missions: "Missões",
+  events: "Eventos",
+  schedule: "Cronograma",
+  houses: "Casas",
+  hierarchy: "Cargos & Patentes",
+  journal: "Jornal",
+  announcements: "Comunicados",
+  economy: "Economia / Yuls",
+  admin_users: "Administradores",
+  audit: "Auditoria",
+  reports: "Relatórios",
+  settings: "Configurações"
+};
+const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
+
+function adminPermissionForRequest(req) {
+  const path = req.path || "";
+  if (path === "/me") return null;
+  if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users";
+  if (path === "/overview") return "dashboard";
+  if (path.startsWith("/players")) {
+    if (path.includes("/cards") || path.includes("/cards/")) return "cards";
+    if (path.includes("/yuls")) return "economy";
+    if (path.includes("/missions")) return "missions";
+    if (req.body?.action === "cards") return "cards";
+    if (req.body?.action === "yuls") return "economy";
+    if (req.body?.action === "missions") return "missions";
+    return "players";
+  }
+  if (path.startsWith("/cards")) return "cards";
+  if (path.startsWith("/events")) return "events";
+  if (path.startsWith("/event-actions")) return "events";
+  if (path.startsWith("/schedule")) return "schedule";
+  if (path.startsWith("/houses")) return "houses";
+  if (path.startsWith("/hierarchy") || path.startsWith("/patents") || path.startsWith("/roles")) return "hierarchy";
+  if (path.startsWith("/articles") || path.startsWith("/editions") || path.startsWith("/news")) return "journal";
+  if (path.startsWith("/announcements")) return "announcements";
+  if (path.startsWith("/missions")) return "missions";
+  return "dashboard";
+}
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
@@ -109,7 +154,17 @@ async function requireAdmin(req, res, next) {
   try {
     const admin = await resolveAdmin(req);
     if (!admin) return res.status(401).json({ error: "Acesso administrativo negado." });
-    req.admin = admin;
+    if (admin.legacy) { req.admin = { ...admin, permissions: ALL_ADMIN_PERMISSIONS }; return next(); }
+    const perm = adminPermissionForRequest(req);
+    if (!perm) {
+      const r = await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1", [admin.id]);
+      req.admin = { ...admin, permissions: r.rows[0]?.permissions || ALL_ADMIN_PERMISSIONS };
+      return next();
+    }
+    const r = await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1", [admin.id]);
+    const permissions = r.rows[0]?.permissions || ALL_ADMIN_PERMISSIONS;
+    if (permissions[perm] !== true) return res.status(403).json({ error: `Seu acesso administrativo não possui permissão para: ${ADMIN_PERMISSION_DEFS[perm] || perm}.` });
+    req.admin = { ...admin, permissions };
     next();
   } catch (e) {
     console.error(e);
@@ -160,6 +215,12 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       last_login TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_permissions (
+      admin_id BIGINT PRIMARY KEY REFERENCES admin_users(id) ON DELETE CASCADE,
+      permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS news (
@@ -785,7 +846,38 @@ async function initDatabase() {
       );
     }
   }
+  // Every existing administrator starts with full access; permissions can then be restricted.
+  const admins = await pool.query("SELECT id FROM admin_users");
+  for (const a of admins.rows) {
+    await pool.query(`INSERT INTO admin_permissions(admin_id,permissions) VALUES($1,$2::jsonb) ON CONFLICT (admin_id) DO NOTHING`, [a.id, JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+  }
 }
+
+app.get("/api/admin/permissions/definitions", requireAdmin, async (req,res)=>{
+  res.json({permissions: ADMIN_PERMISSION_DEFS});
+});
+
+app.get("/api/admin/permissions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  try {
+    const r=await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1",[id]);
+    res.json({permissions:r.rows[0]?.permissions||ALL_ADMIN_PERMISSIONS});
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar permissões."});}
+});
+
+app.put("/api/admin/permissions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Administrador inválido."});
+  if(Number(req.admin.id)===id && req.body?.permissions && Object.values(req.body.permissions).some(v=>v===false)) return res.status(400).json({error:"Você não pode remover suas próprias permissões."});
+  try {
+    const requested=req.body?.permissions||{};
+    const permissions={};
+    for(const key of Object.keys(ADMIN_PERMISSION_DEFS)) permissions[key]=requested[key]===true;
+    const r=await pool.query(`INSERT INTO admin_permissions(admin_id,permissions,updated_at) VALUES($1,$2::jsonb,NOW()) ON CONFLICT (admin_id) DO UPDATE SET permissions=EXCLUDED.permissions,updated_at=NOW() RETURNING permissions`,[id,JSON.stringify(permissions)]);
+    res.json({permissions:r.rows[0].permissions});
+  } catch(e){console.error(e);res.status(500).json({error:"Erro ao salvar permissões."});}
+});
 
 app.post("/api/admin/login", async (req,res)=>{
   const username=String(req.body?.username||"").trim().toLowerCase();
@@ -801,7 +893,8 @@ app.post("/api/admin/login", async (req,res)=>{
     res.cookie("spade_admin",makeAdminToken(Number(admin.id)),{
       httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",maxAge:1000*60*60*24*7
     });
-    res.json({admin:{id:Number(admin.id),username:admin.username,display_name:admin.display_name||admin.username,active:true}});
+    const pr=await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1",[admin.id]);
+    res.json({admin:{id:Number(admin.id),username:admin.username,display_name:admin.display_name||admin.username,active:true,permissions:pr.rows[0]?.permissions||ALL_ADMIN_PERMISSIONS}});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao realizar login administrativo."});}
 });
 
@@ -811,12 +904,12 @@ app.post("/api/admin/logout", (req,res)=>{
 });
 
 app.get("/api/admin/me", requireAdmin, async (req,res)=>{
-  res.json({admin:{id:Number(req.admin.id),username:req.admin.username,display_name:req.admin.display_name||req.admin.username,active:true,legacy:Boolean(req.admin.legacy)}});
+  res.json({admin:{id:Number(req.admin.id),username:req.admin.username,display_name:req.admin.display_name||req.admin.username,active:true,legacy:Boolean(req.admin.legacy),permissions:req.admin.permissions||ALL_ADMIN_PERMISSIONS}});
 });
 
 app.get("/api/admin/admins", requireAdmin, async (req,res)=>{
   try{
-    const r=await pool.query(`SELECT id,username,display_name,active,created_at,updated_at,last_login FROM admin_users ORDER BY lower(username)`);
+    const r=await pool.query(`SELECT a.id,a.username,a.display_name,a.active,a.created_at,a.updated_at,a.last_login,COALESCE(p.permissions,$1::jsonb) AS permissions FROM admin_users a LEFT JOIN admin_permissions p ON p.admin_id=a.id ORDER BY lower(a.username)`,[JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
     res.json({admins:r.rows.map(a=>({...a,id:Number(a.id),active:Boolean(a.active)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar administradores."});}
 });
@@ -830,7 +923,8 @@ app.post("/api/admin/admins", requireAdmin, async (req,res)=>{
   try{
     const hash=await bcrypt.hash(password,12);
     const r=await pool.query(`INSERT INTO admin_users(username,password_hash,display_name,active) VALUES($1,$2,$3,1) RETURNING id,username,display_name,active,created_at,last_login`,[username,hash,displayName]);
-    res.json({admin:{...r.rows[0],id:Number(r.rows[0].id),active:Boolean(r.rows[0].active)}});
+    await pool.query(`INSERT INTO admin_permissions(admin_id,permissions) VALUES($1,$2::jsonb) ON CONFLICT (admin_id) DO NOTHING`,[r.rows[0].id,JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+    res.json({admin:{...r.rows[0],id:Number(r.rows[0].id),active:Boolean(r.rows[0].active),permissions:ALL_ADMIN_PERMISSIONS}});
   }catch(e){
     if(e.code==="23505")return res.status(409).json({error:"Esse usuário administrativo já existe."});
     console.error(e);res.status(500).json({error:"Erro ao criar administrador."});
