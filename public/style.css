@@ -262,6 +262,7 @@
 .card-quantity{font:700 12px Inter;color:#e0c785}
 .card-inventory-item h3{font:600 17px Cinzel;margin:12px 0 7px}
 .card-inventory-item p{font-size:9px;color:#aaa;line-height:1.6;margin:0;flex:1}
+.card-inventory-item .card-description{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .card-cost{font-size:8px;color:#c4aa72;margin-top:10px}
 .cards-empty{background:#fff;border:1px solid #ddd5c9;border-radius:12px;padding:35px;text-align:center;color:#888;font-size:10px}
 .admin-card-catalog{margin-top:12px}
