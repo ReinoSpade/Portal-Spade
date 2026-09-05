@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -847,10 +847,18 @@ async function adminApi(url,options={}){
   return api(url,options);
 }
 
+function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
+function setAdminPermissionVisibility(){
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"]};
+  Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
+  const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
+  qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
+}
+
 async function refreshAdminSession(){
   try{
     const d=await adminApi("/api/admin/me");
-    state.admin=true;state.adminUser=d.admin;setAdminNav();
+    state.admin=true;state.adminUser=d.admin;state.adminPermissions=d.admin.permissions||{};setAdminNav();
     if(state.page==="admin-login") go("admin");
   }catch{
     state.admin=false;state.adminUser=null;setAdminNav();
@@ -869,18 +877,35 @@ async function adminLogin(e){
   if(!username||!password){if(err)err.textContent="Preencha usuário e senha.";return;}
   try{
     const d=await api("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
-    state.admin=true;state.adminUser=d.admin;state.adminKey=null;clearStoredAdminKey();setAdminNav();
+    state.admin=true;state.adminUser=d.admin;state.adminPermissions=d.admin.permissions||{};state.adminKey=null;clearStoredAdminKey();setAdminNav();
     qs("#adminLoginForm")?.reset();go("admin");
   }catch(ex){if(err)err.textContent=ex.message}
 }
+async function editAdminPermissions(id){
+  const editor=qs("#adminPermissionEditor"); if(!editor)return;
+  try{
+    const [defs,data]=await Promise.all([adminApi("/api/admin/permissions/definitions"),adminApi(`/api/admin/permissions/${id}`)]);
+    const admin=(state.adminUserList||[]).find(a=>Number(a.id)===Number(id));
+    const permissions=data.permissions||{};
+    editor.innerHTML=`<div class="admin-permission-card"><div class="admin-permission-card-head"><div><b>👑 ${escapeHtml(admin?.display_name||admin?.username||`Administrador #${id}`)}</b><small>Selecione os módulos que este administrador poderá gerenciar.</small></div><span class="permission-status" id="permissionStatus"></span></div><div class="admin-permission-grid">${Object.entries(defs.permissions||{}).map(([key,label])=>`<label class="admin-permission-item"><input type="checkbox" data-perm-key="${escapeHtml(key)}" ${permissions[key]===true?"checked":""}> ${escapeHtml(label)}</label>`).join("")}</div><div class="admin-permission-actions"><button type="button" class="outline small" id="cancelPermissionEdit">Cancelar</button><button type="button" class="gold small" id="savePermissionEdit">Salvar permissões</button></div></div>`;
+    qs("#cancelPermissionEdit").onclick=()=>{editor.innerHTML=`<p class="admin-history-empty">Selecione “Permissões” em um administrador para editar.</p>`};
+    qs("#savePermissionEdit").onclick=async()=>{
+      const out={};qsa("[data-perm-key]").forEach(x=>out[x.dataset.permKey]=x.checked);
+      const status=qs("#permissionStatus");
+      try{await adminApi(`/api/admin/permissions/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({permissions:out})});if(status)status.textContent="Permissões salvas.";await loadAdminUsers();setTimeout(()=>{if(status)status.textContent=""},1800)}catch(ex){if(status)status.textContent=ex.message}
+    };
+  }catch(ex){editor.innerHTML=`<p class="admin-history-empty">${escapeHtml(ex.message)}</p>`}
+}
+
 async function loadAdminUsers(){
   const list=qs("#adminUserList");if(!list)return;
   try{
     const d=await adminApi("/api/admin/admins");
-    list.innerHTML=(d.admins||[]).map(a=>`<div class="admin-user-row">
+    state.adminUserList=d.admins||[];list.innerHTML=state.adminUserList.map(a=>`<div class="admin-user-row">
       <div><b>👑 ${escapeHtml(a.display_name||a.username)}</b><small>@${escapeHtml(a.username)} • ${a.active?"Ativo":"Desativado"}${a.last_login?` • Último acesso: ${escapeHtml(String(a.last_login))}`:""}</small></div>
-      <div class="admin-user-actions">${Number(a.id)!==Number(state.adminUser?.id)?`<button type="button" class="outline small ${a.active?"danger":""}" data-admin-toggle="${a.id}" data-admin-active="${a.active?0:1}">${a.active?"Desativar":"Reativar"}</button>`:`<span class="admin-user-current">Seu acesso</span>`}</div>
+      <div class="admin-user-actions">${Number(a.id)!==Number(state.adminUser?.id)?`<button type="button" class="outline small" data-admin-perms="${a.id}">Permissões</button><button type="button" class="outline small ${a.active?"danger":""}" data-admin-toggle="${a.id}" data-admin-active="${a.active?0:1}">${a.active?"Desativar":"Reativar"}</button>`:`<span class="admin-user-current">Seu acesso</span>`}</div>
     </div>`).join("")||`<div class="admin-history-empty">Nenhum administrador cadastrado.</div>`;
+    qsa("[data-admin-perms]").forEach(btn=>btn.onclick=()=>editAdminPermissions(Number(btn.dataset.adminPerms)));
     qsa("[data-admin-toggle]").forEach(btn=>btn.onclick=async()=>{
       try{await adminApi(`/api/admin/admins/${btn.dataset.adminToggle}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:Number(btn.dataset.adminActive)===1})});await loadAdminUsers();}
       catch(ex){alert(ex.message)}
@@ -1047,14 +1072,18 @@ async function deleteAdminSchedule(id){
 
 async function initAdmin(){
   if(!state.admin)return;
+  setAdminPermissionVisibility();
   try{
-    const [ov,pl]=await Promise.all([adminApi("/api/admin/overview"),adminApi("/api/admin/players")]);
-    state.players=pl.players;
-    await loadAdminCards();
-    await loadAdminSchedule();
-    renderAdminStats(ov);populateAdminFilters();renderAdminList(state.players,qs("#adminSearch").value);
-    if(state.selectedPlayer){await selectAdminPlayer(state.selectedPlayer.id)}
-  }catch(e){alert(e.message);go("home")}
+    if(hasAdminPermission("dashboard")){ const ov=await adminApi("/api/admin/overview"); renderAdminStats(ov); }
+    if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
+    if(hasAdminPermission("cards")) await loadAdminCards();
+    if(hasAdminPermission("schedule")) await loadAdminSchedule();
+    if(hasAdminPermission("admin_users")) await loadAdminUsers();
+    if(hasAdminPermission("houses")) await loadAdminHouses();
+    if(hasAdminPermission("hierarchy")) await loadAdminHierarchy();
+    if(hasAdminPermission("journal")) await loadAdminEditorial();
+    if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
+  }catch(e){console.error(e)}
 }
 
 function renderAdminStats(ov){
