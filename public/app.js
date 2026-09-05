@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[]};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -997,7 +997,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],audit:["#adminAuditPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1263,6 +1263,29 @@ async function loadAdminEconomy(){
 }
 function populateEconomyPlayers(){const s=qs('#economyPlayer');if(!s)return;s.innerHTML='<option value="">Jogador</option>'+(state.players||[]).filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))} • ${escapeHtml(p.house||'Sem Casa')}</option>`).join('');}
 
+
+function auditSourceIcon(source){return ({AUDITORIA:'🛡️',JOGADOR:'👤',CARD:'🃏',RANKING:'🏆',CASA:'🏰'})[source]||'📜';}
+function auditStatusLabel(code){const n=Number(code||0);if(n>=200&&n<300)return {label:'Concluído',cls:'ok'};if(n>=400&&n<500)return {label:'Negado',cls:'warn'};if(n>=500)return {label:'Erro',cls:'bad'};return {label:String(n||'—'),cls:'neutral'};}
+function formatAuditDate(v){try{return new Date(v).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}catch{return String(v||'')}}
+function auditHumanAction(x){
+  if(x.source==='AUDITORIA'){
+    const m=String(x.action||'').match(/^(POST|PUT|PATCH|DELETE)\s+\/api\/admin\/(.+)$/i);
+    if(m){const verb={POST:'Criou/alterou',PUT:'Atualizou',PATCH:'Atualizou',DELETE:'Arquivou/removou'}[m[1].toUpperCase()]||m[1];return `${verb} ${m[2]}`;}
+  }
+  return String(x.action||'Registro administrativo');
+}
+async function loadAdminAudit(){
+  const list=qs('#adminAuditList');if(!list)return;
+  try{
+    const params=new URLSearchParams();
+    const q=qs('#adminAuditSearch')?.value?.trim()||'';const source=qs('#adminAuditSource')?.value||'';const from=qs('#adminAuditFrom')?.value||'';const to=qs('#adminAuditTo')?.value||'';
+    if(q)params.set('q',q);if(source)params.set('source',source);if(from)params.set('from',from);if(to)params.set('to',to);params.set('limit','100');
+    const d=await adminApi(`/api/admin/audit?${params.toString()}`);state.adminAudit=d.entries||[];
+    const counts=state.adminAudit.reduce((a,x)=>{const k=x.source||'OUTRO';a[k]=(a[k]||0)+1;return a},{});
+    const sum=qs('#adminAuditSummary'); if(sum)sum.innerHTML=`<span>📜 ${state.adminAudit.length} registros</span><span>🛡️ ${counts.AUDITORIA||0} ações diretas</span><span>🧩 ${state.adminAudit.length-(counts.AUDITORIA||0)} históricos</span>`;
+    list.innerHTML=state.adminAudit.map(x=>{const st=auditStatusLabel(x.status_code);return `<article class="audit-row"><div class="audit-icon">${auditSourceIcon(x.source)}</div><div class="audit-main"><div class="audit-top"><b>${escapeHtml(auditHumanAction(x))}</b><span class="audit-status ${st.cls}">${st.label}</span></div><small>${escapeHtml(x.actor||'Administração')} • ${escapeHtml(String(x.entity||'sistema'))}${x.entity_id?` #${escapeHtml(String(x.entity_id))}`:''} • ${escapeHtml(formatAuditDate(x.created_at))}</small>${x.detail?`<p>${escapeHtml(String(x.detail))}</p>`:''}</div></article>`}).join('')||`<div class="admin-history-empty">Nenhum registro encontrado para esses filtros.</div>`;
+  }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;const sum=qs('#adminAuditSummary');if(sum)sum.innerHTML='';}
+}
 async function initAdmin(){
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
@@ -1282,6 +1305,7 @@ async function initAdmin(){
     if(hasAdminPermission("journal")) await loadAdminEditorial();
     if(hasAdminPermission("library")) await loadAdminLibrary();
     if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
+    if(hasAdminPermission("audit")) await loadAdminAudit();
   }catch(e){console.error(e)}
 }
 
@@ -1764,6 +1788,8 @@ qs("#clearAllPlayersBtn").onclick=()=>{
 qsa("[data-bulk-action]").forEach(b=>b.onclick=()=>openBulkModal(b.dataset.bulkAction));
 qs("#newPlayerBtn").addEventListener("click",openNewPlayer);
 qs("#refreshAdminBtn").addEventListener("click",initAdmin);
+qs("#adminAuditRefresh")?.addEventListener("click",loadAdminAudit);
+["adminAuditSearch","adminAuditSource","adminAuditFrom","adminAuditTo"].forEach(id=>qs("#"+id)?.addEventListener(id==="adminAuditSearch"?"input":"change",()=>{clearTimeout(window.__auditTimer);window.__auditTimer=setTimeout(loadAdminAudit,id==="adminAuditSearch"?250:0)}));
 qs("#adminEconomyRefresh")?.addEventListener("click",loadAdminEconomy);
 qs("#adminEconomyStatus")?.addEventListener("change",loadAdminEconomy);
 qs("#adminEconomyForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs('#adminEconomyError');err.textContent='';const body={player_id:Number(qs('#economyPlayer').value),currency:qs('#economyCurrency').value,amount:Number(qs('#economyAmount').value),activity_date:qs('#economyDate').value,source_type:qs('#economySource').value.trim()||'ADMINISTRATIVO',reason:qs('#economyReason').value.trim()};try{await adminApi('/api/admin/economy/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});e.target.reset();await loadAdminEconomy();alert('Transação criada e enviada para aprovação.');}catch(ex){err.textContent=ex.message}});
