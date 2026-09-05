@@ -891,7 +891,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1135,6 +1135,28 @@ function clearAdminMissionForm(){qs("#adminMissionForm")?.reset();qs("#adminMiss
 qs("#adminMissionClear")?.addEventListener("click",clearAdminMissionForm);
 qs("#adminMissionForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#adminMissionError");err.textContent="";const body={mission_type:qs("#adminMissionType").value,start_at:qs("#adminMissionStart").value,end_at:qs("#adminMissionEnd").value,status:qs("#adminMissionStatus").value,reward_yuls:Number(qs("#adminMissionYuls").value||0),reward_exp:Number(qs("#adminMissionExp").value||0),reward_cards:qs("#adminMissionCards").value,description:qs("#adminMissionDescription").value,instructions:qs("#adminMissionInstructions").value};const id=qs("#adminMissionId").value;try{await adminApi(id?`/api/admin/missions/${id}`:"/api/admin/missions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminMissionForm();await loadAdminMissions();await loadMissions();alert(id?"Missão atualizada.":"Missão publicada.");}catch(ex){err.textContent=ex.message}});
 
+
+async function loadAdminEconomy(){
+  const list=qs("#adminEconomyList"); if(!list)return;
+  try{
+    const d=await adminApi(`/api/admin/economy${qs("#adminEconomyStatus")?.value?`?status=${encodeURIComponent(qs("#adminEconomyStatus").value)}`:""}`);
+    state.adminEconomy=d.transactions||[];
+    const totals=d.totals||[];
+    const y=totals.find(x=>x.currency==='YULS')||{}, dr=totals.find(x=>x.currency==='DRACMAS')||{};
+    qs("#adminEconomySummary").innerHTML=`<div class="admin-stat"><span>🪙 Yuls pagos</span><b>${money(y.paid||0)}</b></div><div class="admin-stat"><span>⚫ Dracmas pagos</span><b>${money(dr.paid||0)}</b></div><div class="admin-stat"><span>⏳ Pendentes</span><b>${Number(y.pending||0)+Number(dr.pending||0)}</b></div>`;
+    list.innerHTML=state.adminEconomy.map(t=>{
+      const st={AGUARDANDO_APROVACAO:'Aguardando aprovação',APROVADA_AGUARDANDO_PAGAMENTO:'Aguardando pagamento',PAGA:'Paga',ESTORNADA:'Estornada',REJEITADA:'Rejeitada'}[t.status]||t.status;
+      const actions=t.status==='AGUARDANDO_APROVACAO'?`<button class="gold small" data-econ-approve="${t.id}">Aprovar</button><button class="outline dark-outline small" data-econ-reject="${t.id}">Rejeitar</button>`:t.status==='APROVADA_AGUARDANDO_PAGAMENTO'?`<button class="gold small" data-econ-pay="${t.id}">Efetivar pagamento</button><button class="outline dark-outline small" data-econ-reject="${t.id}">Rejeitar</button>`:t.status==='PAGA'?`<button class="outline danger small" data-econ-reverse="${t.id}">Estornar</button>`:'';
+      return `<div class="economy-admin-row"><div><b>${t.currency==='YULS'?'🪙':'⚫'} ${t.amount>0?'+':''}${money(t.amount)} — ${escapeHtml(t.nick)}${escapeHtml(t.number||'')}</b><small>${escapeHtml(st)} • ${escapeHtml(t.reason||'')} • atividade: ${escapeHtml(String(t.activity_date||''))}</small><small>Origem: ${escapeHtml(t.source_type||'ADMINISTRATIVO')}${t.created_by_name?` • lançado por ${escapeHtml(t.created_by_name)}`:''}</small></div><div class="economy-admin-actions">${actions}</div></div>`;
+    }).join("")||`<div class="admin-history-empty">Nenhuma transação encontrada.</div>`;
+    qsa("[data-econ-approve]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econApprove}/approve`,{method:'POST'});await loadAdminEconomy();}catch(e){alert(e.message)}});
+    qsa("[data-econ-pay]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econPay}/pay`,{method:'POST'});await loadAdminEconomy();await initAdmin();}catch(e){alert(e.message)}});
+    qsa("[data-econ-reject]").forEach(b=>b.onclick=async()=>{if(!confirm('Rejeitar esta transação?'))return;try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econReject}/reject`,{method:'POST'});await loadAdminEconomy();}catch(e){alert(e.message)}});
+    qsa("[data-econ-reverse]").forEach(b=>b.onclick=async()=>{if(!confirm('Estornar esta transação? O saldo será revertido e o histórico será preservado.'))return;try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econReverse}/reverse`,{method:'POST'});await loadAdminEconomy();await initAdmin();}catch(e){alert(e.message)}});
+  }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
+}
+function populateEconomyPlayers(){const s=qs('#economyPlayer');if(!s)return;s.innerHTML='<option value="">Jogador</option>'+(state.players||[]).filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))} • ${escapeHtml(p.house||'Sem Casa')}</option>`).join('');}
+
 async function initAdmin(){
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
@@ -1143,6 +1165,7 @@ async function initAdmin(){
     if(hasAdminPermission("dashboard")){ const ov=await adminApi("/api/admin/overview"); renderAdminStats(ov); }
     if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
     if(hasAdminPermission("cards")) await loadAdminCards();
+    if(hasAdminPermission("economy")){ populateEconomyPlayers(); await loadAdminEconomy(); }
     if(hasAdminPermission("schedule")) await loadAdminSchedule();
     if(hasAdminPermission("missions")) await loadAdminMissions();
     if(hasAdminPermission("admin_users")) await loadAdminUsers();
@@ -1607,6 +1630,9 @@ qs("#clearAllPlayersBtn").onclick=()=>{
 qsa("[data-bulk-action]").forEach(b=>b.onclick=()=>openBulkModal(b.dataset.bulkAction));
 qs("#newPlayerBtn").addEventListener("click",openNewPlayer);
 qs("#refreshAdminBtn").addEventListener("click",initAdmin);
+qs("#adminEconomyRefresh")?.addEventListener("click",loadAdminEconomy);
+qs("#adminEconomyStatus")?.addEventListener("change",loadAdminEconomy);
+qs("#adminEconomyForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs('#adminEconomyError');err.textContent='';const body={player_id:Number(qs('#economyPlayer').value),currency:qs('#economyCurrency').value,amount:Number(qs('#economyAmount').value),activity_date:qs('#economyDate').value,source_type:qs('#economySource').value.trim()||'ADMINISTRATIVO',reason:qs('#economyReason').value.trim()};try{await adminApi('/api/admin/economy/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});e.target.reset();await loadAdminEconomy();alert('Transação criada e enviada para aprovação.');}catch(ex){err.textContent=ex.message}});
 qs("#newsForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
 qs("#editionForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
 qs("#adminLoginForm")?.addEventListener("submit",adminLogin);
