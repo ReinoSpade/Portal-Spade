@@ -304,6 +304,16 @@
 <section class="page" id="admin"><div class="subhero compact"><div class="admin-title-line"><div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Painel do <em>Reino.</em></h1><p>Controle central de jogadores, Yuls, jornal e dados do RPG.</p></div><span class="admin-lock">♛ ADMIN</span></div></div>
 <div class="content admin-page">
   <div class="admin-stats" id="adminStats"></div>
+  <section class="admin-reports-panel panel" id="adminReportsPanel">
+    <div class="panel-head"><div><p class="eyebrow">INTELIGÊNCIA DO REINO</p><h3>Estatísticas & Relatórios</h3></div><span>Visão consolidada dos principais dados de Spade</span></div>
+    <div id="adminReportsSummary" class="report-kpis"></div>
+    <div class="reports-grid">
+      <div class="report-card"><p class="eyebrow">TOP PODER</p><div id="reportTopPower"></div></div>
+      <div class="report-card"><p class="eyebrow">TOP ATIVIDADE</p><div id="reportTopActivity"></div></div>
+      <div class="report-card report-card-wide"><p class="eyebrow">CASAS</p><div id="reportHouseStats"></div></div>
+    </div>
+    <div class="report-foot"><span id="reportUpdatedAt">—</span><button class="outline dark-outline small" type="button" id="adminReportsRefresh">↻ Atualizar relatórios</button></div>
+  </section>
   <div class="admin-toolbar admin-toolbar-v2">
     <div class="admin-search-wrap"><input class="search admin-search" id="adminSearch" placeholder="Pesquisar por nick, identificador ou Casa"></div>
     <select class="admin-filter" id="adminHouseFilter"><option value="">Todas as Casas</option></select>
