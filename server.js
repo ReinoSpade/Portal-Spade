@@ -31,7 +31,8 @@ const ADMIN_PERMISSION_DEFS = {
   library: "Biblioteca",
   community: "Comunidade / Status",
   rankings: "Rankings",
-  notifications: "Notificações & Alertas"
+  notifications: "Notificações & Alertas",
+  allies: "Aliados Ocultos"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -64,6 +65,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/library")) return "library";
   if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings";
   if (path.startsWith("/notifications")) return "notifications";
+  if (path.startsWith("/allies")) return "allies";
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
@@ -174,6 +176,47 @@ function readPlayerToken(req) {
   if (!Number.isFinite(Number(id)) || !Number.isFinite(Number(ts))) return null;
   if (Date.now() - Number(ts) > 1000 * 60 * 60 * 24 * 7) return null;
   return Number(id);
+}
+
+function makeAllyToken(allyId) {
+  const payload = `ally.${allyId}.${Date.now()}`;
+  return `${payload}.${sign(payload)}`;
+}
+
+function readAllyToken(req) {
+  const token = req.cookies.spade_ally;
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "ally") return null;
+  const [, id, ts, sig] = parts;
+  const payload = `ally.${id}.${ts}`;
+  if (sign(payload) !== sig) return null;
+  if (!Number.isFinite(Number(id)) || !Number.isFinite(Number(ts))) return null;
+  if (Date.now() - Number(ts) > 1000 * 60 * 60 * 24 * 7) return null;
+  return Number(id);
+}
+
+async function resolveAlly(req) {
+  const tokenId = readAllyToken(req);
+  if (!tokenId) return null;
+  const r = await pool.query(`SELECT id,username,display_name,origin_kingdom,origin_house,patent,role,description,active FROM ally_accounts WHERE id=$1 AND active=1 LIMIT 1`, [tokenId]);
+  return r.rows[0] || null;
+}
+
+async function resolveViewer(req) {
+  const playerId = readPlayerToken(req);
+  if (playerId) {
+    const r = await pool.query("SELECT id,nick,house,patent,role,grimoire,active FROM players WHERE id=$1 AND active=1 LIMIT 1", [playerId]);
+    if (r.rows[0]) return { type: "PLAYER", id: Number(playerId), data: r.rows[0], readOnly: false };
+  }
+  const ally = await resolveAlly(req);
+  if (ally) return { type: "ALLY", id: Number(ally.id), data: ally, readOnly: true };
+  return null;
+}
+
+function viewerPlayerId(req) {
+  const id = readPlayerToken(req);
+  return id ? Number(id) : null;
 }
 
 function makeAdminToken(adminId) {
@@ -486,6 +529,33 @@ async function initDatabase() {
       notes TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS ally_accounts (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      origin_kingdom TEXT DEFAULT '',
+      origin_house TEXT DEFAULT '',
+      patent TEXT DEFAULT '',
+      role TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      hidden INTEGER DEFAULT 1 CHECK (hidden IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      last_login TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS ally_cards (
+      ally_id BIGINT NOT NULL REFERENCES ally_accounts(id) ON DELETE CASCADE,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      acquisition_type TEXT DEFAULT 'ADMINISTRATIVO',
+      acquisition_id BIGINT,
+      acquisition_name TEXT DEFAULT '',
+      acquired_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (ally_id, card_id)
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id BIGSERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -933,6 +1003,8 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_schedule_event ON schedule_activities(event_id);
     ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS mission_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL;
     CREATE INDEX IF NOT EXISTS idx_schedule_mission ON schedule_activities(mission_id);
+    CREATE INDEX IF NOT EXISTS idx_ally_accounts_username ON ally_accounts(lower(username));
+    CREATE INDEX IF NOT EXISTS idx_ally_cards_ally ON ally_cards(ally_id,card_id);
 
   `);
 
@@ -1400,22 +1472,32 @@ app.post("/api/login", async (req, res) => {
       [identifier]
     );
     const player = result.rows[0];
-    if (!player) return res.status(401).json({ error: "Login ou senha incorretos." });
-    if (!player.password_hash) {
-      return res.status(403).json({ error: "Sua senha ainda não foi cadastrada. Procure a administração do RPG." });
+    if (player) {
+      if (!player.password_hash) {
+        return res.status(403).json({ error: "Sua senha ainda não foi cadastrada. Procure a administração do RPG." });
+      }
+      const valid = await bcrypt.compare(password, player.password_hash);
+      if (!valid) return res.status(401).json({ error: "Login ou senha incorretos." });
+      player.roles=await getPlayerRoles(player.id);
+
+      res.cookie("spade_player", makePlayerToken(Number(player.id)), {
+        httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 1000 * 60 * 60 * 24 * 7
+      });
+      res.clearCookie("spade_ally");
+      return res.json({ player: publicPlayer(player) });
     }
 
-    const valid = await bcrypt.compare(password, player.password_hash);
-    if (!valid) return res.status(401).json({ error: "Login ou senha incorretos." });
-    player.roles=await getPlayerRoles(player.id);
-
-    res.cookie("spade_player", makePlayerToken(Number(player.id)), {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 1000 * 60 * 60 * 24 * 7
+    const allyResult = await pool.query(`SELECT * FROM ally_accounts WHERE lower(username)=lower($1) AND active=1 LIMIT 1`, [identifier]);
+    const ally = allyResult.rows[0];
+    if (!ally) return res.status(401).json({ error: "Login ou senha incorretos." });
+    const validAlly = await bcrypt.compare(password, ally.password_hash);
+    if (!validAlly) return res.status(401).json({ error: "Login ou senha incorretos." });
+    await pool.query("UPDATE ally_accounts SET last_login=NOW() WHERE id=$1", [ally.id]);
+    res.cookie("spade_ally", makeAllyToken(Number(ally.id)), {
+      httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 1000 * 60 * 60 * 24 * 7
     });
-    res.json({ player: publicPlayer(player) });
+    res.clearCookie("spade_player");
+    return res.json({ player: { id:Number(ally.id), nick:ally.display_name, identifier:ally.username, house:ally.origin_house||"", patent:ally.patent||"", role:ally.role||"", grimoire:"", hp:0, mana:0, yuls:0, missions:0, achievements:0, ranking:0, power:0, active:1, exp:0, roles:[], account_type:"ALLY", read_only:true, origin_kingdom:ally.origin_kingdom||"", origin_house:ally.origin_house||"" } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Erro ao realizar login." });
@@ -1424,27 +1506,50 @@ app.post("/api/login", async (req, res) => {
 
 app.post("/api/logout", (req, res) => {
   res.clearCookie("spade_player");
+  res.clearCookie("spade_ally");
   res.json({ ok: true });
 });
 
 app.get("/api/me", async (req, res) => {
-  const id = readPlayerToken(req);
-  if (!id) return res.status(401).json({ error: "Não autenticado." });
+  const viewer = await resolveViewer(req);
+  if (!viewer) return res.status(401).json({ error: "Não autenticado." });
   try {
+    if (viewer.type === "ALLY") {
+      const a = viewer.data;
+      return res.json({ player: { id:Number(a.id), nick:a.display_name, identifier:a.username, house:a.origin_house||"", patent:a.patent||"", role:a.role||"", grimoire:"", hp:0, mana:0, yuls:0, missions:0, achievements:0, ranking:0, power:0, active:1, exp:0, roles:[], account_type:"ALLY", read_only:true, origin_kingdom:a.origin_kingdom||"", origin_house:a.origin_house||"", description:a.description||"" } });
+    }
+    const id = viewer.id;
     const result = await pool.query("SELECT * FROM players WHERE id=$1 AND active=1", [id]);
     const player = result.rows[0];
     if (!player) return res.status(401).json({ error: "Sessão inválida." });
     player.roles=await getPlayerRoles(id);
     res.json({ player: publicPlayer(player) });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erro ao carregar perfil." });
-  }
+  } catch (e) { console.error(e); res.status(500).json({ error: "Erro ao carregar perfil." }); }
 });
 
 app.get("/api/me/dashboard", async (req,res)=>{
-  const id=readPlayerToken(req);
-  if(!id)return res.status(401).json({error:"Não autenticado."});
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type==="ALLY") {
+    try{
+      const [cardsR, activeR, scheduleR, notesR]=await Promise.all([
+        pool.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(c.power_value),0)::bigint AS power FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1`,[viewer.id]),
+        pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND status='ATIVO' ORDER BY end_date ASC,id ASC LIMIT 4`),
+        pool.query(`SELECT s.id,s.title,s.activity_type,s.activity_date,s.start_time,s.end_time,s.status,s.event_id,s.mission_id,e.title AS event_title FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id WHERE s.published=1 AND s.status NOT IN ('CANCELADA') AND s.activity_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 5`,[]),
+        pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id IS NULL ORDER BY id DESC LIMIT 5`).catch(()=>({rows:[]}))
+      ]);
+      res.json({
+        account_type:"ALLY",read_only:true,
+        player:{id:Number(viewer.id),nick:viewer.data.display_name,identifier:viewer.data.username,house:viewer.data.origin_house||"",patent:viewer.data.patent||"",role:viewer.data.role||"",grimoire:"",hp:0,mana:0,yuls:0,missions:0,achievements:0,ranking:0,power:0,active:1,exp:0,roles:[],account_type:"ALLY",read_only:true,origin_kingdom:viewer.data.origin_kingdom||"",origin_house:viewer.data.origin_house||"",description:viewer.data.description||""},
+        cards:{count:Number(cardsR.rows[0]?.count||0),power:Number(cardsR.rows[0]?.power||0)},
+        rankings:{power:0,sc:0,vt:0},
+        activeEvents:activeR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||"EVENTO",status:x.status,start_date:x.start_date,end_date:x.end_date})),
+        upcoming:scheduleR.rows.map(x=>({id:Number(x.id),title:x.title,activity_type:x.activity_type||"ATIVIDADE",activity_date:x.activity_date,start_time:x.start_time,end_time:x.end_time,status:x.status,event_id:x.event_id?Number(x.event_id):null,mission_id:x.mission_id?Number(x.mission_id):null,event_title:x.event_title||""})),
+        notifications:[],unreadNotifications:0,todayStatus:null
+      });
+    }catch(e){console.error(e);return res.status(500).json({error:"Erro ao carregar seu painel de aliado."});}
+  }
+  const id=viewer.id;
   try{
     const [playerR, cardsR, rankingsR, activeR, scheduleR, notesR, statusR] = await Promise.all([
       pool.query(`SELECT id,nick,house,patent,grimoire,hp,mana,yuls,missions,achievements,exp,active FROM players WHERE id=$1 AND active=1 LIMIT 1`,[id]),
@@ -1475,8 +1580,10 @@ app.get("/api/me/dashboard", async (req,res)=>{
 function saoPauloTodaySql(){ return "((NOW() AT TIME ZONE 'America/Sao_Paulo')::date)"; }
 
 app.get("/api/me/status/today", async (req,res)=>{
-  const playerId=readPlayerToken(req);
-  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type==="ALLY")return res.json({status:null,read_only:true});
+  const playerId=viewer.id;
   try{
     const r=await pool.query(`
       SELECT ps.id,ps.status_date,ps.message,ps.created_at,ps.updated_at,p.nick,p.house
@@ -1513,8 +1620,9 @@ app.post("/api/me/status", async (req,res)=>{
 });
 
 app.get("/api/status-board", async (req,res)=>{
-  const viewerId=readPlayerToken(req);
-  if(!viewerId)return res.status(401).json({error:"Faça login para visualizar o quadro de status."});
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Faça login para visualizar o quadro de status."});
+  const viewerId=viewer.type==="PLAYER"?viewer.id:null;
   try{
     const days=Math.min(14,Math.max(1,Number(req.query?.days||7)));
     const r=await pool.query(`
@@ -1539,8 +1647,10 @@ app.get("/api/status-board", async (req,res)=>{
 });
 
 app.post("/api/status/:id/react", async (req,res)=>{
-  const playerId=readPlayerToken(req);
-  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type!=="PLAYER")return res.status(403).json({error:"Aliados Ocultos possuem acesso somente para leitura."});
+  const playerId=viewer.id;
   const statusId=Number(req.params.id);
   if(!Number.isFinite(statusId))return res.status(400).json({error:"Status inválido."});
   try{
@@ -1555,8 +1665,9 @@ app.post("/api/status/:id/react", async (req,res)=>{
 });
 
 app.get("/api/status/:id/comments", async (req,res)=>{
-  const viewer=readPlayerToken(req);
+  const viewer=await resolveViewer(req);
   if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  const viewerId=viewer.type==="PLAYER"?viewer.id:null;
   const statusId=Number(req.params.id);
   try{
     const r=await pool.query(`SELECT sc.id,sc.player_id,sc.message,sc.created_at,p.nick,p.house
@@ -1567,8 +1678,10 @@ app.get("/api/status/:id/comments", async (req,res)=>{
 });
 
 app.post("/api/status/:id/comments", async (req,res)=>{
-  const playerId=readPlayerToken(req);
-  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type!=="PLAYER")return res.status(403).json({error:"Aliados Ocultos possuem acesso somente para leitura."});
+  const playerId=viewer.id;
   const statusId=Number(req.params.id);
   const message=String(req.body?.message||"").trim();
   if(!message)return res.status(400).json({error:"Escreva um comentário."});
@@ -1699,9 +1812,22 @@ app.get("/api/me/events", async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus eventos."});}
 });
 
+app.get("/api/me/ally-cards", async (req,res)=>{
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type!=="ALLY")return res.status(403).json({error:"Rota exclusiva de aliados."});
+  try{
+    const r=await pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.origin,c.status,c.description,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
+      FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1 ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,[viewer.id]);
+    res.json({cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Administrativo",status:c.status||"ATIVO",description:c.description||"",acquisition_type:c.acquisition_type||"ADMINISTRATIVO",acquisition_name:c.acquisition_name||"",acquired_at:c.acquired_at}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus Cards de aliado."});}
+});
+
 app.get("/api/me/cards", async (req,res)=>{
-  const id=readPlayerToken(req);
-  if(!id)return res.status(401).json({error:"Não autenticado."});
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type!=="PLAYER")return res.status(403).json({error:"Use o painel de Cards do Aliado."});
+  const id=viewer.id;
   try{
     const r=await pool.query(
       `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.origin,c.status,c.description,c.sort_order,
@@ -2205,7 +2331,7 @@ app.get("/api/search", async (req,res)=>{
   try{
     const playerId=readPlayerToken(req);
     const isAdmin=!!(await resolveAdmin(req));
-    const cardsAllowed=!!playerId||isAdmin;
+    const cardsAllowed=!!playerId||!!(await resolveAlly(req))||isAdmin;
     const queries=[
       pool.query(`SELECT id,nick,house,patent FROM players WHERE public_profile=1 AND active=1 AND (nick ILIKE $1 OR house ILIKE $1 OR patent ILIKE $1) ORDER BY nick ASC LIMIT 8`,[like]),
       pool.query(`SELECT id,name,emblem FROM houses WHERE active=1 AND (name ILIKE $1 OR description ILIKE $1 OR motto ILIKE $1) ORDER BY name ASC LIMIT 8`,[like]),
@@ -3563,6 +3689,71 @@ app.get("/api/admin/reports", requireAdmin, async (req,res)=>{
   }
 });
 
+
+app.get("/api/admin/allies", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT a.id,a.username,a.display_name,a.origin_kingdom,a.origin_house,a.patent,a.role,a.description,a.active,a.hidden,a.created_at,a.updated_at,a.last_login,COUNT(ac.card_id)::int AS card_count
+      FROM ally_accounts a LEFT JOIN ally_cards ac ON ac.ally_id=a.id GROUP BY a.id ORDER BY a.display_name COLLATE "C" ASC`);
+    res.json({allies:r.rows.map(a=>({...a,id:Number(a.id),active:Number(a.active),hidden:Number(a.hidden),card_count:Number(a.card_count||0)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar Aliados Ocultos."});}
+});
+
+app.post("/api/admin/allies", requireAdmin, async (req,res)=>{
+  const b=req.body||{};
+  const username=String(b.username||"").trim().toLowerCase();
+  const displayName=String(b.display_name||"").trim();
+  const password=String(b.password||"");
+  if(!username||!displayName)return res.status(400).json({error:"Usuário e nome de exibição são obrigatórios."});
+  if(password.length<6)return res.status(400).json({error:"A senha do aliado precisa ter pelo menos 6 caracteres."});
+  try{
+    const collision=await pool.query(`SELECT 1 FROM players WHERE lower(nick)=lower($1) OR lower(identifier)=lower($1) LIMIT 1`,[username]);
+    if(collision.rows[0])return res.status(400).json({error:"Esse usuário já está reservado por um jogador de Spade."});
+    const hash=await bcrypt.hash(password,12);
+    const r=await pool.query(`INSERT INTO ally_accounts(username,password_hash,display_name,origin_kingdom,origin_house,patent,role,description,active,hidden) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,1) RETURNING *`,[username,hash,displayName,String(b.origin_kingdom||""),String(b.origin_house||""),String(b.patent||""),String(b.role||""),String(b.description||"")]);
+    res.json({ally:{...r.rows[0],id:Number(r.rows[0].id),active:1,hidden:1}});
+  }catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:"Esse usuário de aliado já existe."});res.status(500).json({error:"Erro ao criar Aliado Oculto."});}
+});
+
+app.put("/api/admin/allies/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);const b=req.body||{};
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Aliado inválido."});
+  try{
+    const cur=await pool.query(`SELECT * FROM ally_accounts WHERE id=$1`,[id]);
+    if(!cur.rows[0])return res.status(404).json({error:"Aliado não encontrado."});
+    const a=cur.rows[0]; const username=String(b.username??a.username).trim().toLowerCase(); const displayName=String(b.display_name??a.display_name).trim();
+    const collision=await pool.query(`SELECT 1 FROM players WHERE (lower(nick)=lower($1) OR lower(identifier)=lower($1)) AND id<>$2 LIMIT 1`,[username,0]);
+    if(collision.rows[0])return res.status(400).json({error:"Esse usuário já está reservado por um jogador de Spade."});
+    let hash=a.password_hash; if(String(b.password||"")){if(String(b.password).length<6)return res.status(400).json({error:"A nova senha precisa ter pelo menos 6 caracteres."});hash=await bcrypt.hash(String(b.password),12);}
+    const r=await pool.query(`UPDATE ally_accounts SET username=$1,password_hash=$2,display_name=$3,origin_kingdom=$4,origin_house=$5,patent=$6,role=$7,description=$8,active=$9,hidden=1,updated_at=NOW() WHERE id=$10 RETURNING *`,[username,hash,displayName,String(b.origin_kingdom??a.origin_kingdom??""),String(b.origin_house??a.origin_house??""),String(b.patent??a.patent??""),String(b.role??a.role??""),String(b.description??a.description??""),Number(b.active??a.active)?1:0,id]);
+    res.json({ally:{...r.rows[0],id:Number(r.rows[0].id),active:Number(r.rows[0].active),hidden:1}});
+  }catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:"Esse usuário de aliado já existe."});res.status(500).json({error:"Erro ao atualizar Aliado Oculto."});}
+});
+
+app.delete("/api/admin/allies/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Aliado inválido."});
+  try{const r=await pool.query(`UPDATE ally_accounts SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id`,[id]);if(!r.rows[0])return res.status(404).json({error:"Aliado não encontrado."});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:"Erro ao suspender Aliado Oculto."});}
+});
+
+app.get("/api/admin/allies/:id/cards", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Aliado inválido."});
+  try{const r=await pool.query(`SELECT c.*,ac.acquisition_type,ac.acquisition_name,ac.acquired_at FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1 ORDER BY c.name_pt,c.name`,[id]);res.json({cards:r.rows.map(c=>({...c,id:Number(c.id),power_value:Number(c.power_value||0)}))});}catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar Cards do aliado."});}
+});
+
+app.post("/api/admin/allies/:id/cards", requireAdmin, async (req,res)=>{
+  const allyId=Number(req.params.id), cardId=Number(req.body?.card_id);
+  if(!Number.isInteger(allyId)||!Number.isInteger(cardId)||allyId<=0||cardId<=0)return res.status(400).json({error:"Aliado ou Card inválido."});
+  try{
+    const a=await pool.query(`SELECT id FROM ally_accounts WHERE id=$1`,[allyId]); const c=await pool.query(`SELECT id,name,name_pt FROM cards WHERE id=$1`,[cardId]);
+    if(!a.rows[0])return res.status(404).json({error:"Aliado não encontrado."}); if(!c.rows[0])return res.status(404).json({error:"Card não encontrado."});
+    await pool.query(`INSERT INTO ally_cards(ally_id,card_id,acquisition_type,acquisition_id,acquisition_name) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,[allyId,cardId,String(req.body?.acquisition_type||"ADMINISTRATIVO"),req.body?.acquisition_id?Number(req.body.acquisition_id):null,String(req.body?.acquisition_name||"Concessão administrativa")]);
+    res.json({ok:true});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao conceder Card ao aliado."});}
+});
+
+app.delete("/api/admin/allies/:id/cards/:cardId", requireAdmin, async (req,res)=>{
+  const allyId=Number(req.params.id),cardId=Number(req.params.cardId);if(!Number.isInteger(allyId)||!Number.isInteger(cardId))return res.status(400).json({error:"Aliado ou Card inválido."});
+  try{const r=await pool.query(`DELETE FROM ally_cards WHERE ally_id=$1 AND card_id=$2`,[allyId,cardId]);if(!r.rowCount)return res.status(404).json({error:"O aliado não possui este Card."});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:"Erro ao remover Card do aliado."});}
+});
 
 app.get("/api/admin/houses", requireAdmin, async (req, res) => {
   try {
