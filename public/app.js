@@ -765,7 +765,7 @@ function renderPlayerCards(cards){
   const filtered=(cards||[]).filter(c=>{
     if(state.cardFilter && c.category!==state.cardFilter)return false;
     const term=String(state.cardSearch||"").trim().toLowerCase();
-    return !term || `${c.name} ${c.category} ${c.description||""} ${c.acquisition_name||""}`.toLowerCase().includes(term);
+    return !term || `${c.name_pt||c.name} ${c.name_jp||""} ${c.category} ${c.element||""} ${c.origin||""} ${c.description||""} ${c.acquisition_name||""}`.toLowerCase().includes(term);
   });
   if(summary)summary.textContent=`${filtered.length} cards no inventário`;
   if(!filtered.length){
@@ -780,9 +780,11 @@ function renderPlayerCards(cards){
       <div class="player-card-grid">
         ${items.map(c=>`<article class="card-inventory-item">
           <div class="card-inventory-top"><span class="card-type-pill">${escapeHtml(c.category)}</span></div>
-          <h3>${escapeHtml(c.name)}</h3>
+          <h3>${escapeHtml(c.name_pt||c.name)}</h3>
+          ${c.name_jp?`<div class="card-jp-name">${escapeHtml(c.name_jp)}</div>`:""}
           <p>${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
-          ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)}</div>`:""}
+          <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${c.element_type==="ELEMENTAL"&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
+          ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
           <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}</div>
         </article>`).join("")}
       </div>
@@ -1666,56 +1668,33 @@ async function loadAdminCards(){
   }catch(e){console.error(e)}
 }
 
-function resetCardForm(){
-  const f=qs("#cardForm");if(!f)return;
-  f.reset();
-  qs("#cardId").value="";
-  qs("#adminCardCategory").value="Outros";
-  qs("#cardActive").checked=true;
-  qs("#cardSaveBtn").textContent="Criar card";
-  qs("#cardError").textContent="";
+async function loadAdminCards(){
+  try{
+    const d=await adminApi("/api/admin/cards");
+    state.adminCards=d.cards||[];state.cardCategories=d.categories||[];state.cardOrigins=d.origins||[];state.cardElementTypes=d.element_types||[];state.cardCostTypes=d.cost_types||[];state.cardStatuses=d.statuses||[];
+    renderAdminCardCatalog();
+  }catch(e){console.error(e)}
 }
 
+function populateCardSelects(){
+  const cat=qs("#adminCardCategory"),origin=qs("#cardOrigin");
+  if(cat)cat.innerHTML=(state.cardCategories||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
+  if(origin)origin.innerHTML=(state.cardOrigins||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
+}
+function resetCardForm(){
+  const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";populateCardSelects();
+  qs("#adminCardCategory").value="Outros";qs("#cardOrigin").value="Exclusivo";qs("#cardElementType").value="NAO_ELEMENTAL";qs("#cardCostType").value="SEM_CUSTO";qs("#cardStatus").value="ATIVO";qs("#cardPower").value=0;qs("#cardSaveBtn").textContent="Criar card";qs("#cardError").textContent="";
+}
 function editCardForm(id){
   const c=state.adminCards.find(x=>Number(x.id)===id);if(!c)return;
-  qs("#cardId").value=c.id;
-  qs("#cardName").value=c.name;
-  qs("#adminCardCategory").value=c.category;
-  qs("#cardCost").value=c.cost||"";
-  qs("#cardOrder").value=c.sort_order||0;
-  qs("#cardDescription").value=c.description||"";
-  qs("#cardActive").checked=!!c.active;
-  qs("#cardSaveBtn").textContent="Salvar card";
-  qs("#cardError").textContent="";
-  qs("#cardName").focus();
+  qs("#cardId").value=c.id;qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
 }
-
 function renderAdminCardCatalog(){
-  const list=qs("#adminCardCatalogList");if(!list)return;
-  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item">
-    <div><b>${escapeHtml(c.name)}</b><small>${escapeHtml(c.category)}${c.cost?` • ${escapeHtml(c.cost)}`:""} • ${c.players} jogador(es)${c.active?"":" • DESATIVADO"}</small></div>
-    <div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div>
-  </div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
-  qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));
-  qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
-  const select=qs("#adminCardCategory");
-  if(select){
-    select.innerHTML=(state.cardCategories||[]).map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-    if(!qs("#cardId").value)select.value="Outros";
-  }
+  const list=qs("#adminCardCatalogList");if(!list)return;populateCardSelects();
+  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item"><div><b>${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
+  qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
 }
-
-async function deleteCard(id){
-  const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;
-  if(!confirm(`Excluir o card "${c.name}"?`))return;
-  try{
-    await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});
-    if(Number(qs("#cardId").value)===id)resetCardForm();
-    await loadAdminCards();
-    if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);
-    alert("Card excluído.");
-  }catch(e){alert(e.message)}
-}
+async function deleteCard(id){const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;if(!confirm(`Excluir o card "${c.name_pt||c.name}"?`))return;try{await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});if(Number(qs("#cardId").value)===id)resetCardForm();await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);alert("Card excluído.");}catch(e){alert(e.message)}}
 
 async function loadAdminEvents(){
   try{
@@ -2219,7 +2198,7 @@ qs("#announcementForm").addEventListener("submit",async e=>{
 qs("#cardForm").addEventListener("submit",async e=>{
   e.preventDefault();
   const b=Object.fromEntries(new FormData(e.target).entries());
-  b.active=qs("#cardActive").checked?1:0;
+  b.power_value=Number(b.power_value||0);
   try{
     if(b.id)await adminApi(`/api/admin/cards/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
     else await adminApi("/api/admin/cards",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
@@ -2229,6 +2208,11 @@ qs("#cardForm").addEventListener("submit",async e=>{
   }catch(ex){qs("#cardError").textContent=ex.message}
 });
 qs("#cardCancelBtn").addEventListener("click",resetCardForm);
+qs("#addCardCategoryBtn")?.addEventListener("click",async()=>{
+  const input=qs("#newCardCategory"),name=(input?.value||"").trim();if(!name)return alert("Informe o nome da categoria.");
+  try{await adminApi("/api/admin/card-categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});input.value="";await loadAdminCards();alert("Categoria criada.");}
+  catch(e){alert(e.message)}
+});
 
 qs("#announcementCancelBtn").addEventListener("click",resetAnnouncementForm);
 
