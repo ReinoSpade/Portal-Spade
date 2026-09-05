@@ -850,7 +850,7 @@ function renderPlayerCards(cards){
           <div class="card-inventory-top"><span class="card-type-pill">${escapeHtml(c.category)}</span></div>
           <h3>${escapeHtml(c.name_pt||c.name)}</h3>
           ${c.name_jp?`<div class="card-jp-name">${escapeHtml(c.name_jp)}</div>`:""}
-          <p>${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
+          <p class="card-description">${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
           <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>Dano: <b>${Number(c.damage_value||0)}</b> <small>${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}</small></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${c.element_type==="ELEMENTAL"&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
           ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
           <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}</div>
