@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[]};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -25,6 +25,7 @@ function go(page){
   if(page==="casas") loadHouses();
   if(page==="ranking") loadRanking();
   if(page==="hierarquia") loadHierarchy();
+  if(page==="biblioteca") loadLibrary();
   if(page==="dashboard"){ if(state.me) renderDashboard(); else refreshDashboard(); }
   if(page==="cards"){ if(state.me) loadPlayerCards(); else { state.page="login"; return go("login"); } }
   if(page==="admin"){ if(state.admin) initAdmin(); else go("admin-login"); }
@@ -49,6 +50,14 @@ async function loadHome(){
     const e=d.editions[0];qs("#editionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
 }
+
+async function loadLibrary(){
+  try{const params=new URLSearchParams();const q=qs("#librarySearch")?.value.trim();const cat=qs("#libraryCategory")?.value;if(q)params.set("q",q);if(cat)params.set("category",cat);const d=await api(`/api/library?${params.toString()}`);state.libraryItems=d.items||[];renderLibrary(state.libraryItems);populateLibraryCategories(state.libraryItems);}
+  catch(e){const el=qs("#libraryGrid");if(el)el.innerHTML=`<div class="panel"><h3>Não foi possível carregar a Biblioteca.</h3><p>${escapeHtml(e.message)}</p></div>`;}
+}
+function populateLibraryCategories(items){const sel=qs("#libraryCategory");if(!sel)return;const current=sel.value;const cats=[...new Set((items||[]).map(x=>x.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");if(cats.includes(current))sel.value=current;}
+function renderLibrary(items){const el=qs("#libraryGrid");if(!el)return;el.innerHTML=(items||[]).length?(items||[]).map(x=>`<article class="library-card"><div class="library-icon">${escapeHtml(x.icon||"📚")}</div><span class="tag">${escapeHtml(x.category||"GERAL")}</span><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.description||"")}</p><div class="library-actions">${x.content?`<button class="outline dark-outline small" type="button" data-library-read="${x.id}">Ler no Portal</button>`:""}${x.url?`<a class="gold small library-link" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Abrir material</a>`:""}</div></article>`).join(""): '<div class="panel"><h3>Nenhum material encontrado.</h3><p>A Biblioteca será alimentada pela Administração.</p></div>';qsa("[data-library-read]").forEach(b=>b.onclick=()=>{const x=state.libraryItems.find(i=>Number(i.id)===Number(b.dataset.libraryRead));if(!x)return;openLibraryReader(x);});}
+function openLibraryReader(x){let modal=qs("#libraryReaderModal");if(!modal){modal=document.createElement("div");modal.id="libraryReaderModal";modal.className="modal-overlay";document.body.appendChild(modal);}modal.innerHTML=`<div class="modal-card library-reader"><button class="modal-close" type="button" id="libraryReaderClose">×</button><p class="eyebrow">${escapeHtml(x.category||"BIBLIOTECA")}</p><h2>${escapeHtml(x.title)}</h2><p class="library-reader-desc">${escapeHtml(x.description||"")}</p><div class="library-reader-content">${escapeHtml(x.content||"").replace(/\n/g,"<br>")}</div>${x.url?`<a class="gold small" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Abrir material original</a>`:""}</div>`;modal.classList.add("open");qs("#libraryReaderClose").onclick=()=>modal.classList.remove("open");modal.onclick=e=>{if(e.target===modal)modal.classList.remove("open")};}
 
 async function loadAnnouncements(){
   try{
@@ -875,7 +884,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1132,6 +1141,7 @@ async function initAdmin(){
     if(hasAdminPermission("houses")) await loadAdminHouses();
     if(hasAdminPermission("hierarchy")) await loadAdminHierarchy();
     if(hasAdminPermission("journal")) await loadAdminEditorial();
+    if(hasAdminPermission("library")) await loadAdminLibrary();
     if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
   }catch(e){console.error(e)}
 }
@@ -2014,6 +2024,12 @@ async function deleteAnnouncement(id){
   }catch(e){alert(e.message)}
 }
 
+async function loadAdminLibrary(){try{const d=await adminApi("/api/admin/library");state.adminLibrary=d.items||[];renderAdminLibrary();}catch(e){console.error(e)}}
+function clearAdminLibraryForm(){qs("#adminLibraryForm")?.reset();qs("#adminLibraryId").value="";qs("#adminLibraryIcon").value="📚";qs("#adminLibraryOrder").value="0";qs("#adminLibraryPublished").checked=true;qs("#adminLibraryError").textContent="";}
+function renderAdminLibrary(){const el=qs("#adminLibraryList");if(!el)return;el.innerHTML=(state.adminLibrary||[]).map(x=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(x.icon||"📚")} ${escapeHtml(x.title)}</b><small>${escapeHtml(x.category||"GERAL")} • ${x.published?"Publicado":"Arquivado"}</small></div><div class="editorial-actions"><button type="button" data-library-edit="${x.id}">✎</button><button type="button" data-library-delete="${x.id}">×</button></div></div></div>`).join("")||'<div style="font-size:10px;color:#888">Nenhum material cadastrado.</div>';qsa("[data-library-edit]").forEach(b=>b.onclick=()=>editAdminLibrary(Number(b.dataset.libraryEdit)));qsa("[data-library-delete]").forEach(b=>b.onclick=()=>deleteAdminLibrary(Number(b.dataset.libraryDelete)));}
+function editAdminLibrary(id){const x=state.adminLibrary.find(i=>Number(i.id)===id);if(!x)return;qs("#adminLibraryId").value=x.id;qs("#adminLibraryTitle").value=x.title||"";qs("#adminLibraryCategory").value=x.category||"";qs("#adminLibraryIcon").value=x.icon||"📚";qs("#adminLibraryOrder").value=x.sort_order||0;qs("#adminLibraryUrl").value=x.url||"";qs("#adminLibraryDescription").value=x.description||"";qs("#adminLibraryContent").value=x.content||"";qs("#adminLibraryPublished").checked=Number(x.published)===1;}
+async function deleteAdminLibrary(id){if(!confirm("Arquivar este material?"))return;try{await adminApi(`/api/admin/library/${id}`,{method:"DELETE"});await loadAdminLibrary();await loadLibrary();}catch(e){alert(e.message)}}
+
 async function loadAdminEditorial(){
   try{
     const [n,e]=await Promise.all([adminApi("/api/admin/news"),adminApi("/api/admin/editions")]);
@@ -2041,6 +2057,10 @@ async function deleteEdition(id){
 
 qs("#saveEventResultsBtn").addEventListener("click",saveAdminResults);
 qs("#publishEventResultsBtn").addEventListener("click",publishAdminResults);
+qs("#librarySearch")?.addEventListener("input",()=>loadLibrary());
+qs("#libraryCategory")?.addEventListener("change",()=>loadLibrary());
+qs("#adminLibraryClear")?.addEventListener("click",clearAdminLibraryForm);
+qs("#adminLibraryForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminLibraryId").value;const body={title:qs("#adminLibraryTitle").value,category:qs("#adminLibraryCategory").value,icon:qs("#adminLibraryIcon").value,sort_order:Number(qs("#adminLibraryOrder").value||0),url:qs("#adminLibraryUrl").value,description:qs("#adminLibraryDescription").value,content:qs("#adminLibraryContent").value,published:qs("#adminLibraryPublished").checked};try{await adminApi(id?`/api/admin/library/${id}`:"/api/admin/library",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminLibraryForm();await loadAdminLibrary();await loadLibrary();alert(id?"Material atualizado.":"Material cadastrado.")}catch(ex){qs("#adminLibraryError").textContent=ex.message}});
 qs("#scheduleSearch")?.addEventListener("input",()=>renderSchedule(state.schedule));
 qs("#scheduleDateFilter")?.addEventListener("change",()=>renderSchedule(state.schedule));
 qs("#scheduleTypeFilter")?.addEventListener("change",()=>renderSchedule(state.schedule));
