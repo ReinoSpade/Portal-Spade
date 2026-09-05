@@ -106,7 +106,7 @@ function renderAnnouncements(items){
 
 function renderHomeActiveActivities(items){
   const el=qs("#homeActiveActivities"); if(!el)return;
-  el.innerHTML=(items||[]).length?`<div class="home-active-wrap"><div class="section-head"><div><p class="eyebrow">♠️ ATIVIDADE OFICIAL</p><h2>Acontecendo agora</h2></div><button class="outline dark-outline" data-page="cronograma">Ver cronograma</button></div><div class="home-active-grid">${items.slice(0,4).map(a=>{const kind=a.mission_type?`Missão de ${a.mission_type}`:(a.event_title?`Evento: ${a.event_title}`:(a.activity_type||"Atividade"));const end=a.end_time?String(a.end_time).slice(0,5):(a.mission_end_at?new Date(a.mission_end_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"");const label=a.event_title?"Evento":(a.mission_type?"Missão":(a.activity_type||"Atividade"));return `<article class="home-active-card"><span class="tag">${escapeHtml(label)} • ACONTECENDO AGORA</span><h3>${escapeHtml(a.title||kind)}</h3><p>${escapeHtml(a.description||kind)}</p>${end?`<small>Encerra às <b>${escapeHtml(end)}</b></small>`:""}<button class="gold small" data-page="cronograma">Ver atividade</button></article>`}).join("")}</div></div>`:"";
+  el.innerHTML=(items||[]).length?`<div class="home-active-wrap"><div class="section-head"><div><p class="eyebrow">♠️ ATIVIDADE OFICIAL</p><h2>Acontecendo agora</h2></div><button class="outline dark-outline" data-page="cronograma">Ver cronograma</button></div><div class="home-active-grid">${items.slice(0,4).map(a=>{const kind=a.mission_type?`Missão de ${a.mission_type}`:(a.event_title?`Evento: ${a.event_title}`:(a.activity_type||"Atividade"));const end=a.end_time?String(a.end_time).slice(0,5):(a.mission_end_at?new Date(a.mission_end_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"");return `<article class="home-active-card"><span class="tag">ACONTECENDO AGORA</span><h3>${escapeHtml(a.title||kind)}</h3><p>${escapeHtml(a.description||kind)}</p>${end?`<small>Encerra às <b>${escapeHtml(end)}</b></small>`:""}<button class="gold small" data-page="cronograma">Ver atividade</button></article>`}).join("")}</div></div>`:"";
 }
 
 function renderHomeAnnouncements(items){
@@ -1833,6 +1833,7 @@ async function loadAdminArticles(){
     state.adminArticles=a.articles||[];
     state.adminEditions=e.editions||[];
     renderAdminArticles();
+    renderAdminEditions();
     populateEditorEditionSelect();
     if(state.editorEditionId)await loadEditionComposition(state.editorEditionId);
   }catch(e){console.error(e)}
@@ -2109,6 +2110,25 @@ qs("#eventRegisterActionBtn").addEventListener("click",async()=>{
   try{await adminApi(`/api/admin/events/${state.selectedEventId}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id,action_id,note})});qs("#eventActionNote").value="";await loadEventAdminDetails(state.selectedEventId);alert("Pontos registrados.")}catch(e){alert(e.message)}
 });
 
+function resetEditionForm(){
+  const f=qs("#editionForm");if(!f)return;f.reset();
+  qs("#editionId").value="";qs("#editionDate").value=new Date().toISOString().slice(0,10);
+  qs("#editionPublished").checked=false;qs("#editionSaveBtn").textContent="Criar edição";qs("#editionError").textContent="";
+}
+function editEdition(id){
+  const e=(state.adminEditions||[]).find(x=>Number(x.id)===id);if(!e)return;
+  qs("#editionId").value=e.id;qs("#editionTitle").value=e.title||"";qs("#editionNumber").value=e.edition||"";
+  qs("#editionDate").value=String(e.date||"").slice(0,10);qs("#editionCover").value=e.cover_url||"";qs("#editionPdf").value=e.pdf_url||"";
+  qs("#editionDescription").value=e.description||"";qs("#editionPublished").checked=!!e.published;qs("#editionSaveBtn").textContent="Salvar edição";
+  qs("#editionError").textContent="";qs("#editionTitle").focus();
+}
+function renderAdminEditions(){
+  const el=qs("#adminEditionList");if(!el)return;
+  el.innerHTML=(state.adminEditions||[]).map(e=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(e.title)}</b><small>${escapeHtml(e.edition||"Edição")} • ${escapeHtml(String(e.date||""))} • ${e.article_count||0} matérias${e.published?"":" • Arquivada"}</small></div><div class="editorial-actions"><button type="button" data-edition-edit="${e.id}">✎</button><button type="button" class="delete" data-edition-delete="${e.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição cadastrada.</div>`;
+  qsa("[data-edition-edit]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionEdit)));
+  qsa("[data-edition-delete]").forEach(b=>b.onclick=async()=>{if(!confirm("Arquivar esta edição? O histórico será preservado."))return;try{await adminApi(`/api/admin/editions/${b.dataset.editionDelete}`,{method:"DELETE"});await loadAdminArticles();alert("Edição arquivada.")}catch(e){alert(e.message)}});
+}
+
 qs("#articleForm").addEventListener("submit",async e=>{
   e.preventDefault();
   const b=Object.fromEntries(new FormData(e.target).entries());
@@ -2123,6 +2143,14 @@ qs("#articleForm").addEventListener("submit",async e=>{
   }catch(ex){qs("#articleError").textContent=ex.message}
 });
 qs("#articleCancelBtn").addEventListener("click",resetArticleForm);
+qs("#editionCancelBtn").addEventListener("click",resetEditionForm);
+qs("#editionForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const b={title:qs("#editionTitle").value.trim(),edition:qs("#editionNumber").value.trim(),date:qs("#editionDate").value,cover_url:qs("#editionCover").value.trim(),pdf_url:qs("#editionPdf").value.trim(),description:qs("#editionDescription").value.trim(),published:qs("#editionPublished").checked?1:0};
+  const id=Number(qs("#editionId").value||0);
+  try{await adminApi(id?`/api/admin/editions/${id}`:"/api/admin/editions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});resetEditionForm();await loadAdminArticles();alert("Edição salva com sucesso.");}
+  catch(ex){qs("#editionError").textContent=ex.message}
+});
 qs("#editorEditionSelect").addEventListener("change",e=>loadEditionComposition(Number(e.target.value)));
 qs("#saveEditionCompositionBtn").addEventListener("click",saveEditionComposition);
 qsa(".journal-editor-tab").forEach(tab=>{
