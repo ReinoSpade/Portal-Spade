@@ -453,19 +453,30 @@
       <form id="cardForm" class="admin-form">
         <input type="hidden" name="id" id="cardId">
         <div class="card-admin-grid">
-          <input name="name" id="cardName" class="full" placeholder="Nome do card" required>
+          <input name="name_pt" id="cardNamePt" class="full" placeholder="Nome em português" required>
+          <input name="name_jp" id="cardNameJp" class="full" placeholder="Nome em japonês (opcional)">
           <select name="category" id="adminCardCategory"></select>
+          <select name="origin" id="cardOrigin"></select>
+          <select name="element_type" id="cardElementType"><option value="NAO_ELEMENTAL">Não Elemental</option><option value="ELEMENTAL">Elemental</option></select>
+          <input name="element" id="cardElement" placeholder="Elemento (ex.: Fogo)">
+          <select name="cost_type" id="cardCostType"><option value="SEM_CUSTO">Sem custo</option><option value="MANA">Mana</option><option value="VIDA">Vida</option></select>
           <input name="cost" id="cardCost" placeholder="Custo (ex.: 50/00)">
+          <input name="power_value" id="cardPower" type="number" min="0" value="0" placeholder="Valor de Poder">
           <input name="sort_order" id="cardOrder" type="number" value="0" placeholder="Ordem">
-          <textarea name="description" id="cardDescription" class="full" placeholder="Descrição / efeito da carta"></textarea>
+          <select name="status" id="cardStatus"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select>
+          <textarea name="description" id="cardDescription" class="full" placeholder="Efeito / descrição da carta"></textarea>
         </div>
-        <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="cardActive" checked> Card ativo para novos inventários</label></div>
+        <div class="announcement-options" style="margin-top:9px"><span class="admin-editor-note">O valor de Poder é independente do custo e da categoria. A posse é única: o mesmo Card pode pertencer a vários jogadores.</span></div>
         <div class="editor-actions">
           <button class="gold" type="submit" id="cardSaveBtn">Criar card</button>
           <button class="outline dark-outline" type="button" id="cardCancelBtn">Limpar</button>
         </div>
         <div class="error" id="cardError"></div>
       </form>
+      <div class="card-category-manager">
+        <input id="newCardCategory" placeholder="Nova categoria">
+        <button type="button" class="outline dark-outline small" id="addCardCategoryBtn">+ Categoria</button>
+      </div>
       <div id="adminCardCatalogList" class="card-catalog-list"></div>
     </div>
   </div>
