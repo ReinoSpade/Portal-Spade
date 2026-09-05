@@ -21,7 +21,7 @@
 <main>
 <section class="page active" id="home">
   <div class="hero"><div><p class="eyebrow">PORTAL OFICIAL DO REINO SPADE</p><h1>A história do RPG<br><em>vive aqui.</em></h1><p class="lead">Jornal, jogadores, Casas, rankings e os grandes acontecimentos do Reino em um só lugar.</p><div class="actions"><button class="gold" data-page="jornal">Ler o jornal</button><button class="outline" data-page="login">Entrar como jogador</button></div></div><div class="seal">♠<small>REINO SPADE<br>PORTAL OFICIAL</small></div></div>
-  <div class="content"><div id="homeEventAlert"></div><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
+  <div class="content"><div id="homeActiveActivities"></div><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
   <div class="split"><div class="panel"><p class="eyebrow">EDIÇÃO ATUAL</p><h3 id="editionTitle">Carregando...</h3><p id="editionDesc"></p><button class="gold small" data-page="jornal">Abrir jornal</button></div><div class="panel"><p class="eyebrow">REINO</p><h3>O portal está vivo.</h3><p>As páginas públicas serão alimentadas pelos dados que você cadastrar no painel administrativo.</p></div></div></div>
 </section>
 <section class="page" id="jornal">
@@ -496,6 +496,7 @@
         <input name="location" id="scheduleLocation" placeholder="Local / canal">
         <input name="link" id="scheduleLink" class="full" placeholder="Link (opcional)">
         <select name="event_id" id="scheduleEvent"><option value="">Sem evento vinculado</option></select>
+        <select name="mission_id" id="scheduleMission"><option value="">Sem missão vinculada</option></select>
         <textarea name="description" id="scheduleDescription" class="full" placeholder="Descrição"></textarea>
       </div>
       <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="scheduleFeatured"> Destacar</label><label><input type="checkbox" id="schedulePublished" checked> Publicar</label></div>
