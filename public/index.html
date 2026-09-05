@@ -610,11 +610,26 @@
     <div class="journal-editor-panel" data-editor-panel="edition">
       <div class="edition-builder-head">
         <div>
-          <p class="eyebrow">COMPOSIÇÃO</p>
-          <h3>Escolha uma edição</h3>
+          <p class="eyebrow">EDIÇÃO</p>
+          <h3>Crie ou escolha uma edição</h3>
         </div>
         <select id="editorEditionSelect" class="admin-filter"></select>
       </div>
+      <form id="editionForm" class="admin-form" style="margin-bottom:14px">
+        <div class="article-form-grid">
+          <input id="editionId" type="hidden">
+          <input id="editionTitle" class="full" placeholder="Título da edição" required>
+          <input id="editionNumber" placeholder="Identificação (ex.: Edição 01)">
+          <input id="editionDate" type="date">
+          <input id="editionCover" class="full" placeholder="URL da capa (opcional)">
+          <input id="editionPdf" class="full" placeholder="URL do PDF (opcional)">
+          <textarea id="editionDescription" class="full" placeholder="Descrição da edição"></textarea>
+        </div>
+        <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="editionPublished"> Publicar edição</label></div>
+        <div class="editor-actions"><button class="gold" type="submit" id="editionSaveBtn">Criar edição</button><button class="outline dark-outline" type="button" id="editionCancelBtn">Limpar</button></div>
+        <div class="error" id="editionError"></div>
+      </form>
+      <div class="eyebrow" style="margin-bottom:8px">ARQUIVO DE EDIÇÕES</div><div id="adminEditionList" class="editorial-list" style="margin-bottom:14px"></div>
       <div class="edition-builder-layout">
         <div>
           <div class="eyebrow">MATÉRIAS DISPONÍVEIS</div>
