@@ -1551,59 +1551,18 @@ app.get("/api/schedule", async (req,res)=>{
 
 app.get("/api/active-activities", async (req,res)=>{
   try{
-    const now=`(NOW() AT TIME ZONE 'America/Sao_Paulo')`;
     const r=await pool.query(`
-      WITH active_schedule AS (
-        SELECT s.id::text AS uid,s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,s.status,
-               s.event_id,s.mission_id,e.title AS event_title,ma.mission_type,ma.end_at AS mission_end_at,
-               s.featured,1 AS priority
-        FROM schedule_activities s
-        LEFT JOIN events e ON e.id=s.event_id
-        LEFT JOIN mission_activities ma ON ma.id=s.mission_id
-        WHERE s.published=1 AND (
-          (s.activity_date = ${now}::date AND (s.start_time IS NULL OR s.start_time <= ${now}::time) AND (s.end_time IS NULL OR s.end_time >= ${now}::time))
-          OR s.status IN ('EM_ANDAMENTO','ATIVO')
-        )
-      ),
-      active_events AS (
-        SELECT ('event-'||e.id)::text AS uid,NULL::bigint AS id,e.title,'EVENTO'::text AS activity_type,e.description,
-               e.start_date AS activity_date,NULL::time AS start_time,NULL::time AS end_time,e.status,
-               e.id AS event_id,NULL::bigint AS mission_id,e.title AS event_title,NULL::text AS mission_type,NULL::timestamptz AS mission_end_at,
-               e.featured,2 AS priority
-        FROM events e
-        WHERE e.published=1 AND e.status='ATIVO'
-          AND (e.start_date IS NULL OR e.start_date <= ${now}::date)
-          AND (e.end_date IS NULL OR e.end_date >= ${now}::date)
-      ),
-      active_missions AS (
-        SELECT ('mission-'||m.id)::text AS uid,NULL::bigint AS id,('Missão de '||m.mission_type)::text AS title,'MISSÃO'::text AS activity_type,m.description,
-               m.start_at::date AS activity_date,m.start_at::time AS start_time,m.end_at::time AS end_time,m.status,
-               NULL::bigint AS event_id,m.id AS mission_id,NULL::text AS event_title,m.mission_type,m.end_at AS mission_end_at,
-               0 AS featured,3 AS priority
-        FROM mission_activities m
-        WHERE m.published=1 AND m.status IN ('EM_ANDAMENTO','ATIVO') AND m.start_at <= NOW() AND m.end_at >= NOW()
+      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,s.location,s.link,s.status,
+             s.event_id,s.mission_id,e.title AS event_title,ma.mission_type,ma.end_at AS mission_end_at
+      FROM schedule_activities s
+      LEFT JOIN events e ON e.id=s.event_id
+      LEFT JOIN mission_activities ma ON ma.id=s.mission_id
+      WHERE s.published=1 AND (
+        (s.activity_date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (s.start_time IS NULL OR s.start_time <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time) AND (s.end_time IS NULL OR s.end_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time))
+        OR s.status='EM_ANDAMENTO'
       )
-      SELECT * FROM active_schedule
-      UNION ALL SELECT * FROM active_events
-      UNION ALL SELECT * FROM active_missions
-      ORDER BY featured DESC,priority ASC,start_time ASC NULLS LAST,activity_date ASC NULLS LAST,uid ASC
-      LIMIT 30
-    `);
-    const seen=new Set();
-    const activities=[];
-    for(const a of r.rows){
-      const logical=a.event_id?`event:${a.event_id}`:(a.mission_id?`mission:${a.mission_id}`:`schedule:${a.id}`);
-      if(a.event_id && seen.has(logical)) continue;
-      if(a.mission_id && seen.has(logical)) continue;
-      seen.add(logical);
-      activities.push({
-        id:a.id?Number(a.id):null,uid:a.uid,title:a.title,activity_type:a.activity_type,description:a.description||"",activity_date:a.activity_date,
-        start_time:a.start_time,end_time:a.end_time,status:a.status,event_id:a.event_id?Number(a.event_id):null,
-        mission_id:a.mission_id?Number(a.mission_id):null,event_title:a.event_title||"",mission_type:a.mission_type||"",
-        mission_end_at:a.mission_end_at||null,featured:Boolean(a.featured)
-      });
-    }
-    res.json({activities});
+      ORDER BY s.featured DESC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 20`);
+    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar atividades em andamento."});}
 });
 
@@ -2043,7 +2002,7 @@ app.delete("/api/admin/articles/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Matéria inválida."});
   try{
-    const r=await pool.query("DELETE FROM articles WHERE id=$1",[id]);
+    const r=await pool.query("UPDATE articles SET published=0,updated_at=NOW() WHERE id=$1 RETURNING id",[id]);
     if(!r.rowCount)return res.status(404).json({error:"Matéria não encontrada."});
     res.json({ok:true});
   }catch(e){
@@ -2865,7 +2824,7 @@ app.put("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
     const r=await pool.query(
       `UPDATE schedule_activities SET title=$1,activity_type=$2,description=$3,activity_date=$4,start_time=$5,end_time=$6,
        location=$7,link=$8,event_id=$9,mission_id=$10,status=$11,featured=$12,published=$13,updated_at=NOW()
-       WHERE id=$14 RETURNING *`,
+       WHERE id=$13 RETURNING *`,
       [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,
        b.start_time||null,b.end_time||null,String(b.location||"").trim(),String(b.link||"").trim(),
        b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
