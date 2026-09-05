@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -19,6 +19,7 @@ function go(page){
   if(page==="comunicados") loadAnnouncements();
   if(page==="status") { if(state.me) loadStatusBoard(); else { state.page="login"; return go("login"); } }
   if(page==="eventos") loadEvents();
+  if(page==="missoes") loadMissions();
   if(page==="cronograma") loadSchedule();
   if(page==="jogadores") loadPlayers();
   if(page==="casas") loadHouses();
@@ -233,6 +234,26 @@ function populateScheduleTypeFilter(items){
   el.innerHTML=`<option value="">Todos os tipos</option>`+types.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
   if(types.includes(current))el.value=current;
 }
+
+async function loadMissions(){
+  const grid=qs("#missionGrid"),feature=qs("#missionActiveFeature"); if(!grid)return;
+  try{
+    const d=await api("/api/missions"); state.missions=d.missions||[]; renderMissionsPublic(state.missions);
+  }catch(e){grid.innerHTML=`<div class="panel"><h3>Missões indisponíveis</h3><p>${escapeHtml(e.message)}</p></div>`;}
+}
+function missionLabel(m){return `Missão de ${m.mission_type||"Missão"}`;}
+function missionDate(v){try{return new Date(v).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"});}catch{return String(v||"")}}
+function renderMissionsPublic(items){
+  const feature=qs("#missionActiveFeature"),grid=qs("#missionGrid"); if(!grid)return;
+  const search=(qs("#missionSearch")?.value||"").toLowerCase(),filter=qs("#missionStatusFilter")?.value||"";
+  const arr=(items||[]).filter(m=>(!search||String(m.mission_type||"").toLowerCase().includes(search))&&(!filter||m.status===filter));
+  const active=(items||[]).find(m=>m.status==="EM_ANDAMENTO");
+  if(feature) feature.innerHTML=active?`<div class="mission-active-feature"><div><p class="eyebrow">⚔️ ACONTECENDO AGORA</p><h2>${escapeHtml(missionLabel(active))}</h2><p>Encerra em <b>${escapeHtml(missionDate(active.end_at))}</b>.</p></div><button class="gold small" type="button" data-mission-scroll="${active.id}">Ver missão</button></div>`:"";
+  grid.innerHTML=arr.length?arr.map(m=>`<article class="mission-card ${m.status==="EM_ANDAMENTO"?"active":""}" id="mission-${m.id}"><div class="mission-card-top"><span class="tag">${escapeHtml(m.status)}</span><b>${escapeHtml(missionLabel(m))}</b></div><p>${escapeHtml(m.description||"Sem descrição publicada.")}</p><div class="mission-meta"><span>📅 ${escapeHtml(missionDate(m.start_at))}</span><span>⏳ ${escapeHtml(missionDate(m.end_at))}</span></div><div class="mission-instructions"><b>Instruções</b><p>${escapeHtml(m.instructions||"Consulte as instruções oficiais no Portal.")}</p></div><div class="mission-rewards">${m.reward_yuls?`🪙 ${money(m.reward_yuls)} Yuls`:""}${m.reward_exp?` ✨ ${money(m.reward_exp)} EXP`:""}${m.reward_cards?` 🃏 ${escapeHtml(m.reward_cards)}`:""}${!m.reward_yuls&&!m.reward_exp&&!m.reward_cards?"Sem recompensa cadastrada":""}</div></article>`).join(""):`<div class="panel"><h3>Nenhuma missão encontrada.</h3><p>Ajuste os filtros ou aguarde uma nova atividade oficial.</p></div>`;
+  qsa("[data-mission-scroll]").forEach(b=>b.onclick=()=>qs(`#mission-${b.dataset.missionScroll}`)?.scrollIntoView({behavior:"smooth",block:"center"}));
+}
+qs("#missionSearch")?.addEventListener("input",()=>renderMissionsPublic(state.missions));
+qs("#missionStatusFilter")?.addEventListener("change",()=>renderMissionsPublic(state.missions));
 
 async function loadEvents(){
   try{
@@ -849,7 +870,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1070,6 +1091,22 @@ async function deleteAdminSchedule(id){
   }catch(e){qs("#scheduleError").textContent=e.message}
 }
 
+async function loadAdminMissions(){
+  const list=qs("#adminMissionList");if(!list)return;
+  try{const d=await adminApi("/api/admin/missions");state.adminMissions=d.missions||[];renderAdminMissions();}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
+}
+function toLocalInput(v){const d=new Date(v);if(Number.isNaN(d.getTime()))return "";const z=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;}
+function renderAdminMissions(){
+  const list=qs("#adminMissionList");if(!list)return;
+  list.innerHTML=(state.adminMissions||[]).map(m=>`<div class="admin-mission-item"><div><b>${escapeHtml(missionLabel(m))}</b><small>${escapeHtml(m.status)} • ${escapeHtml(missionDate(m.start_at))} → ${escapeHtml(missionDate(m.end_at))}${m.published?"":" • Não publicada"}</small></div><div class="admin-mission-actions"><button type="button" data-mission-edit="${m.id}">✎</button><button type="button" class="delete" data-mission-cancel="${m.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhuma missão cadastrada.</div>`;
+  qsa("[data-mission-edit]").forEach(b=>b.onclick=()=>editAdminMission(Number(b.dataset.missionEdit)));
+  qsa("[data-mission-cancel]").forEach(b=>b.onclick=async()=>{if(!confirm("Encerrar esta missão sem apagar seu registro?"))return;try{await adminApi(`/api/admin/missions/${b.dataset.missionCancel}`,{method:"DELETE"});await loadAdminMissions();await loadMissions();}catch(e){alert(e.message)}});
+}
+function editAdminMission(id){const m=state.adminMissions.find(x=>Number(x.id)===id);if(!m)return;qs("#adminMissionId").value=m.id;qs("#adminMissionType").value=m.mission_type;qs("#adminMissionStart").value=toLocalInput(m.start_at);qs("#adminMissionEnd").value=toLocalInput(m.end_at);qs("#adminMissionStatus").value=m.status;qs("#adminMissionYuls").value=m.reward_yuls||0;qs("#adminMissionExp").value=m.reward_exp||0;qs("#adminMissionCards").value=m.reward_cards||"";qs("#adminMissionDescription").value=m.description||"";qs("#adminMissionInstructions").value=m.instructions||"";qs("#adminMissionError").textContent="Editando missão.";qs("#adminMissionManager")?.scrollIntoView({behavior:"smooth",block:"center"});}
+function clearAdminMissionForm(){qs("#adminMissionForm")?.reset();qs("#adminMissionId").value="";qs("#adminMissionError").textContent="";qs("#adminMissionStatus").value="AGENDADA";}
+qs("#adminMissionClear")?.addEventListener("click",clearAdminMissionForm);
+qs("#adminMissionForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#adminMissionError");err.textContent="";const body={mission_type:qs("#adminMissionType").value,start_at:qs("#adminMissionStart").value,end_at:qs("#adminMissionEnd").value,status:qs("#adminMissionStatus").value,reward_yuls:Number(qs("#adminMissionYuls").value||0),reward_exp:Number(qs("#adminMissionExp").value||0),reward_cards:qs("#adminMissionCards").value,description:qs("#adminMissionDescription").value,instructions:qs("#adminMissionInstructions").value};const id=qs("#adminMissionId").value;try{await adminApi(id?`/api/admin/missions/${id}`:"/api/admin/missions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminMissionForm();await loadAdminMissions();await loadMissions();alert(id?"Missão atualizada.":"Missão publicada.");}catch(ex){err.textContent=ex.message}});
+
 async function initAdmin(){
   if(!state.admin)return;
   setAdminPermissionVisibility();
@@ -1078,6 +1115,7 @@ async function initAdmin(){
     if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
     if(hasAdminPermission("cards")) await loadAdminCards();
     if(hasAdminPermission("schedule")) await loadAdminSchedule();
+    if(hasAdminPermission("missions")) await loadAdminMissions();
     if(hasAdminPermission("admin_users")) await loadAdminUsers();
     if(hasAdminPermission("houses")) await loadAdminHouses();
     if(hasAdminPermission("hierarchy")) await loadAdminHierarchy();
