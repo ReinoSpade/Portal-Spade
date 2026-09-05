@@ -972,3 +972,157 @@ button,a,input,select,textarea{transition:box-shadow .18s ease,border-color .18s
 @media (max-width:760px){.ally-card-grant-row{grid-template-columns:1fr;}.ally-mode-badge{font-size:10px;}.ally-access-copy{font-size:13px;}}
 
 .status-readonly-note{padding:9px 0;font-size:10px;color:#a9905a;}
+
+
+/* =========================================================
+   V51 — POLIMENTO FINAL / EXPERIÊNCIA
+   ========================================================= */
+:root{
+  --gold:#c6a45d;
+  --gold-soft:#ead8af;
+  --ink:#151515;
+  --paper:#fffdf9;
+  --paper-2:#f7f2e9;
+  --line:#ded6c8;
+  --shadow-soft:0 8px 24px rgba(35,29,20,.07);
+  --shadow-card:0 14px 34px rgba(35,29,20,.10);
+}
+
+html{scroll-padding-top:86px}
+body{background:
+  radial-gradient(circle at 12% 8%,rgba(198,164,93,.05),transparent 24%),
+  linear-gradient(180deg,#f5f0e8 0%,#f0ebe2 100%);}
+body::selection{background:#e7d7b3;color:#151515}
+
+.skip-link{
+  position:fixed;left:14px;top:10px;z-index:1000;
+  transform:translateY(-150%);transition:transform .16s ease;
+  background:#111216;color:#fff;border:1px solid #8b733f;
+  border-radius:8px;padding:9px 12px;font:700 10px Inter,sans-serif;
+  text-decoration:none;box-shadow:0 10px 25px rgba(0,0,0,.22);
+}
+.skip-link:focus{transform:translateY(0)}
+
+button,input,select,textarea{font:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{
+  outline:2px solid var(--gold);outline-offset:2px;
+}
+
+.top{
+  backdrop-filter:blur(12px);
+  box-shadow:0 8px 26px rgba(0,0,0,.10);
+}
+.logo{text-decoration:none;transition:opacity .16s ease}
+.logo:hover{opacity:.9}
+.top nav button{transition:background .16s ease,color .16s ease,transform .16s ease}
+.top nav button:active{transform:translateY(1px)}
+
+.global-search-input{transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}
+.global-search-input:hover{background:#1b1c20}
+.global-search-results{box-shadow:0 20px 50px rgba(0,0,0,.20)}
+
+.hero,.subhero{position:relative;overflow:hidden}
+.hero::before,.subhero::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(120deg,transparent 0 58%,rgba(198,164,93,.035) 72%,transparent 88%);
+}
+.hero>*,.subhero>*{position:relative;z-index:1}
+
+.gold,.outline,.icon-button{transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,background .16s ease,filter .16s ease}
+.gold:hover,.outline:hover,.icon-button:hover{transform:translateY(-1px)}
+.gold:active,.outline:active,.icon-button:active{transform:translateY(0)}
+
+.panel,.news-card,.player-card,.house-card,.edition,.mission-card,.event-card,.schedule-card,.announcement-card,.status-post,.library-card,.ranking-panel{
+  box-shadow:var(--shadow-soft);
+  transition:box-shadow .16s ease,border-color .16s ease,transform .16s ease,background .16s ease;
+}
+.news-card:hover,.player-card:hover,.house-card:hover,.edition:hover,.mission-card:hover,.event-card:hover,.schedule-card:hover,.announcement-card:hover,.status-post:hover,.library-card:hover{
+  box-shadow:var(--shadow-card);
+}
+
+.section-head{display:flex;justify-content:space-between;gap:14px;align-items:end}
+.section-head>span{font-size:9px;color:#8b857b}
+
+.table-wrap{border-radius:12px}
+.table-wrap table{font-variant-numeric:tabular-nums}
+.table-wrap tbody tr{transition:background .14s ease}
+.table-wrap tbody tr:hover{background:#fbf7ef}
+
+.form-grid .field input,.form-grid .field select,.admin-filter,.search,.admin-form input,.admin-form textarea{
+  transition:border-color .16s ease,box-shadow .16s ease,background .16s ease;
+}
+.form-grid .field input:hover,.form-grid .field select:hover,.admin-filter:hover,.search:hover,.admin-form input:hover,.admin-form textarea:hover{border-color:#bca982}
+
+/* Improve content density without shrinking type */
+.content{padding-top:58px;padding-bottom:72px}
+.panel{background:rgba(255,255,255,.94)}
+.subhero{box-shadow:inset 0 -1px rgba(255,255,255,.03)}
+
+/* Home: active activity callout */
+.home-active-wrap{margin-bottom:34px}
+.home-active-wrap .section-head{margin-bottom:14px}
+.home-active-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.home-active-card{
+  position:relative;padding:20px;border-radius:14px;color:#f4f0e7;
+  background:linear-gradient(145deg,#141519,#1e1f24);
+  border:1px solid #3a3b40;box-shadow:0 14px 34px rgba(0,0,0,.10);
+}
+.home-active-card::after{content:"";position:absolute;left:0;top:18px;bottom:18px;width:3px;border-radius:3px;background:var(--gold)}
+.home-active-card .tag{color:#d5b268}
+.home-active-card h3{font:600 21px Cinzel;margin:7px 0 8px;color:#fff}
+.home-active-card p{margin:0 0 10px;color:#aaa;font-size:10px;line-height:1.65}
+.home-active-card small{display:block;color:#918d85;font-size:9px;margin-bottom:14px}
+.home-active-card small b{color:#dec27f}
+.home-active-card .gold{min-height:40px}
+
+/* Cleaner status/comment controls */
+.status-post .status-actions,.status-comments,.status-comment-form{max-width:100%}
+.status-post .status-actions button,.status-comment-form button{min-height:36px}
+
+/* Readability for long-form content */
+.article-prose,.library-content,.journal-article-reader-body{max-width:760px;margin-left:auto;margin-right:auto}
+.article-prose p,.library-content p,.journal-article-reader-body p{line-height:1.85}
+
+/* Mobile navigation: compact, scrollable and thumb-friendly */
+@media(max-width:900px){
+  .top{min-height:70px;padding:10px 14px}
+  .top nav{
+    position:absolute;left:10px;right:10px;top:70px;
+    padding:10px;background:#0d0e10;border:1px solid #2b2c31;border-radius:0 0 14px 14px;
+    box-shadow:0 22px 40px rgba(0,0,0,.28);
+    max-height:calc(100vh - 88px);overflow:auto;
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;
+  }
+  .top nav button{width:100%;min-height:42px;padding:9px 10px;font-size:10px}
+  .top nav button[data-page="admin-login"],.top nav button[data-page="login"]{grid-column:1/-1}
+  .hamb{width:44px;height:44px;border-radius:10px;border:1px solid #35363b}
+  .global-search{margin-top:2px}
+  .global-search-results{top:126px}
+  .hero{padding-top:72px}
+  .content{padding-top:44px;padding-bottom:58px}
+}
+
+@media(max-width:620px){
+  .home-active-grid{grid-template-columns:1fr}
+  .section-head{align-items:flex-start;flex-direction:column}
+  .section-head>span{margin-top:-7px}
+  .hero h1,.subhero h1{letter-spacing:-.02em}
+  .actions .gold,.actions .outline{width:100%}
+  .home-active-card{padding:18px}
+  .home-active-card h3{font-size:19px}
+  .table-wrap table{min-width:620px}
+}
+
+@media(max-width:420px){
+  .top nav{grid-template-columns:1fr}
+  .top nav button[data-page="admin-login"],.top nav button[data-page="login"]{grid-column:auto}
+  .global-search-input{height:40px;font-size:13px}
+  .logo{font-size:14px}
+  .logo span{font-size:21px}
+  .hero h1,.subhero h1{font-size:36px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .skip-link{transition:none}
+  .top nav button,.gold,.outline,.icon-button,.panel,.news-card,.player-card,.house-card,.edition,.mission-card,.event-card,.schedule-card,.announcement-card,.status-post,.library-card,.ranking-panel{transition:none}
+}
