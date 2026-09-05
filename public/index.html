@@ -228,8 +228,8 @@
     <h1>Entrar no Reino</h1>
     <p>Use seu login e sua senha cadastrados pela administração.</p>
     <form id="loginForm">
-      <label for="identifier">Nick</label>
-      <input id="identifier" autocomplete="username" placeholder="Ex.: Mattiel" maxlength="80" required>
+      <label for="identifier">Nick / usuário</label>
+      <input id="identifier" autocomplete="username" placeholder="Ex.: Mattiel ou seu usuário de aliado" maxlength="80" required>
       <label for="password" style="margin-top:14px">Senha</label>
       <input id="password" type="password" autocomplete="current-password" placeholder="Digite sua senha" maxlength="100" required>
       <button class="gold full" type="submit">Entrar</button>
@@ -238,7 +238,7 @@
     <p style="margin-top:18px;font-size:10px;color:#777">Esqueceu a senha? Procure a administração do RPG.</p>
   </div>
 </section>
-<section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p>Acompanhe sua jornada, seus dados e sua posição no Reino.</p></div><div id="playerAlerts" class="player-alerts"></div><div class="content"><div id="dash"></div><div class="player-yuls-section"><div class="panel player-yuls-card"><div class="player-yuls-head"><div><p class="eyebrow">BANCO DE YULS</p><h3>Meu saldo</h3></div><strong id="playerYulsBalance">🪙 0</strong></div><div id="playerYulsHistory" class="player-yuls-history"><p>Carregando histórico...</p></div></div></div><div class="player-missions-section"><div class="panel player-missions-card"><div class="player-missions-head"><div><p class="eyebrow">ATIVIDADE</p><h3>Minhas missões</h3></div><strong id="playerMissionCount">0 missões</strong></div><div id="playerMissionHistory" class="player-mission-history"><p>Carregando missões...</p></div></div></div></div><div class="player-status-section">
+<section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow" id="dashboardEyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p id="dashboardDescription">Acompanhe sua jornada, seus dados e sua posição no Reino.</p><div id="allyModeBadge" class="ally-mode-badge" hidden>🤝 Acesso de Aliado • Modo observador</div></div><div id="playerAlerts" class="player-alerts"></div><div class="content"><div id="dash"></div><div class="player-yuls-section"><div class="panel player-yuls-card"><div class="player-yuls-head"><div><p class="eyebrow">BANCO DE YULS</p><h3>Meu saldo</h3></div><strong id="playerYulsBalance">🪙 0</strong></div><div id="playerYulsHistory" class="player-yuls-history"><p>Carregando histórico...</p></div></div></div><div class="player-missions-section"><div class="panel player-missions-card"><div class="player-missions-head"><div><p class="eyebrow">ATIVIDADE</p><h3>Minhas missões</h3></div><strong id="playerMissionCount">0 missões</strong></div><div id="playerMissionHistory" class="player-mission-history"><p>Carregando missões...</p></div></div></div></div><div class="player-status-section">
   <div class="panel player-status-panel">
     <div class="player-status-head">
       <div><p class="eyebrow">STATUS DIÁRIO</p><h3>O que você está fazendo?</h3><p>Publique uma mensagem curta para o quadro do Reino.</p></div>
@@ -808,6 +808,34 @@
     <div class="error" id="settingsGlobalError"></div>
   </section>
 
+  <div class="panel admin-allies-panel" id="adminAlliesPanel">
+    <div class="panel-head"><div><p class="eyebrow">ALIANÇAS ESPECIAIS</p><h3>Aliados Ocultos</h3></div><span>Contas externas com acesso de observação a Spade</span></div>
+    <div class="admin-users-layout">
+      <form id="adminAllyForm" class="admin-form admin-user-form">
+        <input type="hidden" id="adminAllyId">
+        <input id="adminAllyUsername" placeholder="Usuário do aliado" required>
+        <input id="adminAllyDisplayName" placeholder="Nome de exibição" required>
+        <input id="adminAllyPassword" type="password" minlength="6" placeholder="Senha (mínimo 6 caracteres)">
+        <input id="adminAllyKingdom" placeholder="Reino de origem">
+        <input id="adminAllyHouse" placeholder="Casa de origem">
+        <input id="adminAllyPatent" placeholder="Patente (opcional)">
+        <input id="adminAllyRole" placeholder="Cargo/função (opcional)">
+        <textarea id="adminAllyDescription" class="full" placeholder="Descrição / observação administrativa"></textarea>
+        <label class="full checkline"><input type="checkbox" id="adminAllyActive" checked> Acesso ativo</label>
+        <div class="editor-actions full"><button class="gold" type="submit">🤝 Salvar aliado</button><button class="outline dark-outline" type="button" id="adminAllyClear">Limpar</button></div>
+        <div class="error full" id="adminAllyError"></div>
+      </form>
+      <div>
+        <div class="eyebrow">CADASTRO DE ALIADOS</div>
+        <div id="adminAllyList" class="admin-user-list"></div>
+      </div>
+    </div>
+    <div class="ally-card-manager" id="allyCardManager" hidden>
+      <div class="panel-head"><div><p class="eyebrow">INVENTÁRIO DO ALIADO</p><h4 id="allyCardManagerTitle">Cards do aliado</h4></div><button class="outline dark-outline small" type="button" id="closeAllyCardManager">Fechar</button></div>
+      <div class="ally-card-grant-row"><select id="allyCardSelect"><option value="">Selecionar Card...</option></select><input id="allyCardAcquisition" placeholder="Origem/observação (opcional)"><button class="gold small" type="button" id="grantAllyCardBtn">＋ Conceder</button></div>
+      <div id="allyCardList" class="editorial-list"></div>
+    </div>
+  </div>
   <div class="panel admin-notification-panel" id="adminNotificationPanel">
   <div class="panel-head"><div><p class="eyebrow">CENTRAL DE ALERTAS</p><h3>Enviar notificação</h3></div><span>Envie um aviso para um jogador ou para todos os ativos</span></div>
   <form id="adminNotificationForm" class="admin-form">
@@ -827,6 +855,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=49.0"></script>
+<script src="/app.js?v=50.0"></script>
 </body>
 </html>
