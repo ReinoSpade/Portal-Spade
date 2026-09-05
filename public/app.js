@@ -53,10 +53,17 @@ function initGlobalSearch(){
 }
 
 function go(page){
+  const previous=state.page;
   state.page=page;
   qsa(".page").forEach(x=>x.classList.toggle("active",x.id===page));
-  qsa("nav button[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+  qsa("nav button[data-page]").forEach(x=>{
+    const active=x.dataset.page===page;
+    x.classList.toggle("active",active);
+    if(active) x.setAttribute("aria-current","page"); else x.removeAttribute("aria-current");
+  });
   qs("#nav")?.classList.remove("open");
+  qs("#globalSearchResults")?.setAttribute("hidden","");
+  if(previous!==page) window.scrollTo({top:0,behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
   if(page==="home") loadHome();
   if(page==="jornal") loadEditions();
   if(page==="notificacoes") loadNotifications();
@@ -78,6 +85,7 @@ function go(page){
 
 qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 qs("#hamb").addEventListener("click",()=>qs("#nav").classList.toggle("open"));
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();}});
 
 async function api(url,options={}){
   options.credentials="same-origin";
@@ -967,7 +975,7 @@ function renderAllyDashboard(){
       <section class="dash-main dashboard-profile-card ally-profile-card">
         <div class="dash-ident"><div class="avatar">🤝</div><div><h2>${escapeHtml(displayPlayerName(p))}</h2><p>${escapeHtml(p.origin_kingdom||"Reino aliado não informado")} • ${escapeHtml(p.origin_house||"Casa não informada")}</p></div></div>
         <div class="dashboard-profile-tags"><span>🤝 Aliado Oculto</span><span>👁️ Somente leitura</span>${p.patent?`<span>🎖️ ${escapeHtml(p.patent)}</span>`:""}${p.role?`<span>💼 ${escapeHtml(p.role)}</span>`:""}</div>
-        <div class="profile-lines"><div><small>VIDA BASE</small><b>❤️ ${money(p.base_hp||0)}</b></div><div><small>MANA BASE</small><b>♦️ ${money(p.base_mana||0)}</b></div></div><div class="profile-lines"><div><small>STATUS BASE</small><b>${escapeHtml(p.base_status||"Não informado")}</b></div><div><small>CARDS</small><b>${money(c.count)}</b></div></div><div class="profile-lines"><div><small>PODER DOS CARDS</small><b>${money(c.power)}</b></div><div><small>ORIGEM</small><b>${escapeHtml(p.origin_kingdom||"Não informado")}</b></div></div>
+        <div class="profile-lines"><div><small>CARDS</small><b>${money(c.count)}</b></div><div><small>PODER DOS CARDS</small><b>${money(c.power)}</b></div></div>
       </section>
       <section class="dash-status dashboard-resource-card"><p class="eyebrow">ACESSO</p><div class="ally-access-copy"><b>Modo observador</b><p>Você pode acompanhar o Reino Spade, consultar seu inventário e ler o mural. Publicações e interações estão desabilitadas.</p></div></section>
     </div>
@@ -1400,14 +1408,14 @@ async function loadAdminAllies(){
   const list=qs("#adminAllyList");if(!list)return;
   try{
     const d=await adminApi("/api/admin/allies"); state.allies=d.allies||[];
-    list.innerHTML=state.allies.map(a=>`<div class="admin-user-row"><div><b>🤝 ${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)} • ${escapeHtml(a.origin_kingdom||"Reino não informado")}${a.origin_house?` • ${escapeHtml(a.origin_house)}`:""} • ${a.active?"Ativo":"Suspenso"} • ❤️ ${Number(a.base_hp||0)} Vida • ♦️ ${Number(a.base_mana||0)} Mana • ${escapeHtml(a.base_status||"Status base não informado")} • ${a.card_count||0} Cards${a.last_login?` • último acesso ${escapeHtml(new Date(a.last_login).toLocaleString("pt-BR"))}`:""}</small></div><div class="admin-user-actions"><button type="button" class="outline small" data-ally-cards="${a.id}">Cards</button><button type="button" class="outline small" data-ally-edit="${a.id}">Editar</button><button type="button" class="outline small ${a.active?"danger":""}" data-ally-toggle="${a.id}" data-ally-active="${a.active?0:1}">${a.active?"Suspender":"Reativar"}</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum Aliado Oculto cadastrado.</div>`;
+    list.innerHTML=state.allies.map(a=>`<div class="admin-user-row"><div><b>🤝 ${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)} • ${escapeHtml(a.origin_kingdom||"Reino não informado")}${a.origin_house?` • ${escapeHtml(a.origin_house)}`:""} • ${a.active?"Ativo":"Suspenso"} • ${a.card_count||0} Cards${a.last_login?` • último acesso ${escapeHtml(new Date(a.last_login).toLocaleString("pt-BR"))}`:""}</small></div><div class="admin-user-actions"><button type="button" class="outline small" data-ally-cards="${a.id}">Cards</button><button type="button" class="outline small" data-ally-edit="${a.id}">Editar</button><button type="button" class="outline small ${a.active?"danger":""}" data-ally-toggle="${a.id}" data-ally-active="${a.active?0:1}">${a.active?"Suspender":"Reativar"}</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum Aliado Oculto cadastrado.</div>`;
     qsa("[data-ally-edit]").forEach(b=>b.onclick=()=>editAdminAlly(Number(b.dataset.allyEdit)));
     qsa("[data-ally-toggle]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/allies/${b.dataset.allyToggle}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:Number(b.dataset.allyActive)===1})});await loadAdminAllies();}catch(e){alert(e.message)}});
     qsa("[data-ally-cards]").forEach(b=>b.onclick=()=>openAllyCardManager(Number(b.dataset.allyCards)));
   }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
 }
 function clearAdminAllyForm(){const f=qs("#adminAllyForm");if(f)f.reset();qs("#adminAllyId").value="";qs("#adminAllyActive").checked=true;qs("#adminAllyPassword").required=true;qs("#adminAllyError").textContent="";}
-function editAdminAlly(id){const a=(state.allies||[]).find(x=>Number(x.id)===id);if(!a)return;qs("#adminAllyId").value=a.id;qs("#adminAllyUsername").value=a.username||"";qs("#adminAllyDisplayName").value=a.display_name||"";qs("#adminAllyPassword").value="";qs("#adminAllyPassword").required=false;qs("#adminAllyKingdom").value=a.origin_kingdom||"";qs("#adminAllyHouse").value=a.origin_house||"";qs("#adminAllyBaseHp").value=Number(a.base_hp||0);qs("#adminAllyBaseMana").value=Number(a.base_mana||0);qs("#adminAllyBaseStatus").value=a.base_status||"";qs("#adminAllyPatent").value=a.patent||"";qs("#adminAllyRole").value=a.role||"";qs("#adminAllyDescription").value=a.description||"";qs("#adminAllyActive").checked=Number(a.active)===1;qs("#adminAllyError").textContent="Editando aliado.";qs("#adminAlliesPanel")?.scrollIntoView({behavior:"smooth",block:"center"});}
+function editAdminAlly(id){const a=(state.allies||[]).find(x=>Number(x.id)===id);if(!a)return;qs("#adminAllyId").value=a.id;qs("#adminAllyUsername").value=a.username||"";qs("#adminAllyDisplayName").value=a.display_name||"";qs("#adminAllyPassword").value="";qs("#adminAllyPassword").required=false;qs("#adminAllyKingdom").value=a.origin_kingdom||"";qs("#adminAllyHouse").value=a.origin_house||"";qs("#adminAllyPatent").value=a.patent||"";qs("#adminAllyRole").value=a.role||"";qs("#adminAllyDescription").value=a.description||"";qs("#adminAllyActive").checked=Number(a.active)===1;qs("#adminAllyError").textContent="Editando aliado.";qs("#adminAlliesPanel")?.scrollIntoView({behavior:"smooth",block:"center"});}
 async function openAllyCardManager(id){
   state.selectedAllyId=id; const a=(state.allies||[]).find(x=>Number(x.id)===id);
   qs("#allyCardManager").hidden=false; qs("#allyCardManagerTitle").textContent=`Cards de ${a?.display_name||"Aliado"}`;
@@ -1421,7 +1429,7 @@ function renderAllyAdminCards(){const el=qs("#allyCardList");if(!el)return;el.in
 qs("#closeAllyCardManager")?.addEventListener("click",()=>{qs("#allyCardManager").hidden=true;state.selectedAllyId=null;});
 qs("#grantAllyCardBtn")?.addEventListener("click",async()=>{const id=state.selectedAllyId,card=Number(qs("#allyCardSelect")?.value||0);if(!id||!card)return alert("Selecione um Card.");try{await adminApi(`/api/admin/allies/${id}/cards`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_id:card,acquisition_name:qs("#allyCardAcquisition")?.value||"Concessão administrativa"})});qs("#allyCardSelect").value="";qs("#allyCardAcquisition").value="";await openAllyCardManager(id);await loadAdminAllies();}catch(e){alert(e.message)}});
 qs("#adminAllyClear")?.addEventListener("click",clearAdminAllyForm);
-qs("#adminAllyForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminAllyId").value;const body={username:qs("#adminAllyUsername").value,display_name:qs("#adminAllyDisplayName").value,password:qs("#adminAllyPassword").value,origin_kingdom:qs("#adminAllyKingdom").value,origin_house:qs("#adminAllyHouse").value,base_hp:Number(qs("#adminAllyBaseHp").value||0),base_mana:Number(qs("#adminAllyBaseMana").value||0),base_status:qs("#adminAllyBaseStatus").value,patent:qs("#adminAllyPatent").value,role:qs("#adminAllyRole").value,description:qs("#adminAllyDescription").value,active:qs("#adminAllyActive").checked};const err=qs("#adminAllyError");err.textContent="Salvando...";try{await adminApi(id?`/api/admin/allies/${id}`:"/api/admin/allies",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminAllyForm();await loadAdminAllies();err.textContent="Aliado salvo.";}catch(ex){err.textContent=ex.message;}});
+qs("#adminAllyForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminAllyId").value;const body={username:qs("#adminAllyUsername").value,display_name:qs("#adminAllyDisplayName").value,password:qs("#adminAllyPassword").value,origin_kingdom:qs("#adminAllyKingdom").value,origin_house:qs("#adminAllyHouse").value,patent:qs("#adminAllyPatent").value,role:qs("#adminAllyRole").value,description:qs("#adminAllyDescription").value,active:qs("#adminAllyActive").checked};const err=qs("#adminAllyError");err.textContent="Salvando...";try{await adminApi(id?`/api/admin/allies/${id}`:"/api/admin/allies",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminAllyForm();await loadAdminAllies();err.textContent="Aliado salvo.";}catch(ex){err.textContent=ex.message;}});
 
 async function initAdmin(){
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
