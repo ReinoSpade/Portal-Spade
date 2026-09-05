@@ -1667,7 +1667,7 @@ function renderOverviewPanel(p){
 
 function renderEconomyPanel(p){
   const hist=(p.history||[]).map(h=>`<div class="history-row"><span>${escapeHtml(h.reason||"Movimentação")}<br><small>${escapeHtml(String(h.created_at||""))}</small></span><b class="${h.amount>=0?"plus":"minus"}">${h.amount>=0?"+":""}${money(h.amount)} → ${money(h.balance_after)}</b></div>`).join("")||`<div class="admin-history-empty">Nenhuma movimentação registrada.</div>`;
-  return `<div class="yuls-box" style="margin-top:0"><h4>🪙 Movimentação de Yuls</h4><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><div class="history">${hist}</div></div>`;
+  return `<div class="yuls-box" style="margin-top:0"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><div><h4>🪙 Movimentação de Yuls</h4><small>Saldo atual: <b>${money(p.yuls||0)} Yuls</b></small></div><button class="outline dark-outline small" id="zeroYulsBtn" type="button">⟲ Zerar Yuls</button></div><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><p class="admin-editor-note">Zerar o saldo cria um ajuste financeiro auditável e preserva todo o histórico.</p><div class="history">${hist}</div></div>`;
 }
 
 function renderMissionsPanel(p){
@@ -1821,6 +1821,7 @@ function renderEditor(p){
   qs("#editPlayerForm").addEventListener("submit",savePlayer);
   qs("#deletePlayerBtn").addEventListener("click",deleteSelectedPlayer);
   qs("#yulsBtn").addEventListener("click",launchYuls);
+  qs("#zeroYulsBtn")?.addEventListener("click",zeroSelectedPlayerYuls);
   qs("#missionBtn").addEventListener("click",launchMission);
   qs("#adminCardApply")?.addEventListener("click",applyAdminCardChange);
   qs("#adminCardSourceType")?.addEventListener("change",updateAdminCardSourceFields);
@@ -1851,6 +1852,22 @@ async function savePlayer(e){
     alert("Jogador atualizado com sucesso.");
   }catch(ex){qs("#editError").textContent=ex.message}
 }
+
+async function zeroSelectedPlayerYuls(){
+  if(!state.selectedPlayer)return;
+  const current=Number(state.selectedPlayer.yuls||0);
+  if(current===0){alert("Este jogador já está com 0 Yuls.");return}
+  if(!confirm(`Zerar os ${money(current)} Yuls de ${displayPlayerName(state.selectedPlayer)}?\n\nA operação será registrada no histórico financeiro e não apagará as movimentações anteriores.`))return;
+  const reason=prompt("Motivo do acerto de saldo:","Acerto de saldo para transferência");
+  if(reason===null)return;
+  try{
+    const d=await adminApi(`/api/admin/players/${state.selectedPlayer.id}/yuls/reset`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason:reason.trim()||"Acerto de saldo para transferência"})});
+    await selectAdminPlayer(state.selectedPlayer.id);
+    alert(d.changed?`Saldo zerado. ${money(current)} Yuls foram registrados como ajuste.`:d.message);
+    if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}
+  }catch(ex){alert(ex.message)}
+}
+
 async function launchYuls(){
   const amount=Number(qs("#yulsAmount").value),reason=qs("#yulsReason").value.trim();
   if(!Number.isFinite(amount)||amount===0){alert("Informe uma quantidade diferente de zero.");return}
