@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -26,7 +26,8 @@ function go(page){
   if(page==="hierarquia") loadHierarchy();
   if(page==="dashboard"){ if(state.me) renderDashboard(); else refreshDashboard(); }
   if(page==="cards"){ if(state.me) loadPlayerCards(); else { state.page="login"; return go("login"); } }
-  if(page==="admin" && state.admin) initAdmin();
+  if(page==="admin"){ if(state.admin) initAdmin(); else go("admin-login"); }
+  if(page==="admin-login") refreshAdminSession();
 }
 
 qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
@@ -841,8 +842,50 @@ function clearStoredAdminKey(){
 async function adminApi(url,options={}){
   const key=state.adminKey||getStoredAdminKey();
   state.adminKey=key;
-  options.headers={...(options.headers||{}),"x-admin-key":key};
+  options.headers={...(options.headers||{})};
+  if(key) options.headers["x-admin-key"]=key;
   return api(url,options);
+}
+
+async function refreshAdminSession(){
+  try{
+    const d=await adminApi("/api/admin/me");
+    state.admin=true;state.adminUser=d.admin;setAdminNav();
+    if(state.page==="admin-login") go("admin");
+  }catch{
+    state.admin=false;state.adminUser=null;setAdminNav();
+  }
+}
+function setAdminNav(){
+  const b=qs("#adminNav");if(!b)return;
+  b.textContent=state.admin?"👑 Administração":"👑 Administração";
+  b.dataset.page=state.admin?"admin":"admin-login";
+}
+async function adminLogin(e){
+  e.preventDefault();
+  const err=qs("#adminLoginError");if(err)err.textContent="";
+  const username=qs("#adminUsername")?.value.trim();
+  const password=qs("#adminPassword")?.value||"";
+  if(!username||!password){if(err)err.textContent="Preencha usuário e senha.";return;}
+  try{
+    const d=await api("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
+    state.admin=true;state.adminUser=d.admin;state.adminKey=null;clearStoredAdminKey();setAdminNav();
+    qs("#adminLoginForm")?.reset();go("admin");
+  }catch(ex){if(err)err.textContent=ex.message}
+}
+async function loadAdminUsers(){
+  const list=qs("#adminUserList");if(!list)return;
+  try{
+    const d=await adminApi("/api/admin/admins");
+    list.innerHTML=(d.admins||[]).map(a=>`<div class="admin-user-row">
+      <div><b>👑 ${escapeHtml(a.display_name||a.username)}</b><small>@${escapeHtml(a.username)} • ${a.active?"Ativo":"Desativado"}${a.last_login?` • Último acesso: ${escapeHtml(String(a.last_login))}`:""}</small></div>
+      <div class="admin-user-actions">${Number(a.id)!==Number(state.adminUser?.id)?`<button type="button" class="outline small ${a.active?"danger":""}" data-admin-toggle="${a.id}" data-admin-active="${a.active?0:1}">${a.active?"Desativar":"Reativar"}</button>`:`<span class="admin-user-current">Seu acesso</span>`}</div>
+    </div>`).join("")||`<div class="admin-history-empty">Nenhum administrador cadastrado.</div>`;
+    qsa("[data-admin-toggle]").forEach(btn=>btn.onclick=async()=>{
+      try{await adminApi(`/api/admin/admins/${btn.dataset.adminToggle}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:Number(btn.dataset.adminActive)===1})});await loadAdminUsers();}
+      catch(ex){alert(ex.message)}
+    });
+  }catch(ex){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(ex.message)}</div>`}
 }
 
 async function loadAdminHouses(){
@@ -1460,7 +1503,14 @@ qs("#newPlayerBtn").addEventListener("click",openNewPlayer);
 qs("#refreshAdminBtn").addEventListener("click",initAdmin);
 qs("#newsForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
 qs("#editionForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
-qs("#logoutAdminBtn").addEventListener("click",()=>{state.admin=false;state.adminKey=null;clearStoredAdminKey();state.selectedPlayer=null;go("home")});
+qs("#adminLoginForm")?.addEventListener("submit",adminLogin);
+qs("#adminUserForm")?.addEventListener("submit",async e=>{
+  e.preventDefault();const err=qs("#adminUserError");if(err)err.textContent="";
+  const b=Object.fromEntries(new FormData(e.target).entries());
+  try{await adminApi("/api/admin/admins",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();await loadAdminUsers();alert("Administrador criado com sucesso.");}
+  catch(ex){if(err)err.textContent=ex.message}
+});
+qs("#logoutAdminBtn").addEventListener("click",async()=>{try{await api("/api/admin/logout",{method:"POST"})}catch{} state.admin=false;state.adminUser=null;state.adminKey=null;clearStoredAdminKey();state.selectedPlayer=null;setAdminNav();go("home")});
 
 qs("#houseForm").addEventListener("submit",async e=>{
   e.preventDefault();
@@ -2042,23 +2092,9 @@ qs("#announcementCancelBtn").addEventListener("click",resetAnnouncementForm);
 
 async function tryAdminHash(){
   if(location.hash!=="#admin")return;
-  setTimeout(async()=>{
-    const stored=getStoredAdminKey();
-    const key=stored||prompt("Chave administrativa:");
-    if(!key){history.replaceState(null,"",location.pathname+location.search);go("home");return}
-    state.adminKey=key;
-    try{
-      await adminApi("/api/admin/overview");
-      state.admin=true;
-      storeAdminKey(key);
-      go("admin");
-    }catch(e){
-      state.adminKey=null;
-      clearStoredAdminKey();
-      alert("Chave administrativa inválida ou sessão expirada.");
-      go("home");
-    }
-  },80);
+  history.replaceState(null,"",location.pathname+location.search);
+  await refreshAdminSession();
+  if(state.admin) go("admin"); else go("admin-login");
 }
 
-loadHome();tryMe();tryAdminHash();
+loadHome();tryMe();setAdminNav();tryAdminHash();
