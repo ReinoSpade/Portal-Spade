@@ -1126,3 +1126,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .skip-link{transition:none}
   .top nav button,.gold,.outline,.icon-button,.panel,.news-card,.player-card,.house-card,.edition,.mission-card,.event-card,.schedule-card,.announcement-card,.status-post,.library-card,.ranking-panel{transition:none}
 }
+
+/* V52 integration */
+.dashboard-live-item{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+.dashboard-live-item>div{min-width:0;}
+.dashboard-live-item h4{margin:5px 0 3px;}
+.dashboard-live-item p{margin:0;}
+@media(max-width:700px){.dashboard-live-item{align-items:flex-start;flex-direction:column;}.dashboard-live-item button{width:100%;}}
