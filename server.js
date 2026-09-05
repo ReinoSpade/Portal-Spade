@@ -29,7 +29,8 @@ const ADMIN_PERMISSION_DEFS = {
   reports: "Relatórios",
   settings: "Configurações",
   library: "Biblioteca",
-  community: "Comunidade / Status"
+  community: "Comunidade / Status",
+  rankings: "Rankings"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -56,6 +57,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/articles") || path.startsWith("/editions") || path.startsWith("/news")) return "journal";
   if (path.startsWith("/announcements")) return "announcements";
   if (path.startsWith("/library")) return "library";
+  if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings";
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
@@ -592,6 +594,40 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS ranking_battles (
+      id BIGSERIAL PRIMARY KEY,
+      ranking_type TEXT NOT NULL CHECK (ranking_type IN ('SC','VT')),
+      challenger_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      opponent_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      winner_id BIGINT REFERENCES players(id) ON DELETE SET NULL,
+      result TEXT NOT NULL DEFAULT 'PENDENTE' CHECK (result IN ('PENDENTE','CHALLENGER','OPPONENT','EMPATE')),
+      status TEXT NOT NULL DEFAULT 'AGUARDANDO_OPONENTE' CHECK (status IN ('AGUARDANDO_OPONENTE','AGUARDANDO_ADMIN','APROVADA','REJEITADA')),
+      proof_url TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      challenger_score_before INTEGER NOT NULL DEFAULT 0,
+      opponent_score_before INTEGER NOT NULL DEFAULT 0,
+      challenger_score_after INTEGER,
+      opponent_score_after INTEGER,
+      confirmed_at TIMESTAMPTZ,
+      approved_at TIMESTAMPTZ,
+      approved_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      rejected_reason TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      CHECK (challenger_id <> opponent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS ranking_history (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      ranking_type TEXT NOT NULL CHECK (ranking_type IN ('SC','VT')),
+      battle_id BIGINT REFERENCES ranking_battles(id) ON DELETE SET NULL,
+      score_before INTEGER NOT NULL DEFAULT 0,
+      score_after INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
 
   `);
 
@@ -600,6 +636,8 @@ async function initDatabase() {
     ALTER TABLE players ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT '';
     ALTER TABLE players ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1 CHECK (active IN (0,1));
     ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS skill_sc INTEGER NOT NULL DEFAULT 0 CHECK (skill_sc >= 0);
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS skill_vt INTEGER NOT NULL DEFAULT 0 CHECK (skill_vt >= 0);
     ALTER TABLE news ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
     ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
 
@@ -643,6 +681,9 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_announcements_public ON announcements(published, featured, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_admin_history ON player_admin_history(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_ranking_battles_status ON ranking_battles(status, ranking_type, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ranking_battles_players ON ranking_battles(challenger_id, opponent_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ranking_history_player ON ranking_history(player_id, ranking_type, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_cards_player ON player_cards(player_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_player_statuses_date ON player_statuses(status_date DESC,id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_statuses_player ON player_statuses(player_id,status_date DESC);
@@ -1900,83 +1941,81 @@ app.get("/api/hierarchy", async (req,res) => {
 });
 app.get("/api/rankings", async (req, res) => {
   try {
-    const [powerResult, missionsResult, wealthResult, activityResult, houseResult] = await Promise.all([
-      pool.query(
-        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
-         FROM players
-         WHERE public_profile=1
-         ORDER BY power DESC, missions DESC, nick COLLATE "C" ASC
-         LIMIT 75`
-      ),
-      pool.query(
-        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
-         FROM players
-         WHERE public_profile=1
-         ORDER BY missions DESC, achievements DESC, nick COLLATE "C" ASC
-         LIMIT 75`
-      ),
-      pool.query(
-        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
-         FROM players
-         WHERE public_profile=1
-         ORDER BY yuls DESC, missions DESC, nick COLLATE "C" ASC
-         LIMIT 75`
-      ),
-      pool.query(
-        `SELECT id,nick,number,identifier,house,power,missions,achievements,yuls
-         FROM players
-         WHERE public_profile=1
-         ORDER BY (missions + achievements * 3) DESC, missions DESC, achievements DESC, nick COLLATE "C" ASC
-         LIMIT 75`
-      ),
-      pool.query(
-        `SELECT h.id,h.name,h.emblem,h.leader,h.vice_leader,
-                COUNT(p.id)::int AS members,
-                COALESCE(SUM(p.missions),0)::bigint AS missions,
-                COALESCE(SUM(p.yuls),0)::bigint AS yuls,
-                COALESCE(SUM(p.power),0)::bigint AS power
-         FROM houses h
-         LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1
-         GROUP BY h.id
-         ORDER BY power DESC, missions DESC, members DESC, h.name ASC
-         LIMIT 20`
-      )
+    const [powerResult, scResult, vtResult, missionsResult, wealthResult, activityResult, houseResult] = await Promise.all([
+      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY power DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,skill_sc AS score,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_sc DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,skill_vt AS score,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_vt DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY missions DESC, achievements DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY yuls DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY (missions + achievements * 3) DESC, missions DESC, achievements DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT h.id,h.name,h.emblem,h.leader,h.vice_leader,COUNT(p.id)::int AS members,COALESCE(SUM(p.missions),0)::bigint AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls,COALESCE(SUM(p.power),0)::bigint AS power FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1 AND p.active=1 WHERE h.active=1 GROUP BY h.id ORDER BY power DESC, missions DESC, members DESC, h.name ASC LIMIT 20`)
     ]);
-
-    const mapPlayer = p => ({
-      id:Number(p.id),
-      nick:p.nick,
-      number:p.number,
-      identifier:p.identifier,
-      house:p.house||"",
-      power:Number(p.power||0),
-      missions:Number(p.missions||0),
-      achievements:Number(p.achievements||0),
-      yuls:Number(p.yuls||0)
-    });
-
+    const mapPlayer=p=>({id:Number(p.id),nick:p.nick,number:p.number,identifier:p.identifier,house:p.house||"",power:Number(p.power||0),score:Number(p.score||0),missions:Number(p.missions||0),achievements:Number(p.achievements||0),yuls:Number(p.yuls||0)});
     res.json({
-      force: powerResult.rows.map(mapPlayer),
-      missions: missionsResult.rows.map(mapPlayer),
-      wealth: wealthResult.rows.map(mapPlayer),
-      activity: activityResult.rows.map(mapPlayer),
-      houses: houseResult.rows.map(h=>({
-        id:Number(h.id),
-        name:h.name,
-        emblem:h.emblem||"♜",
-        leader:h.leader||"",
-        vice_leader:h.vice_leader||"",
-        members:Number(h.members||0),
-        missions:Number(h.missions||0),
-        yuls:Number(h.yuls||0),
-        power:Number(h.power||0)
-      }))
+      force:powerResult.rows.map(mapPlayer), skill_sc:scResult.rows.map(mapPlayer), skill_vt:vtResult.rows.map(mapPlayer),
+      missions:missionsResult.rows.map(mapPlayer), wealth:wealthResult.rows.map(mapPlayer), activity:activityResult.rows.map(mapPlayer),
+      houses:houseResult.rows.map(h=>({id:Number(h.id),name:h.name,emblem:h.emblem||"♜",leader:h.leader||"",vice_leader:h.vice_leader||"",members:Number(h.members||0),missions:Number(h.missions||0),yuls:Number(h.yuls||0),power:Number(h.power||0)}))
     });
-  } catch(e) {
-    console.error("Erro em /api/rankings:",e);
-    res.status(500).json({error:"Erro ao carregar rankings."});
-  }
+  } catch(e) { console.error("Erro em /api/rankings:",e); res.status(500).json({error:"Erro ao carregar rankings."}); }
 });
+
+app.get("/api/ranking-players", async (req,res)=>{
+  try { const r=await pool.query(`SELECT id,nick,identifier,house,skill_sc,skill_vt FROM players WHERE active=1 AND public_profile=1 ORDER BY nick COLLATE "C" ASC`); res.json({players:r.rows.map(x=>({id:Number(x.id),nick:x.nick,identifier:x.identifier,house:x.house||"",skill_sc:Number(x.skill_sc||0),skill_vt:Number(x.skill_vt||0)}))}); }
+  catch(e){res.status(500).json({error:"Erro ao carregar jogadores para a batalha."});}
+});
+
+app.get("/api/me/ranking-battles", async (req,res)=>{
+  const id=readPlayerToken(req); if(!id)return res.status(401).json({error:"Não autenticado."});
+  try{const r=await pool.query(`SELECT rb.*,c.nick AS challenger_nick,o.nick AS opponent_nick FROM ranking_battles rb JOIN players c ON c.id=rb.challenger_id JOIN players o ON o.id=rb.opponent_id WHERE rb.challenger_id=$1 OR rb.opponent_id=$1 ORDER BY rb.created_at DESC LIMIT 50`,[id]);
+    res.json({battles:r.rows.map(x=>({id:Number(x.id),ranking_type:x.ranking_type,challenger_id:Number(x.challenger_id),opponent_id:Number(x.opponent_id),challenger_nick:x.challenger_nick,opponent_nick:x.opponent_nick,result:x.result,status:x.status,proof_url:x.proof_url||"",notes:x.notes||"",challenger_score_before:Number(x.challenger_score_before||0),opponent_score_before:Number(x.opponent_score_before||0),challenger_score_after:x.challenger_score_after===null?null:Number(x.challenger_score_after),opponent_score_after:x.opponent_score_after===null?null:Number(x.opponent_score_after),created_at:x.created_at}))});}
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar batalhas."});}
+});
+
+app.post("/api/ranking-battles", async (req,res)=>{
+  const id=readPlayerToken(req); if(!id)return res.status(401).json({error:"Faça login para registrar uma batalha."});
+  const type=String(req.body?.ranking_type||"").toUpperCase(), opponentId=Number(req.body?.opponent_id), result=String(req.body?.result||"PENDENTE").toUpperCase();
+  if(!['SC','VT'].includes(type))return res.status(400).json({error:"Escolha SC ou VT."});
+  if(!Number.isInteger(opponentId)||opponentId<=0||opponentId===id)return res.status(400).json({error:"Adversário inválido."});
+  if(!['PENDENTE','CHALLENGER','OPPONENT','EMPATE'].includes(result))return res.status(400).json({error:"Resultado inválido."});
+  try{
+    const p=await pool.query(`SELECT id,nick,skill_sc,skill_vt FROM players WHERE id=$1 AND active=1 AND public_profile=1`,[id]);
+    const o=await pool.query(`SELECT id,nick,skill_sc,skill_vt FROM players WHERE id=$1 AND active=1 AND public_profile=1`,[opponentId]);
+    if(!p.rows[0]||!o.rows[0])return res.status(404).json({error:"Jogador não encontrado ou inativo."});
+    const col=type==='SC'?'skill_sc':'skill_vt';
+    const r=await pool.query(`INSERT INTO ranking_battles(ranking_type,challenger_id,opponent_id,result,proof_url,notes,challenger_score_before,opponent_score_before) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[type,id,opponentId,result,String(req.body?.proof_url||''),String(req.body?.notes||''),Number(p.rows[0][col]||0),Number(o.rows[0][col]||0)]);
+    res.json({ok:true,id:Number(r.rows[0].id),message:"Batalha registrada e enviada ao oponente para confirmação."});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao registrar batalha."});}
+});
+
+app.post("/api/ranking-battles/:id/confirm", async(req,res)=>{
+  const playerId=readPlayerToken(req), battleId=Number(req.params.id); if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  if(!Number.isInteger(battleId))return res.status(400).json({error:"Batalha inválida."});
+  try{const r=await pool.query(`UPDATE ranking_battles SET status='AGUARDANDO_ADMIN',confirmed_at=NOW(),updated_at=NOW() WHERE id=$1 AND opponent_id=$2 AND status='AGUARDANDO_OPONENTE' RETURNING id`,[battleId,playerId]); if(!r.rows[0])return res.status(400).json({error:"Batalha não encontrada ou já confirmada."}); res.json({ok:true,message:"Batalha confirmada e enviada à Administração."});}
+  catch(e){res.status(500).json({error:"Erro ao confirmar batalha."});}
+});
+
+app.get("/api/admin/ranking-battles", requireAdmin, async(req,res)=>{
+  try{const status=String(req.query.status||'').toUpperCase();const params=[];let where='';if(['AGUARDANDO_OPONENTE','AGUARDANDO_ADMIN','APROVADA','REJEITADA'].includes(status)){params.push(status);where='WHERE rb.status=$1';}
+    const r=await pool.query(`SELECT rb.*,c.nick AS challenger_nick,o.nick AS opponent_nick,a.display_name AS admin_name FROM ranking_battles rb JOIN players c ON c.id=rb.challenger_id JOIN players o ON o.id=rb.opponent_id LEFT JOIN admin_users a ON a.id=rb.approved_by_admin_id ${where} ORDER BY rb.created_at DESC LIMIT 100`,params);
+    res.json({battles:r.rows.map(x=>({...x,id:Number(x.id),challenger_id:Number(x.challenger_id),opponent_id:Number(x.opponent_id),challenger_score_before:Number(x.challenger_score_before||0),opponent_score_before:Number(x.opponent_score_before||0),challenger_score_after:x.challenger_score_after===null?null:Number(x.challenger_score_after),opponent_score_after:x.opponent_score_after===null?null:Number(x.opponent_score_after)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar registros de ranking."});}
+});
+
+app.post("/api/admin/ranking-battles/:id/approve", requireAdmin, async(req,res)=>{
+  const battleId=Number(req.params.id);const cs=Number(req.body?.challenger_score_after),os=Number(req.body?.opponent_score_after);
+  if(!Number.isInteger(battleId)||!Number.isInteger(cs)||cs<0||!Number.isInteger(os)||os<0)return res.status(400).json({error:"Informe pontuações finais válidas para os dois jogadores."});
+  const client=await pool.connect();try{await client.query('BEGIN');const b=(await client.query(`SELECT * FROM ranking_battles WHERE id=$1 AND status='AGUARDANDO_ADMIN' FOR UPDATE`,[battleId])).rows[0];if(!b){await client.query('ROLLBACK');return res.status(404).json({error:"Batalha não está aguardando aprovação."});}
+    const col=b.ranking_type==='SC'?'skill_sc':'skill_vt';const cp=(await client.query(`SELECT id,${col} AS score FROM players WHERE id=$1 FOR UPDATE`,[b.challenger_id])).rows[0];const op=(await client.query(`SELECT id,${col} AS score FROM players WHERE id=$1 FOR UPDATE`,[b.opponent_id])).rows[0];
+    await client.query(`UPDATE players SET ${col}=$1,updated_at=NOW() WHERE id=$2`,[cs,b.challenger_id]);await client.query(`UPDATE players SET ${col}=$1,updated_at=NOW() WHERE id=$2`,[os,b.opponent_id]);
+    await client.query(`UPDATE ranking_battles SET status='APROVADA',challenger_score_after=$1,opponent_score_after=$2,approved_at=NOW(),approved_by_admin_id=$3,updated_at=NOW() WHERE id=$4`,[cs,os,req.admin.id,battleId]);
+    await client.query(`INSERT INTO ranking_history(player_id,ranking_type,battle_id,score_before,score_after,reason) VALUES($1,$2,$3,$4,$5,$6),($7,$2,$3,$8,$9,$10)`,[b.challenger_id,b.ranking_type,battleId,Number(cp.score||0),cs,'Batalha aprovada no Ranking',b.opponent_id,Number(op.score||0),os,'Batalha aprovada no Ranking']);
+    await client.query('COMMIT');res.json({ok:true,message:"Batalha aprovada e ranking atualizado."});
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(500).json({error:"Erro ao aprovar batalha."});}finally{client.release();}
+});
+
+app.post("/api/admin/ranking-battles/:id/reject", requireAdmin, async(req,res)=>{const battleId=Number(req.params.id),reason=String(req.body?.reason||'');try{const r=await pool.query(`UPDATE ranking_battles SET status='REJEITADA',rejected_reason=$1,approved_by_admin_id=$2,updated_at=NOW() WHERE id=$3 AND status='AGUARDANDO_ADMIN' RETURNING id`,[reason,req.admin.id,battleId]);if(!r.rows[0])return res.status(404).json({error:"Batalha não está aguardando aprovação."});res.json({ok:true,message:"Batalha rejeitada. Nenhuma pontuação foi alterada."});}catch(e){res.status(500).json({error:"Erro ao rejeitar batalha."});}});
+
+app.get("/api/ranking-history/:playerId", async(req,res)=>{const id=Number(req.params.playerId);if(!Number.isInteger(id))return res.status(400).json({error:"Jogador inválido."});try{const r=await pool.query(`SELECT rh.*,p.nick FROM ranking_history rh JOIN players p ON p.id=rh.player_id WHERE rh.player_id=$1 ORDER BY rh.created_at DESC LIMIT 100`,[id]);res.json({history:r.rows.map(x=>({...x,id:Number(x.id),player_id:Number(x.player_id),battle_id:x.battle_id?Number(x.battle_id):null,score_before:Number(x.score_before),score_after:Number(x.score_after)}))});}catch(e){res.status(500).json({error:"Erro ao carregar histórico."});}});
 
 app.get("/api/ranking", async (req, res) => {
   try {
