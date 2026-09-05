@@ -5048,6 +5048,62 @@ app.post("/api/admin/players/:id/yuls", requireAdmin, async (req, res) => {
   }
 });
 
+
+app.post("/api/admin/players/:id/yuls/reset", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const reason = String(req.body?.reason || "Acerto de saldo para transferência").trim();
+  const activityDate = String(req.body?.activity_date || new Date().toISOString().slice(0,10));
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query("SELECT id,nick,number,yuls FROM players WHERE id=$1 FOR UPDATE", [id]);
+    const player = result.rows[0];
+    if (!player) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Jogador não encontrado." });
+    }
+
+    const current = Number(player.yuls || 0);
+    if (current === 0) {
+      await client.query("ROLLBACK");
+      return res.json({ ok: true, changed: false, balance: 0, message: "O jogador já está com 0 Yuls." });
+    }
+
+    const delta = -current;
+    await client.query("UPDATE players SET yuls=0, updated_at=NOW() WHERE id=$1", [id]);
+    await client.query(
+      `INSERT INTO yuls_history(player_id,amount,reason,balance_after)
+       VALUES ($1,$2,$3,0)`,
+      [id, delta, reason]
+    );
+    await client.query(
+      `INSERT INTO economy_transactions(
+        player_id,currency,amount,reason,source_type,status,activity_date,
+        approval_date,payment_date,created_by_admin_id,approved_by_admin_id,paid_by_admin_id
+      ) VALUES($1,'YULS',$2,$3,'ACERTO_SALDO_ZERO','PAGA',$4,NOW(),NOW(),$5,$5,$5)`,
+      [id, delta, reason, activityDate, req.admin.id]
+    );
+    await client.query("COMMIT");
+
+    const updated = await pool.query("SELECT * FROM players WHERE id=$1", [id]);
+    res.json({
+      ok: true,
+      changed: true,
+      previous_balance: current,
+      balance: 0,
+      player: publicPlayer(updated.rows[0])
+    });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error(e);
+    res.status(500).json({ error: "Erro ao zerar os Yuls do jogador." });
+  } finally {
+    client.release();
+  }
+});
+
 app.delete("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
