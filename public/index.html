@@ -14,7 +14,7 @@
   <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
   <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
   <nav id="nav">
-    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button>
+    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button>
     <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
@@ -104,7 +104,18 @@
     <div id="statusBoard" class="status-board"></div>
   </div>
 </section>
-<section class="page" id="eventos">
+<section class="page" id="missoes">
+  <div class="subhero">
+    <p class="eyebrow">ATIVIDADES DO REINO</p>
+    <h1>Missões de <em>Spade.</em></h1>
+    <p>Atividades oficiais com período, instruções e recompensas. Missões não possuem título.</p>
+  </div>
+  <div class="content">
+    <div id="missionActiveFeature"></div>
+    <div class="event-filter-bar"><input class="search" id="missionSearch" placeholder="Pesquisar por tipo de missão..."><select class="admin-filter" id="missionStatusFilter"><option value="">Todos os status</option><option value="EM_ANDAMENTO">Em andamento</option><option value="AGENDADA">Agendadas</option><option value="CONCLUIDA">Concluídas</option></select></div>
+    <div id="missionGrid" class="mission-grid"></div>
+  </div>
+</section><section class="page" id="eventos">
   <div class="subhero">
     <p class="eyebrow">AGENDA DO REINO</p>
     <h1>Eventos de <em>Spade.</em></h1>
@@ -298,6 +309,23 @@
     <button class="gold" id="importPlayersBtn">📥 Importar jogadores</button><button class="gold" id="newPlayerBtn">＋ Novo jogador</button>
     <button class="outline dark-outline" id="refreshAdminBtn">↻ Atualizar</button>
   </div>
+  <div class="admin-mission-manager panel" id="adminMissionManager">
+    <div class="panel-head"><div><p class="eyebrow">ATIVIDADES OFICIAIS</p><h3>Administração de Missões</h3></div><span>Missões sem título: tipo + período + instruções + recompensas</span></div>
+    <form id="adminMissionForm" class="mission-admin-form">
+      <input type="hidden" id="adminMissionId">
+      <select id="adminMissionType"><option>Luta</option><option>Trívia</option><option>História</option><option>Treinamento</option><option>Recrutamento</option><option>Outro</option></select>
+      <input id="adminMissionStart" type="datetime-local" required><input id="adminMissionEnd" type="datetime-local" required>
+      <select id="adminMissionStatus"><option>AGENDADA</option><option>EM_ANDAMENTO</option><option>CONCLUIDA</option><option>CANCELADA</option></select>
+      <input id="adminMissionYuls" type="number" min="0" placeholder="Recompensa em Yuls">
+      <input id="adminMissionExp" type="number" min="0" placeholder="Recompensa em EXP">
+      <input id="adminMissionCards" class="wide" placeholder="Cards de recompensa (opcional)">
+      <textarea id="adminMissionDescription" class="wide" placeholder="Descrição da missão"></textarea>
+      <textarea id="adminMissionInstructions" class="wide" placeholder="Instruções / regras da missão"></textarea>
+      <div class="editor-actions wide"><button class="gold" type="submit">＋ Publicar missão</button><button class="outline dark-outline" type="button" id="adminMissionClear">Limpar</button><span class="error" id="adminMissionError"></span></div>
+    </form>
+    <div class="eyebrow" style="margin-top:18px">HISTÓRICO DE MISSÕES</div><div id="adminMissionList" class="admin-mission-list"></div>
+  </div>
+
   <div class="bulk-toolbar panel" id="bulkToolbar">
     <div class="bulk-selection"><b id="bulkSelectedCount">0 selecionados</b><button type="button" class="text-button" id="selectAllPlayersBtn">Selecionar todos</button><button type="button" class="text-button" id="clearAllPlayersBtn">Limpar seleção</button></div>
     <div class="bulk-actions">
@@ -626,6 +654,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=31.0"></script>
+<script src="/app.js?v=33.0"></script>
 </body>
 </html>
