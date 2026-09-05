@@ -612,6 +612,8 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_event_results_player ON event_results(player_id,id DESC);
     CREATE INDEX IF NOT EXISTS idx_schedule_public ON schedule_activities(published,activity_date,start_time,id);
     CREATE INDEX IF NOT EXISTS idx_schedule_event ON schedule_activities(event_id);
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS mission_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_schedule_mission ON schedule_activities(mission_id);
 
   `);
 
@@ -1530,7 +1532,7 @@ app.get("/api/schedule", async (req,res)=>{
   try{
     const r=await pool.query(`
       SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,
-             s.location,s.link,s.event_id,s.status,s.featured,e.title AS event_title
+             s.location,s.link,s.event_id,s.mission_id,s.status,s.featured,e.title AS event_title
       FROM schedule_activities s
       LEFT JOIN events e ON e.id=s.event_id
       WHERE s.published=1
@@ -1541,10 +1543,27 @@ app.get("/api/schedule", async (req,res)=>{
       id:Number(a.id),title:a.title,activity_type:a.activity_type||"ATIVIDADE",
       description:a.description||"",activity_date:a.activity_date,
       start_time:a.start_time,end_time:a.end_time,location:a.location||"",
-      link:a.link||"",event_id:a.event_id?Number(a.event_id):null,event_title:a.event_title||"",
+      link:a.link||"",event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null,event_title:a.event_title||"",
       status:a.status||"AGENDADA",featured:Boolean(a.featured)
     }))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar cronograma."});}
+});
+
+app.get("/api/active-activities", async (req,res)=>{
+  try{
+    const r=await pool.query(`
+      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,s.location,s.link,s.status,
+             s.event_id,s.mission_id,e.title AS event_title,ma.mission_type,ma.end_at AS mission_end_at
+      FROM schedule_activities s
+      LEFT JOIN events e ON e.id=s.event_id
+      LEFT JOIN mission_activities ma ON ma.id=s.mission_id
+      WHERE s.published=1 AND (
+        (s.activity_date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (s.start_time IS NULL OR s.start_time <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time) AND (s.end_time IS NULL OR s.end_time >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::time))
+        OR s.status='EM_ANDAMENTO'
+      )
+      ORDER BY s.featured DESC,s.start_time ASC NULLS LAST,s.id ASC LIMIT 20`);
+    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar atividades em andamento."});}
 });
 
 app.get("/api/roles/:id", async (req,res)=>{
@@ -2774,7 +2793,7 @@ app.get("/api/admin/schedule", requireAdmin, async (req,res)=>{
       FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id
       ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC
     `);
-    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,featured:Number(a.featured),published:Number(a.published)}))});
+    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null,featured:Number(a.featured),published:Number(a.published)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar cronograma administrativo."});}
 });
 
@@ -2784,11 +2803,11 @@ app.post("/api/admin/schedule", requireAdmin, async (req,res)=>{
   if(!title||!date)return res.status(400).json({error:"Título e data são obrigatórios."});
   try{
     const r=await pool.query(
-      `INSERT INTO schedule_activities(title,activity_type,description,activity_date,start_time,end_time,location,link,event_id,status,featured,published)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO schedule_activities(title,activity_type,description,activity_date,start_time,end_time,location,link,event_id,mission_id,status,featured,published)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,
        b.start_time||null,b.end_time||null,String(b.location||"").trim(),String(b.link||"").trim(),
-       b.event_id?Number(b.event_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
+       b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
        Number(b.featured)?1:0,Number(b.published??1)?1:0]
     );
     if(Number(b.featured))await pool.query("UPDATE schedule_activities SET featured=0 WHERE id<>$1",[r.rows[0].id]);
@@ -2804,11 +2823,11 @@ app.put("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
   try{
     const r=await pool.query(
       `UPDATE schedule_activities SET title=$1,activity_type=$2,description=$3,activity_date=$4,start_time=$5,end_time=$6,
-       location=$7,link=$8,event_id=$9,status=$10,featured=$11,published=$12,updated_at=NOW()
+       location=$7,link=$8,event_id=$9,mission_id=$10,status=$11,featured=$12,published=$13,updated_at=NOW()
        WHERE id=$13 RETURNING *`,
       [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,
        b.start_time||null,b.end_time||null,String(b.location||"").trim(),String(b.link||"").trim(),
-       b.event_id?Number(b.event_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
+       b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
        Number(b.featured)?1:0,Number(b.published??1)?1:0,id]
     );
     if(!r.rows[0])return res.status(404).json({error:"Atividade não encontrada."});
@@ -2819,8 +2838,8 @@ app.put("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
 
 app.delete("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
-  try{const r=await pool.query("DELETE FROM schedule_activities WHERE id=$1",[id]);if(!r.rowCount)return res.status(404).json({error:"Atividade não encontrada."});res.json({ok:true})}
-  catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir atividade."});}
+  try{const r=await pool.query("UPDATE schedule_activities SET status='CANCELADA',published=0,updated_at=NOW() WHERE id=$1 RETURNING id",[id]);if(!r.rowCount)return res.status(404).json({error:"Atividade não encontrada."});res.json({ok:true})}
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao arquivar atividade."});}
 });
 
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
