@@ -323,6 +323,28 @@
     </div>
     <div class="report-foot"><span id="reportUpdatedAt">—</span><button class="outline dark-outline small" type="button" id="adminReportsRefresh">↻ Atualizar relatórios</button></div>
   </section>
+  <section class="admin-audit-panel panel" id="adminAuditPanel">
+    <div class="panel-head">
+      <div><p class="eyebrow">RASTRO ADMINISTRATIVO</p><h3>Auditoria & Histórico</h3></div>
+      <span>Quem fez, quando fez e qual foi o resultado</span>
+    </div>
+    <div class="audit-toolbar">
+      <input class="search" id="adminAuditSearch" placeholder="🔎 Buscar ação, administrador, jogador ou registro...">
+      <select class="admin-filter" id="adminAuditSource">
+        <option value="">Todas as fontes</option>
+        <option value="AUDITORIA">Ações administrativas</option>
+        <option value="JOGADOR">Jogadores</option>
+        <option value="CARD">Cards</option>
+        <option value="RANKING">Rankings</option>
+        <option value="CASA">Casas</option>
+      </select>
+      <input class="admin-filter" id="adminAuditFrom" type="date" title="A partir de">
+      <input class="admin-filter" id="adminAuditTo" type="date" title="Até">
+      <button class="outline dark-outline small" type="button" id="adminAuditRefresh">↻ Atualizar</button>
+    </div>
+    <div class="audit-summary" id="adminAuditSummary"></div>
+    <div class="audit-list" id="adminAuditList"></div>
+  </section>
   <div class="admin-toolbar admin-toolbar-v2">
     <div class="admin-search-wrap"><input class="search admin-search" id="adminSearch" placeholder="Pesquisar por nick, identificador ou Casa"></div>
     <select class="admin-filter" id="adminHouseFilter"><option value="">Todas as Casas</option></select>
