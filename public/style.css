@@ -865,3 +865,15 @@ button,a,input,select,textarea{transition:box-shadow .18s ease,border-color .18s
   .admin-toolbar{grid-template-columns:1fr}
   .admin-toolbar .gold,.admin-toolbar .outline{width:100%}
 }
+
+/* V45 — Notifications */
+.notification-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:10px;background:#8d1d1d;color:#fff;margin-left:4px}
+.notification-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}
+.notification-list{display:grid;gap:12px;max-width:900px}
+.notification-card{display:grid;grid-template-columns:42px 1fr 34px;gap:14px;align-items:start;padding:18px;border:1px solid #ddd6c8;background:#fff;border-radius:12px;box-shadow:0 5px 18px rgba(30,25,15,.06)}
+.notification-card.unread{border-left:4px solid #9b7a32;background:#fffdf8}
+.notification-card.read{opacity:.78}
+.notification-icon{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#f3eee4;font-size:18px}
+.notification-main h3{margin:5px 0 6px}.notification-main p{margin:0;line-height:1.6}.notification-top{display:flex;justify-content:space-between;gap:12px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#776f62}.notification-read{border:0;background:transparent;font-size:18px;cursor:pointer;color:#77622f}.notification-link{margin-top:12px}.checkline{display:flex;align-items:center;gap:7px;font-size:12px}
+.admin-notification-panel{margin-top:18px}
+@media(max-width:600px){.notification-card{grid-template-columns:34px 1fr 28px;padding:14px;gap:10px}.notification-icon{width:34px;height:34px;font-size:15px}.notification-toolbar{align-items:flex-start;flex-direction:column}.notification-top{flex-direction:column;gap:3px}}
