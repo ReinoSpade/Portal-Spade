@@ -494,9 +494,45 @@ async function initDatabase() {
       description TEXT DEFAULT '',
       leader TEXT DEFAULT '',
       vice_leader TEXT DEFAULT '',
+      motto TEXT DEFAULT '',
+      color TEXT DEFAULT '',
+      banner_url TEXT DEFAULT '',
+      history TEXT DEFAULT '',
+      goals TEXT DEFAULT '',
+      achievements TEXT DEFAULT '',
+      status TEXT DEFAULT 'ATIVA',
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS house_history (
+      id BIGSERIAL PRIMARY KEY,
+      house_id BIGINT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL DEFAULT 'REGISTRO',
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      event_date DATE DEFAULT CURRENT_DATE,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_house_history_house_date ON house_history(house_id,event_date DESC,id DESC);
+
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS motto TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS banner_url TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS history TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS goals TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS achievements TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ATIVA';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1;
+
+    CREATE TABLE IF NOT EXISTS house_history (
+      id BIGSERIAL PRIMARY KEY, house_id BIGINT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL DEFAULT 'REGISTRO', title TEXT NOT NULL, description TEXT DEFAULT '',
+      event_date DATE DEFAULT CURRENT_DATE, created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL, created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_house_history_house_date ON house_history(house_id,event_date DESC,id DESC);
 
     CREATE TABLE IF NOT EXISTS patents (
       id BIGSERIAL PRIMARY KEY,
@@ -1717,7 +1753,7 @@ app.get("/api/home", async (req, res) => {
         GROUP BY e.id
         ORDER BY e.id DESC LIMIT 6
       `),
-      pool.query(`SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
+      pool.query(`SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.status,h.active,
                          COUNT(p.id)::int AS count,
                          COALESCE(SUM(p.missions),0)::bigint AS missions
                   FROM houses h
@@ -1755,12 +1791,13 @@ app.get("/api/home", async (req, res) => {
 app.get("/api/houses", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
+      `SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.status,h.active,
               COUNT(p.id)::int AS count,
               COALESCE(SUM(p.missions),0)::bigint AS missions,
               COALESCE(SUM(p.yuls),0)::bigint AS yuls
        FROM houses h
        LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1
+       WHERE COALESCE(h.active,1)=1
        GROUP BY h.id
        ORDER BY missions DESC,h.name ASC`
     );
@@ -1772,6 +1809,7 @@ app.get("/api/houses", async (req, res) => {
         description: h.description || "",
         leader: h.leader || "",
         vice_leader: h.vice_leader || "",
+        motto: h.motto || "", color: h.color || "", banner_url: h.banner_url || "", status: h.status || "ATIVA",
         count: Number(h.count),
         missions: Number(h.missions),
         yuls: Number(h.yuls)
@@ -1791,6 +1829,8 @@ app.get("/api/houses/:id", async (req, res) => {
     const houseResult = await pool.query("SELECT * FROM houses WHERE id=$1", [id]);
     const house = houseResult.rows[0];
     if (!house) return res.status(404).json({ error: "Casa não encontrada." });
+
+    const historyResult = await pool.query(`SELECT id,event_type,title,description,event_date FROM house_history WHERE house_id=$1 ORDER BY event_date DESC,id DESC LIMIT 30`, [id]);
 
     const members = await pool.query(
       `SELECT id,nick,number,identifier,patent,role,grimoire,missions,yuls,ranking
@@ -1814,6 +1854,9 @@ app.get("/api/houses/:id", async (req, res) => {
         description: house.description || "",
         leader: house.leader || "",
         vice_leader: house.vice_leader || "",
+        motto: house.motto || "", color: house.color || "", banner_url: house.banner_url || "",
+        history: house.history || "", goals: house.goals || "", achievements: house.achievements || "", status: house.status || "ATIVA",
+        timeline: historyResult.rows.map(x=>({id:Number(x.id),event_type:x.event_type,title:x.title,description:x.description||"",event_date:x.event_date})),
         count: members.rows.length,
         missions: totals.missions,
         yuls: totals.yuls,
@@ -3014,10 +3057,10 @@ app.post("/api/admin/houses", requireAdmin, async (req, res) => {
   if(!name) return res.status(400).json({error:"Nome da Casa é obrigatório."});
   try {
     const result=await pool.query(
-      `INSERT INTO houses(name,emblem,description,leader,vice_leader)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      `INSERT INTO houses(name,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1) RETURNING *`,
       [name,String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
-       String(b.leader||"").trim(),String(b.vice_leader||"").trim()]
+       String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim()]
     );
     res.json({house:result.rows[0]});
   } catch(e) {
@@ -3041,11 +3084,14 @@ app.put("/api/admin/houses/:id", requireAdmin, async (req,res) => {
       await client.query("BEGIN");
       const result=await client.query(
         `UPDATE houses
-         SET name=$1,emblem=$2,description=$3,leader=$4,vice_leader=$5,updated_at=NOW()
-         WHERE id=$6 RETURNING *`,
+         SET name=$1,emblem=$2,description=$3,leader=$4,vice_leader=$5,motto=$6,color=$7,banner_url=$8,history=$9,goals=$10,achievements=$11,status=$12,active=$13,updated_at=NOW()
+         WHERE id=$14 RETURNING *`,
         [name,String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
-         String(b.leader||"").trim(),String(b.vice_leader||"").trim(),id]
+         String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim(),b.active===false||String(b.active)==='0'?0:1,id]
       );
+      if((current.rows[0].leader||"") !== String(b.leader||"").trim() || (current.rows[0].vice_leader||"") !== String(b.vice_leader||"").trim()) {
+        await client.query(`INSERT INTO house_history(house_id,event_type,title,description,created_by_admin_id) VALUES ($1,'LIDERANÇA','Atualização da liderança',$2,$3)`, [id, `Liderança registrada: Líder ${String(b.leader||"não definido").trim()||"não definido"}; Vice ${String(b.vice_leader||"não definido").trim()||"não definido"}.`, req.admin?.id || null]);
+      }
       if(oldName.toLowerCase()!==name.toLowerCase()){
         await client.query(
           `UPDATE players SET house=$1,updated_at=NOW()
@@ -3069,23 +3115,24 @@ app.put("/api/admin/houses/:id", requireAdmin, async (req,res) => {
 app.delete("/api/admin/houses/:id", requireAdmin, async (req,res) => {
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0) return res.status(400).json({error:"Casa inválida."});
-  const client=await pool.connect();
   try {
-    await client.query("BEGIN");
-    const result=await client.query("SELECT name FROM houses WHERE id=$1",[id]);
-    const house=result.rows[0];
-    if(!house){await client.query("ROLLBACK");return res.status(404).json({error:"Casa não encontrada."});}
-    await client.query("UPDATE players SET house='' , updated_at=NOW() WHERE lower(trim(house))=lower(trim($1))",[house.name]);
-    await client.query("DELETE FROM houses WHERE id=$1",[id]);
-    await client.query("COMMIT");
-    res.json({ok:true});
-  } catch(e) {
-    await client.query("ROLLBACK");
-    console.error(e);
-    res.status(500).json({error:"Erro ao excluir Casa."});
-  } finally { client.release(); }
+    const result=await pool.query(`UPDATE houses SET active=0,status='ARQUIVADA',updated_at=NOW() WHERE id=$1 RETURNING id,name`,[id]);
+    if(!result.rows[0]) return res.status(404).json({error:"Casa não encontrada."});
+    await pool.query(`INSERT INTO house_history(house_id,event_type,title,description,created_by_admin_id) VALUES ($1,'ESTRUTURA','Casa arquivada','A Casa foi retirada da estrutura ativa do Reino, preservando seu histórico.',$2)`,[id,req.admin?.id||null]);
+    res.json({ok:true,archived:true});
+  } catch(e) { console.error(e); res.status(500).json({error:"Erro ao arquivar Casa."}); }
 });
 
+app.post("/api/admin/houses/:id/history", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id), b=req.body||{};
+  if(!Number.isInteger(id)||id<=0) return res.status(400).json({error:"Casa inválida."});
+  const title=String(b.title||"").trim();
+  if(!title) return res.status(400).json({error:"Título do registro é obrigatório."});
+  try {
+    const r=await pool.query(`INSERT INTO house_history(house_id,event_type,title,description,event_date,created_by_admin_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,[id,String(b.event_type||"REGISTRO").trim(),title,String(b.description||"").trim(),String(b.event_date||new Date().toISOString().slice(0,10)),req.admin?.id||null]);
+    res.json({history:r.rows[0]});
+  } catch(e){ console.error(e); res.status(500).json({error:"Erro ao registrar histórico da Casa."}); }
+});
 
 app.get("/api/admin/hierarchy", requireAdmin, async (req,res) => {
   try {
