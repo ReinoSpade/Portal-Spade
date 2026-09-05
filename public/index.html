@@ -185,13 +185,16 @@
   <div class="subhero"><p class="eyebrow">PLACAR DO REINO</p><h1>Rankings de <em>Spade.</em></h1><p>Classificações atualizadas diretamente dos registros oficiais do Reino.</p></div>
   <div class="content">
     <div class="ranking-tabs" role="tablist">
-      <button class="ranking-tab active" data-ranking-tab="force">⚔️ Força</button>
+      <button class="ranking-tab active" data-ranking-tab="force">⚔️ Poder</button>
+      <button class="ranking-tab" data-ranking-tab="skill_sc">⚔️ Skill SC</button>
+      <button class="ranking-tab" data-ranking-tab="skill_vt">⚡ Skill VT</button>
       <button class="ranking-tab" data-ranking-tab="activity">⭐ Atividade</button>
       <button class="ranking-tab" data-ranking-tab="missions">📋 Missões</button>
       <button class="ranking-tab" data-ranking-tab="wealth">🪙 Riqueza</button>
       <button class="ranking-tab" data-ranking-tab="houses">🏰 Casas</button>
     </div>
     <div class="ranking-explainer" id="rankingExplainer"></div>
+    <div class="ranking-player-actions" id="rankingPlayerActions"></div>
     <div class="panel ranking-panel">
       <div class="table-wrap"><table class="ranking-table">
         <thead><tr><th>#</th><th>Jogador / Casa</th><th>Casa</th><th>Principal</th><th>Secundário</th></tr></thead>
@@ -676,6 +679,12 @@
       </form>
       <div><div class="eyebrow">BANCO DA BIBLIOTECA</div><div id="adminLibraryList" class="editorial-list"></div></div>
     </div>
+  </div>
+
+  <div class="admin-ranking-panel panel" id="adminRankingPanel">
+    <div class="panel-head"><div><p class="eyebrow">COMPETIÇÃO OFICIAL</p><h3>Aprovação de Batalhas — Ranking</h3></div><span>SC e VT separados • a pontuação final é definida pela Administração</span></div>
+    <div class="ranking-admin-filters"><select id="adminRankingBattleStatus" class="admin-filter"><option value="AGUARDANDO_ADMIN">Aguardando aprovação</option><option value="AGUARDANDO_OPONENTE">Aguardando oponente</option><option value="APROVADA">Aprovadas</option><option value="REJEITADA">Rejeitadas</option><option value="">Todas</option></select><button class="outline dark-outline small" type="button" id="adminRankingRefresh">↻ Atualizar</button></div>
+    <div id="adminRankingBattleList" class="editorial-list"></div>
   </div>
 
   <div class="admin-users-panel panel">
