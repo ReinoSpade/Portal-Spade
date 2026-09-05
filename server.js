@@ -42,6 +42,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users";
   if (path === "/reports") return "reports";
   if (path === "/audit") return "audit";
+  if (path.startsWith("/settings")) return "settings";
   if (path === "/overview") return "dashboard";
   if (path.startsWith("/players")) {
     if (path.includes("/cards") || path.includes("/cards/")) return "cards";
@@ -119,6 +120,7 @@ function routeEntityType(pathname) {
   if (p.includes('/library')) return 'biblioteca';
   if (p.includes('/articles') || p.includes('/editions') || p.includes('/news')) return 'jornal';
   if (p.includes('/notifications')) return 'notificacao';
+  if (p.includes('/settings')) return 'configuracao';
   if (p.includes('/admins') || p.includes('/permissions')) return 'administrador';
   if (p.includes('/hierarchy') || p.includes('/patents') || p.includes('/roles')) return 'hierarquia';
   return 'sistema';
@@ -259,6 +261,39 @@ function normalizeIdentifier(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+const DEFAULT_PORTAL_SETTINGS = {
+  kingdom_name: "Reino Spade",
+  kingdom_motto: "O Reino acaba de nascer. A história já começou.",
+  timezone: "America/Sao_Paulo",
+  footer_text: "Portal oficial do Reino Spade • 2026",
+  mission_types: ["Luta","Trívia","História","Treinamento","Recrutamento","Outro"],
+  event_types: ["JOGO","ESPECIAL","TEMPORADA","LEGIAO"],
+  card_origins: ["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"],
+  card_elements: ["Fogo","Água","Vento","Raio","Sombra","Cristal","Fumaça"],
+  visibility_scopes: ["PUBLICO","SPADE","ALIADO","ADMIN"]
+};
+let portalSettings = {...DEFAULT_PORTAL_SETTINGS};
+function cleanStringList(value, fallback){
+  const arr=Array.isArray(value)?value.map(v=>String(v||'').trim()).filter(Boolean):[];
+  const unique=[...new Set(arr)];
+  return unique.length?unique:fallback.slice();
+}
+function applyPortalSetting(key,value){
+  if(key==='mission_types') { portalSettings.mission_types=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.mission_types); MISSION_TYPES=portalSettings.mission_types.slice(); }
+  else if(key==='event_types') { portalSettings.event_types=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.event_types); EVENT_TYPES=portalSettings.event_types.slice(); }
+  else if(key==='card_origins') { portalSettings.card_origins=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.card_origins); CARD_ORIGINS=portalSettings.card_origins.slice(); }
+  else if(key==='card_elements') portalSettings.card_elements=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.card_elements);
+  else if(key==='visibility_scopes') portalSettings.visibility_scopes=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.visibility_scopes);
+  else if(['kingdom_name','kingdom_motto','timezone','footer_text'].includes(key)) portalSettings[key]=String(value??'').trim() || String(DEFAULT_PORTAL_SETTINGS[key]);
+}
+async function loadPortalSettings(){
+  const r=await pool.query('SELECT key,value FROM portal_settings');
+  portalSettings={...DEFAULT_PORTAL_SETTINGS};
+  for(const row of r.rows) applyPortalSetting(row.key,row.value);
+  MISSION_TYPES=portalSettings.mission_types.slice();
+  EVENT_TYPES=portalSettings.event_types.slice();
+  CARD_ORIGINS=portalSettings.card_origins.slice();
+}
 async function initDatabase() {
   // Create all base tables before running any migrations or seed queries.
   await pool.query(`
@@ -316,6 +351,14 @@ async function initDatabase() {
       ip_address TEXT DEFAULT '',
       user_agent TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS portal_settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      description TEXT DEFAULT '',
+      updated_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS news (
@@ -1138,6 +1181,16 @@ async function initDatabase() {
     );
   }
 
+  // V49: centralized portal configuration. Defaults are created once; existing values are preserved.
+  const settingMeta={
+    kingdom_name:'Nome oficial do Reino', kingdom_motto:'Lema do Reino', timezone:'Fuso horário principal', footer_text:'Texto do rodapé',
+    mission_types:'Tipos de missão aceitos', event_types:'Tipos de evento aceitos', card_origins:'Origens de Cards', card_elements:'Elementos cadastráveis', visibility_scopes:'Escopos de visibilidade'
+  };
+  for(const [key,value] of Object.entries(DEFAULT_PORTAL_SETTINGS)){
+    await pool.query(`INSERT INTO portal_settings(key,value,description) VALUES($1,$2::jsonb,$3) ON CONFLICT(key) DO NOTHING`,[key,JSON.stringify(value),settingMeta[key]||'Configuração do Portal']);
+  }
+  await loadPortalSettings();
+
   // Bootstrap the first named administrator from environment variables.
   // This keeps the legacy ADMIN_KEY working while providing a normal username/password login.
   const adminUsername = String(process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
@@ -1166,6 +1219,53 @@ async function initDatabase() {
     );
   }
 }
+
+app.get("/api/settings", async (req,res)=>{
+  res.json({kingdom_name:portalSettings.kingdom_name, kingdom_motto:portalSettings.kingdom_motto, timezone:portalSettings.timezone, footer_text:portalSettings.footer_text, visibility_scopes:portalSettings.visibility_scopes});
+});
+
+app.get("/api/admin/settings", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query('SELECT key,value,description,updated_at,updated_by_admin_id FROM portal_settings ORDER BY key');
+    res.json({settings:r.rows});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar configurações do Portal.'});}
+});
+
+app.put("/api/admin/settings/:key", requireAdmin, async (req,res)=>{
+  const key=String(req.params.key||'').trim();
+  const allowed=new Set(Object.keys(DEFAULT_PORTAL_SETTINGS));
+  if(!allowed.has(key)) return res.status(400).json({error:'Configuração não reconhecida.'});
+  const value=req.body?.value;
+  try{
+    if(['mission_types','event_types','card_origins','card_elements','visibility_scopes'].includes(key)){
+      const next=cleanStringList(value,DEFAULT_PORTAL_SETTINGS[key]);
+      if(['mission_types','event_types','card_origins'].includes(key)){
+        const previous=portalSettings[key]||[];
+        const removed=previous.filter(x=>!next.includes(x));
+        if(key==='mission_types' && removed.length){
+          const used=await pool.query('SELECT COUNT(*)::int AS c FROM mission_activities WHERE mission_type = ANY($1)',[removed]);
+          if(Number(used.rows[0].c)>0) return res.status(400).json({error:`Não é possível remover tipos de missão que já possuem registros (${removed.join(', ')}).`});
+        }
+        if(key==='event_types' && removed.length){
+          const used=await pool.query('SELECT COUNT(*)::int AS c FROM events WHERE event_type = ANY($1)',[removed]);
+          if(Number(used.rows[0].c)>0) return res.status(400).json({error:`Não é possível remover tipos de evento que já possuem registros (${removed.join(', ')}).`});
+        }
+        if(key==='card_origins' && removed.length){
+          const used=await pool.query('SELECT COUNT(*)::int AS c FROM cards WHERE origin = ANY($1)',[removed]);
+          if(Number(used.rows[0].c)>0) return res.status(400).json({error:`Não é possível remover origens de Card já utilizadas (${removed.join(', ')}).`});
+        }
+      }
+      await pool.query(`INSERT INTO portal_settings(key,value,updated_by_admin_id,updated_at) VALUES($1,$2::jsonb,$3,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by_admin_id=EXCLUDED.updated_by_admin_id,updated_at=NOW()`,[key,JSON.stringify(next),req.admin?.id||null]);
+      applyPortalSetting(key,next);
+      return res.json({key,value:portalSettings[key]});
+    }
+    const next=String(value??'').trim();
+    if(!next) return res.status(400).json({error:'O valor não pode ficar vazio.'});
+    await pool.query(`INSERT INTO portal_settings(key,value,updated_by_admin_id,updated_at) VALUES($1,$2::jsonb,$3,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_by_admin_id=EXCLUDED.updated_by_admin_id,updated_at=NOW()`,[key,JSON.stringify(next),req.admin?.id||null]);
+    applyPortalSetting(key,next);
+    res.json({key,value:portalSettings[key]});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao salvar configuração.'});}
+});
 
 app.get("/api/admin/permissions/definitions", requireAdmin, async (req,res)=>{
   res.json({permissions: ADMIN_PERMISSION_DEFS});
@@ -1840,14 +1940,14 @@ app.get("/api/journal/editions/:id", async (req,res)=>{
   }
 });
 
-const EVENT_TYPES=["JOGO","ESPECIAL","TEMPORADA","LEGIAO"];
+let EVENT_TYPES=["JOGO","ESPECIAL","TEMPORADA","LEGIAO"];
 const EVENT_STATUSES=["PLANEJADO","ATIVO","ENCERRADO","CANCELADO"];
 const EVENT_REWARD_TYPES=["YULS","EXP","CARD"];
 const EVENT_RESULT_SLOTS=["WINNER_1","WINNER_2","WINNER_3","HONOR_1","HONOR_2","HONOR_3"];
 const SCHEDULE_STATUSES=["AGENDADA","EM_ANDAMENTO","CONCLUIDA","CANCELADA"];
 
 
-const MISSION_TYPES=["Luta","Trívia","História","Treinamento","Recrutamento","Outro"];
+let MISSION_TYPES=["Luta","Trívia","História","Treinamento","Recrutamento","Outro"];
 const MISSION_STATUSES=["AGENDADA","EM_ANDAMENTO","CONCLUIDA","CANCELADA"];
 
 function missionStatusFromDates(startAt,endAt,status){
@@ -2805,7 +2905,7 @@ app.delete("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
 
 
 const CARD_CATEGORIES=["Falha","Fuga","Ataque/Defesa","Barreira","Paralisia","Magia Ofensiva","Réplica","Técnica","Ativação","Invocação","Ilusão","Regeneração","Outros"];
-const CARD_ORIGINS=["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"];
+let CARD_ORIGINS=["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"];
 const CARD_ELEMENT_TYPES=["ELEMENTAL","NAO_ELEMENTAL"];
 const CARD_COST_TYPES=["MANA","VIDA","SEM_CUSTO"];
 const CARD_STATUSES=["ATIVO","INATIVO"];
