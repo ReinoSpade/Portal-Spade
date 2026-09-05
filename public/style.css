@@ -1133,3 +1133,54 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .dashboard-live-item h4{margin:5px 0 3px;}
 .dashboard-live-item p{margin:0;}
 @media(max-width:700px){.dashboard-live-item{align-items:flex-start;flex-direction:column;}.dashboard-live-item button{width:100%;}}
+
+
+/* =========================================================
+   V52.1 — ATMOSFERA MÁGICA / BLACK CLOVER RPG
+   Movimento sutil, sem atrapalhar leitura ou performance.
+   ========================================================= */
+:root{--gold:#c6a45d;--magic-ink:#0b0c0f;--magic-violet:#6656a8;--mana:#8e83d6}
+body{overflow-x:hidden;background:
+  radial-gradient(circle at 10% 0%,rgba(94,77,160,.06),transparent 26%),
+  radial-gradient(circle at 92% 14%,rgba(198,164,93,.08),transparent 24%),
+  #f2ede3}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-2;background:
+  linear-gradient(110deg,transparent 0 46%,rgba(255,255,255,.05) 50%,transparent 54%),
+  radial-gradient(circle at 50% 120%,rgba(103,91,170,.09),transparent 42%);
+  animation:ambientShift 18s ease-in-out infinite alternate}
+@keyframes ambientShift{from{transform:translate3d(-2%,0,0) scale(1)}to{transform:translate3d(2%,0,0) scale(1.04)}}
+.magic-atmosphere{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;opacity:.8}
+.magic-mote,.mana-mote{position:absolute;width:4px;height:4px;border-radius:50%;background:rgba(212,194,255,.75);box-shadow:0 0 14px rgba(142,131,214,.9),0 0 30px rgba(142,131,214,.3);animation:floatMote 12s linear infinite}
+.mana-mote:nth-child(odd){width:3px;height:3px;opacity:.7}.mana-mote:nth-child(even){opacity:.45}
+.m1{left:6%;top:78%;animation-delay:-2s}.m2{left:14%;top:43%;animation-delay:-8s}.m3{left:22%;top:68%;animation-delay:-5s}.m4{left:29%;top:24%;animation-delay:-11s}.m5{left:37%;top:82%;animation-delay:-4s}.m6{left:44%;top:18%;animation-delay:-9s}.m7{left:51%;top:71%;animation-delay:-6s}.m8{left:58%;top:34%;animation-delay:-3s}.m9{left:64%;top:85%;animation-delay:-10s}.m10{left:71%;top:56%;animation-delay:-7s}.m11{left:77%;top:23%;animation-delay:-1s}.m12{left:84%;top:73%;animation-delay:-12s}.m13{left:89%;top:42%;animation-delay:-6s}.m14{left:94%;top:81%;animation-delay:-9s}.m15{left:18%;top:12%;animation-delay:-1s}.m16{left:80%;top:12%;animation-delay:-4s}
+@keyframes floatMote{0%{transform:translate3d(0,40px,0) scale(.7);opacity:0}12%{opacity:.8}50%{transform:translate3d(24px,-120px,0) scale(1)}100%{transform:translate3d(-18px,-250px,0) scale(.35);opacity:0}}
+#app,.top,.page,.site-footer{position:relative;z-index:1}
+.top{backdrop-filter:blur(10px);background:rgba(13,14,16,.92)}
+.logo{transition:letter-spacing .25s ease,transform .25s ease}.logo:hover{letter-spacing:.14em;transform:translateY(-1px)}
+.hero{position:relative;isolation:isolate;overflow:hidden;background:
+  radial-gradient(circle at 78% 45%,rgba(111,90,166,.32) 0,transparent 24%),
+  radial-gradient(circle at 78% 45%,#35353e 0,#17181b 38%,#090a0c 78%)}
+.hero::before{content:"";position:absolute;width:620px;height:620px;right:-180px;top:-240px;border:1px solid rgba(198,164,93,.18);border-radius:50%;box-shadow:0 0 0 28px rgba(198,164,93,.03),0 0 0 68px rgba(142,131,214,.035);animation:slowOrbit 28s linear infinite}
+.hero::after{content:"";position:absolute;width:420px;height:420px;right:-70px;top:-120px;border:1px dashed rgba(142,131,214,.28);border-radius:50%;animation:slowOrbitReverse 22s linear infinite}
+@keyframes slowOrbit{to{transform:rotate(360deg)}}
+@keyframes slowOrbitReverse{to{transform:rotate(-360deg)}}
+.magic-kicker{color:#d4bc79;text-shadow:0 0 16px rgba(198,164,93,.18)}
+.magic-traits{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}.magic-traits span{border:1px solid rgba(198,164,93,.24);background:rgba(255,255,255,.035);border-radius:999px;padding:7px 10px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:#cfcac0;backdrop-filter:blur(5px)}
+.magic-crest{position:absolute;right:9%;top:50%;width:210px;height:210px;transform:translateY(-50%);display:grid;place-items:center;pointer-events:none;filter:drop-shadow(0 0 26px rgba(142,131,214,.18))}
+.magic-ring{position:absolute;inset:12px;border:1px solid rgba(198,164,93,.34);border-radius:50%}.ring-a{animation:slowOrbit 18s linear infinite}.ring-b{inset:30px;border-style:dashed;border-color:rgba(142,131,214,.38);animation:slowOrbitReverse 14s linear infinite}.magic-rune{width:74px;height:74px;border:1px solid rgba(198,164,93,.5);border-radius:50%;display:grid;place-items:center;font:42px Georgia;color:#d3ba76;background:radial-gradient(circle,rgba(61,55,80,.35),transparent 70%);text-shadow:0 0 24px rgba(198,164,93,.42);animation:runePulse 3s ease-in-out infinite}.magic-star{position:absolute;top:18px;right:28px;color:#e8d49a;font-size:16px;animation:starDrift 4s ease-in-out infinite}
+@keyframes runePulse{0%,100%{transform:scale(1);box-shadow:0 0 0 rgba(142,131,214,0)}50%{transform:scale(1.06);box-shadow:0 0 24px rgba(142,131,214,.18)}}
+@keyframes starDrift{0%,100%{transform:translate(0,0) rotate(0);opacity:.5}50%{transform:translate(-12px,7px) rotate(90deg);opacity:1}}
+.subhero{position:relative;overflow:hidden;background:
+  radial-gradient(circle at 84% 18%,rgba(103,91,170,.22),transparent 22%),
+  linear-gradient(180deg,#111216,#0e0f12)}
+.subhero::after{content:"♣   ✦   ♠   ✧   ♣";position:absolute;right:7%;bottom:14px;color:rgba(198,164,93,.08);font:700 28px Cinzel;letter-spacing:.35em;white-space:nowrap;animation:glyphSlide 22s linear infinite}
+@keyframes glyphSlide{from{transform:translateX(0)}to{transform:translateX(-18%)}}
+.hero h1,.subhero h1{text-shadow:0 8px 34px rgba(0,0,0,.22)}
+.news-card,.panel,.player-card,.house-card,.edition,.mission-card,.event-card,.schedule-card,.announcement-card,.status-post,.library-card,.ranking-panel{transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease}
+.news-card:hover,.panel:hover,.player-card:hover,.house-card:hover,.edition:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(26,24,20,.08)}
+.magic-seal-glow{box-shadow:0 0 0 1px rgba(198,164,93,.14),0 0 40px rgba(142,131,214,.12)}
+.site-footer{position:relative;overflow:hidden}.site-footer::before{content:"";position:absolute;left:-10%;right:-10%;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(198,164,93,.5),rgba(142,131,214,.45),transparent);animation:footerFlow 6s linear infinite}
+@keyframes footerFlow{from{transform:translateX(-30%)}to{transform:translateX(30%)}}
+@media(max-width:900px){.magic-crest{right:5%;top:22%;transform:none;width:150px;height:150px;opacity:.55}.magic-rune{width:56px;height:56px;font-size:32px}.magic-seal-glow{box-shadow:none}}
+@media(max-width:620px){.hero::before,.hero::after{display:none}.magic-crest{position:relative;right:auto;top:auto;margin:26px auto 0;opacity:.46;width:150px;height:150px}.hero{grid-template-columns:1fr}.magic-traits{gap:6px}.magic-traits span{font-size:8px;padding:6px 8px}.subhero::after{display:none}}
+@media(prefers-reduced-motion:reduce){body::before,.magic-atmosphere,.hero::before,.hero::after,.magic-ring,.magic-rune,.magic-star,.subhero::after,.site-footer::before{animation:none!important}.news-card:hover,.panel:hover,.player-card:hover,.house-card:hover,.edition:hover{transform:none}}
