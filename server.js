@@ -27,7 +27,8 @@ const ADMIN_PERMISSION_DEFS = {
   admin_users: "Administradores",
   audit: "Auditoria",
   reports: "Relatórios",
-  settings: "Configurações"
+  settings: "Configurações",
+  library: "Biblioteca"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -53,6 +54,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/hierarchy") || path.startsWith("/patents") || path.startsWith("/roles")) return "hierarchy";
   if (path.startsWith("/articles") || path.startsWith("/editions") || path.startsWith("/news")) return "journal";
   if (path.startsWith("/announcements")) return "announcements";
+  if (path.startsWith("/library")) return "library";
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
@@ -270,6 +272,22 @@ async function initDatabase() {
 
 
     -- Cards are created before Events because event reward tables reference them.
+    CREATE TABLE IF NOT EXISTS library_items (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'GERAL',
+      description TEXT DEFAULT '',
+      content TEXT DEFAULT '',
+      url TEXT DEFAULT '',
+      icon TEXT DEFAULT '📚',
+      published INTEGER NOT NULL DEFAULT 1 CHECK (published IN (0,1)),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_items_public ON library_items(published,sort_order,id DESC);
+
     CREATE TABLE IF NOT EXISTS player_statuses (
       id BIGSERIAL PRIMARY KEY,
       player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
@@ -1264,6 +1282,38 @@ app.get("/api/me/alerts", async (req,res)=>{
   }
 });
 
+
+app.get("/api/library", async (req,res)=>{
+  try{
+    const q=String(req.query.q||'').trim();
+    const category=String(req.query.category||'').trim();
+    const params=[]; const where=['published=1'];
+    if(q){params.push(`%${q}%`); where.push(`(title ILIKE $${params.length} OR category ILIKE $${params.length} OR description ILIKE $${params.length} OR content ILIKE $${params.length})`);}
+    if(category){params.push(category); where.push(`category=$${params.length}`);}
+    const r=await pool.query(`SELECT id,title,category,description,content,url,icon,sort_order,created_at,updated_at FROM library_items WHERE ${where.join(' AND ')} ORDER BY sort_order ASC,title ASC,id DESC`,params);
+    res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0)}))});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca.'});}
+});
+
+app.get("/api/admin/library", requireAdmin, async (req,res)=>{
+  try{const r=await pool.query(`SELECT * FROM library_items ORDER BY sort_order ASC,title ASC,id DESC`);res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0),published:Number(x.published||0)}))});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca administrativa.'});}
+});
+app.post("/api/admin/library", requireAdmin, async (req,res)=>{
+  const b=req.body||{}; if(!String(b.title||'').trim())return res.status(400).json({error:'Título obrigatório.'});
+  try{const r=await pool.query(`INSERT INTO library_items(title,category,description,content,url,icon,published,sort_order,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[String(b.title).trim(),String(b.category||'GERAL').trim(),String(b.description||''),String(b.content||''),String(b.url||''),String(b.icon||'📚'),b.published===false||Number(b.published)===0?0:1,positiveInt(b.sort_order,0),req.admin.id||null]);res.json({item:r.rows[0]});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao cadastrar material.'});}
+});
+app.put("/api/admin/library/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id); if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Material inválido.'}); const b=req.body||{};
+  try{const r=await pool.query(`UPDATE library_items SET title=$1,category=$2,description=$3,content=$4,url=$5,icon=$6,published=$7,sort_order=$8,updated_at=NOW() WHERE id=$9 RETURNING *`,[String(b.title||'').trim(),String(b.category||'GERAL').trim(),String(b.description||''),String(b.content||''),String(b.url||''),String(b.icon||'📚'),b.published===false||Number(b.published)===0?0:1,positiveInt(b.sort_order,0),id]);if(!r.rows[0])return res.status(404).json({error:'Material não encontrado.'});res.json({item:r.rows[0]});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao atualizar material.'});}
+});
+app.delete("/api/admin/library/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id); if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Material inválido.'});
+  try{const r=await pool.query(`UPDATE library_items SET published=0,updated_at=NOW() WHERE id=$1 RETURNING id`,[id]);if(!r.rows[0])return res.status(404).json({error:'Material não encontrado.'});res.json({ok:true});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao arquivar material.'});}
+});
 
 app.get("/api/editorial/overview", async (req,res)=>{
   try{
