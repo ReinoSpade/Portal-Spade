@@ -692,6 +692,24 @@
     </div>
   </div>
 
+
+  <div class="admin-economy-panel panel" id="adminEconomyPanel">
+    <div class="panel-head"><div><p class="eyebrow">TESOURARIA</p><h3>Economia do Reino</h3></div><span>Yuls e Dracmas • aprovação, pagamento e estorno</span></div>
+    <div class="economy-admin-summary" id="adminEconomySummary"></div>
+    <form id="adminEconomyForm" class="admin-form economy-admin-form">
+      <select id="economyPlayer" required><option value="">Jogador</option></select>
+      <select id="economyCurrency"><option value="YULS">🪙 Yuls</option><option value="DRACMAS">⚫ Dracmas</option></select>
+      <input id="economyAmount" type="number" step="1" placeholder="Valor (+ ou -)" required>
+      <input id="economyDate" type="date">
+      <input id="economySource" placeholder="Origem (ex.: Missão, Evento, Loja)">
+      <textarea id="economyReason" class="full" placeholder="Motivo da transação" required></textarea>
+      <div class="editor-actions full"><button class="gold" type="submit">＋ Criar transação</button></div>
+      <div class="error full" id="adminEconomyError"></div>
+    </form>
+    <div class="ranking-admin-filters"><select id="adminEconomyStatus" class="admin-filter"><option value="">Todas</option><option value="AGUARDANDO_APROVACAO">Aguardando aprovação</option><option value="APROVADA_AGUARDANDO_PAGAMENTO">Aguardando pagamento</option><option value="PAGA">Pagas</option><option value="ESTORNADA">Estornadas</option><option value="REJEITADA">Rejeitadas</option></select><button class="outline dark-outline small" type="button" id="adminEconomyRefresh">↻ Atualizar</button></div>
+    <div id="adminEconomyList" class="editorial-list"></div>
+  </div>
+
   <div class="admin-ranking-panel panel" id="adminRankingPanel">
     <div class="panel-head"><div><p class="eyebrow">COMPETIÇÃO OFICIAL</p><h3>Aprovação de Batalhas — Ranking</h3></div><span>SC e VT separados • a pontuação final é definida pela Administração</span></div>
     <div class="ranking-admin-filters"><select id="adminRankingBattleStatus" class="admin-filter"><option value="AGUARDANDO_ADMIN">Aguardando aprovação</option><option value="AGUARDANDO_OPONENTE">Aguardando oponente</option><option value="APROVADA">Aprovadas</option><option value="REJEITADA">Rejeitadas</option><option value="">Todas</option></select><button class="outline dark-outline small" type="button" id="adminRankingRefresh">↻ Atualizar</button></div>
@@ -724,6 +742,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=33.0"></script>
+<script src="/app.js?v=42.0"></script>
 </body>
 </html>
