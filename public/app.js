@@ -1034,8 +1034,20 @@ qs("#loginForm").addEventListener("submit",async e=>{
   }catch(ex){err.textContent=ex.message}
 });
 
+async function logoutPlayer(){
+  const b=qs("#playerLogoutBtn");
+  if(b) b.disabled=true;
+  try{await api("/api/logout",{method:"POST"});}
+  catch(e){ if(b) b.disabled=false; alert(e.message||"Não foi possível sair do painel."); return; }
+  state.me=null; state.dashboardData=null; state.page="home";
+  setLoginNav();
+  go("home");
+}
+
 qs("#playerStatusMessage")?.addEventListener("input",updateStatusCounter);
 qs("#playerStatusPublishBtn")?.addEventListener("click",publishPlayerStatus);
+qs("#playerLogoutBtn")?.addEventListener("click",logoutPlayer);
+
 qs("#statusRefreshBtn")?.addEventListener("click",loadStatusBoard);
 qs("#playerCardSearch")?.addEventListener("input",e=>{state.cardSearch=e.target.value;renderPlayerCards(state.playerCards)});
 qs("#playerCardCategoryFilter")?.addEventListener("change",e=>{state.cardFilter=e.target.value;renderPlayerCards(state.playerCards)});
