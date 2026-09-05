@@ -567,18 +567,20 @@ async function loadHierarchy(){
 }
 
 function renderPublicHierarchy(d){
-  const p=qs("#publicPatents"),r=qs("#publicRoles");
-  if(p)p.innerHTML=(d.patents||[]).map(x=>`<div class="hierarchy-item"><h4>${escapeHtml(x.name)}</h4><p>${escapeHtml(x.description||"")}</p></div>`).join("")||`<div class="hierarchy-item"><p>Nenhuma patente cadastrada.</p></div>`;
+  const p=qs("#publicPatents"), r=qs("#publicHierarchyRoles"), ro=qs("#publicRolesOccupants");
+  const patentHtml=(d.patents||[]).map(x=>`<article class="hierarchy-item public-patent-card" data-public-patent="${x.id}" style="cursor:pointer"><div class="role-meta"><span class="role-pill">🎖️ PATENTE</span><span class="role-pill">${Number(x.occupant_count||0)} ocupante(s)</span></div><h4>${escapeHtml(x.name)}</h4><p>${escapeHtml(x.description||"")}</p></article>`).join("")||`<div class="hierarchy-item"><p>Nenhuma patente cadastrada.</p></div>`;
+  if(p)p.innerHTML=patentHtml;
 
   const ranks=d.ranks||[],roles=d.roles||[],rankNames={"I":"ADMINISTRAÇÃO","II":"GESTÃO","III":"COORDENAÇÃO","IV":"ESPECIALIZAÇÃO","V":"OPERACIONAL"};
   if(qs("#rankSummary"))qs("#rankSummary").innerHTML=ranks.map(x=>`<button type="button" class="rank-summary-card" data-rank-scroll="${x.code}"><b>RANK ${escapeHtml(x.code)}</b><span>${escapeHtml(rankNames[x.code]||x.name)} • ${roles.filter(r=>r.rank_code===x.code).length} cargo(s)</span></button>`).join("");
   if(qs("#publicRanks"))qs("#publicRanks").innerHTML=ranks.map(x=>`<section class="public-rank-card" id="rank-${escapeHtml(x.code)}"><div class="public-rank-code">${escapeHtml(x.code)}</div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.description||"")}</p><div class="public-rank-req"><b>Requisitos do Rank:</b><br>${escapeHtml(x.requirements||"")}</div></section>`).join("");
   qsa("[data-rank-scroll]").forEach(b=>b.onclick=()=>qs("#rank-"+b.dataset.rankScroll)?.scrollIntoView({behavior:"smooth",block:"start"}));
 
-  if(r){
-    r.innerHTML=roles.length?roles.map(x=>`<article class="public-role-card" data-public-role="${x.id}"><div class="role-meta"><span class="role-pill">RANK ${escapeHtml(x.rank_code||"—")}</span>${x.vacancies?`<span class="role-pill">${escapeHtml(x.vacancies)}</span>`:""}${x.scope?`<span class="role-pill">${escapeHtml(x.scope)}</span>`:""}</div><h4>${escapeHtml(x.name)}</h4><small>${escapeHtml(x.description||"")}</small></article>`).join(""):`<div class="hierarchy-item"><p>Nenhum cargo cadastrado.</p></div>`;
-    qsa("[data-public-role]").forEach(b=>b.onclick=()=>openPublicRole(Number(b.dataset.publicRole)));
-  }
+  const rolesHtml=roles.length?roles.map(x=>`<article class="public-role-card" data-public-role="${x.id}"><div class="role-meta"><span class="role-pill">RANK ${escapeHtml(x.rank_code||"—")}</span>${x.vacancies?`<span class="role-pill">${escapeHtml(x.vacancies)}</span>`:""}<span class="role-pill">${Number(x.occupant_count||0)} ocupante(s)</span>${x.scope?`<span class="role-pill">${escapeHtml(x.scope)}</span>`:""}</div><h4>${escapeHtml(x.name)}</h4><small>${escapeHtml(x.description||"Clique para ver detalhes e ocupantes.")}</small></article>`).join(""):`<div class="hierarchy-item"><p>Nenhum cargo cadastrado.</p></div>`;
+  if(r)r.innerHTML=rolesHtml;
+  if(ro)ro.innerHTML=rolesHtml;
+  qsa("[data-public-role]").forEach(b=>b.onclick=()=>openPublicRole(Number(b.dataset.publicRole)));
+  qsa("[data-public-patent]").forEach(b=>b.onclick=()=>openPublicPatent(Number(b.dataset.publicPatent)));
 }
 
 async function openPublicRole(id){
@@ -594,9 +596,21 @@ async function openPublicRole(id){
       <div class="role-detail-block"><h4>Requisitos / condições</h4><p>${escapeHtml(r.requirements||"Não informados.")}</p></div>
       <div class="role-detail-block"><h4>Requisitos do Rank</h4><p>${escapeHtml(r.rank_requirements||"Não informados.")}</p></div>
       <div class="role-detail-block"><h4>Benefícios / bônus</h4><p>${escapeHtml(r.benefits||"Não informado.")}</p></div>
+      <div class="role-detail-block role-occupants-block"><h4>Quem ocupa este cargo</h4>${(r.occupants||[]).length?`<div class="role-occupants-list">${r.occupants.map(p=>`<div class="role-occupant"><b>${escapeHtml(p.nick)}</b><small>${escapeHtml(p.house||"Sem Casa")} • ${escapeHtml(p.patent||"Sem patente")}</small></div>`).join("")}</div>`:`<p>Nenhum ocupante público cadastrado.</p>`}</div>
     </div></div>`;
     qs("#closeRoleDetail").onclick=()=>wrap.style.display="none";wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
   }catch(e){wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closeRoleDetail">×</button><h2>Erro</h2><p>${escapeHtml(e.message)}</p></div></div>`;qs("#closeRoleDetail").onclick=()=>wrap.style.display="none"}
+}
+
+async function openPublicPatent(id){
+  let wrap=qs("#patentDetailReader");
+  if(!wrap){wrap=document.createElement("div");wrap.id="patentDetailReader";wrap.className="role-detail-modal";document.body.appendChild(wrap)}
+  wrap.style.display="block";wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closePatentDetail">×</button><h2>Carregando...</h2></div></div>`;
+  try{
+    const d=await api(`/api/patents/${id}`),p=d.patent;
+    wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closePatentDetail">×</button><div class="role-meta"><span class="role-pill">🎖️ PATENTE</span><span class="role-pill">${(p.occupants||[]).length} ocupante(s)</span></div><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.description||"")}</p></div><div class="role-detail-body"><div class="role-detail-block"><h4>Descrição</h4><p>${escapeHtml(p.description||"Não informada.")}</p></div><div class="role-detail-block role-occupants-block"><h4>Quem ocupa esta patente</h4>${(p.occupants||[]).length?`<div class="role-occupants-list">${p.occupants.map(x=>`<div class="role-occupant"><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")} • ${escapeHtml(x.grimoire||"Grimório não informado")}</small></div>`).join("")}`:`<p>Nenhum ocupante público cadastrado.</p>`}</div></div></div>`;
+    qs("#closePatentDetail").onclick=()=>wrap.style.display="none";wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
+  }catch(e){wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closePatentDetail">×</button><h2>Erro</h2><p>${escapeHtml(e.message)}</p></div></div>`;qs("#closePatentDetail").onclick=()=>wrap.style.display="none"}
 }
 
 async function loadAdminHierarchy(){
@@ -1162,13 +1176,13 @@ async function deleteHouse(id){
 
 function openPlayerImport(){
   const modal=qs("#playerImportModal");if(!modal)return;
-  modal.style.display="block";
+  modal.hidden=false;modal.style.display="block";
   state.playerImport={file:null,preview:null};
   qs("#playerImportFile").value="";qs("#playerImportFileName").textContent="Nenhum arquivo selecionado";
   qs("#playerImportPreview").innerHTML="<p>Escolha um arquivo para começar.</p>";
   qs("#playerImportConfirm").disabled=true;qs("#playerImportStatus").textContent="";
 }
-function closePlayerImport(){const m=qs("#playerImportModal");if(m)m.style.display="none"}
+function closePlayerImport(){const m=qs("#playerImportModal");if(m){m.style.display="none";m.hidden=true}}
 function renderImportPreview(data){
   const box=qs("#playerImportPreview");if(!box)return;
   const rows=data.rows||[];
@@ -1434,6 +1448,7 @@ qs("#adminAllyClear")?.addEventListener("click",clearAdminAllyForm);
 qs("#adminAllyForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminAllyId").value;const body={username:qs("#adminAllyUsername").value,display_name:qs("#adminAllyDisplayName").value,password:qs("#adminAllyPassword").value,origin_kingdom:qs("#adminAllyKingdom").value,origin_house:qs("#adminAllyHouse").value,patent:qs("#adminAllyPatent").value,role:qs("#adminAllyRole").value,description:qs("#adminAllyDescription").value,active:qs("#adminAllyActive").checked};const err=qs("#adminAllyError");err.textContent="Salvando...";try{await adminApi(id?`/api/admin/allies/${id}`:"/api/admin/allies",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminAllyForm();await loadAdminAllies();err.textContent="Aliado salvo.";}catch(ex){err.textContent=ex.message;}});
 
 async function initAdmin(){
+  closePlayerImport();
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
   setAdminPermissionVisibility();
