@@ -498,6 +498,7 @@ async function initDatabase() {
       cost TEXT DEFAULT '',
       power_value INTEGER NOT NULL DEFAULT 0 CHECK (power_value >= 0),
       damage_value INTEGER NOT NULL DEFAULT 0 CHECK (damage_value >= 0),
+      damage_type TEXT NOT NULL DEFAULT 'SEM_DANO' CHECK (damage_type IN ('DANO_BRUTO','DANO_CONTINUO','DANO_DIRETO','SEM_DANO')),
       origin TEXT NOT NULL DEFAULT 'Exclusivo',
       status TEXT NOT NULL DEFAULT 'ATIVO',
       description TEXT DEFAULT '',
@@ -916,6 +917,7 @@ async function initDatabase() {
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS cost_type TEXT DEFAULT 'SEM_CUSTO';
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS power_value INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS damage_value INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS damage_type TEXT NOT NULL DEFAULT 'SEM_DANO';
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS origin TEXT DEFAULT 'Exclusivo';
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ATIVO';
     ALTER TABLE player_cards ADD COLUMN IF NOT EXISTS acquisition_type TEXT DEFAULT 'OUTRO';
@@ -941,6 +943,11 @@ async function initDatabase() {
     UPDATE cards SET damage_value=50 WHERE damage_value=0 AND name='Barreira com Dano 50 em TC';
     UPDATE cards SET damage_value=70 WHERE damage_value=0 AND name='Paralisia Dano 70/70';
     UPDATE cards SET damage_value=50 WHERE damage_value=0 AND name='Réplica Kruger';
+    UPDATE cards SET damage_type=CASE
+      WHEN damage_value<=0 THEN 'SEM_DANO'
+      WHEN LOWER(name) LIKE '%contínu%' OR LOWER(name) LIKE '%continuo%' THEN 'DANO_CONTINUO'
+      ELSE 'DANO_BRUTO'
+    END;
 
     UPDATE player_cards
     SET quantity=1
@@ -1802,7 +1809,7 @@ app.get("/api/me/ally-cards", async (req,res)=>{
   if(!viewer)return res.status(401).json({error:"Não autenticado."});
   if(viewer.type!=="ALLY")return res.status(403).json({error:"Rota exclusiva de aliados."});
   try{
-    const r=await pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.origin,c.status,c.description,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
+    const r=await pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
       FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1 ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,[viewer.id]);
     res.json({cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Administrativo",status:c.status||"ATIVO",description:c.description||"",acquisition_type:c.acquisition_type||"ADMINISTRATIVO",acquisition_name:c.acquisition_name||"",acquired_at:c.acquired_at}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus Cards de aliado."});}
@@ -1815,7 +1822,7 @@ app.get("/api/me/cards", async (req,res)=>{
   const id=viewer.id;
   try{
     const r=await pool.query(
-      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.origin,c.status,c.description,c.sort_order,
+      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,
               pc.acquisition_type,pc.acquisition_name,pc.acquisition_id,pc.acquired_at,pc.updated_at
        FROM player_cards pc
        JOIN cards c ON c.id=pc.card_id
@@ -1825,7 +1832,7 @@ app.get("/api/me/cards", async (req,res)=>{
     );
     res.json({
       cards:r.rows.map(c=>({
-        id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
+        id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
         description:c.description||"",
         acquisition_type:c.acquisition_type||"OUTRO",
         acquisition_name:c.acquisition_name||"",
@@ -2307,7 +2314,7 @@ app.get("/api/search", async (req,res)=>{
       pool.query(`SELECT id,title,category,description FROM library_items WHERE published=1 AND (title ILIKE $1 OR category ILIKE $1 OR description ILIKE $1 OR content ILIKE $1) ORDER BY sort_order ASC,title ASC LIMIT 8`,[like])
     ];
     if(cardsAllowed){
-      queries.push(pool.query(`SELECT id,name_jp,name_pt,category,origin,power_value FROM cards WHERE active=1 AND (name_jp ILIKE $1 OR name_pt ILIKE $1 OR category ILIKE $1 OR origin ILIKE $1) ORDER BY name_pt ASC LIMIT 8`,[like]));
+      queries.push(pool.query(`SELECT id,name_jp,name_pt,category,origin,power_value,damage_value,damage_type FROM cards WHERE active=1 AND (name_jp ILIKE $1 OR name_pt ILIKE $1 OR category ILIKE $1 OR origin ILIKE $1) ORDER BY name_pt ASC LIMIT 8`,[like]));
     }
     const out=await Promise.all(queries);
     const [players,houses,events,missions,schedule,articles,library,cards]=out;
@@ -2998,6 +3005,7 @@ app.delete("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
 let CARD_ORIGINS=["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"];
 const CARD_ELEMENT_TYPES=["ELEMENTAL","NAO_ELEMENTAL"];
 const CARD_COST_TYPES=["MANA","VIDA","SEM_CUSTO"];
+const CARD_DAMAGE_TYPES=["DANO_BRUTO","DANO_CONTINUO","DANO_DIRETO","SEM_DANO"];
 const CARD_STATUSES=["ATIVO","INATIVO"];
 
 app.post("/api/admin/card-categories", requireAdmin, async (req,res)=>{
@@ -3010,14 +3018,14 @@ app.post("/api/admin/card-categories", requireAdmin, async (req,res)=>{
 app.get("/api/admin/cards", requireAdmin, async (req,res)=>{
   try{
     const [r,cats]=await Promise.all([
-      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.origin,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players
                   FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id
                   GROUP BY c.id ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`),
       pool.query(`SELECT name FROM card_categories WHERE active=1 ORDER BY sort_order,name COLLATE "C"`)
     ]);
     res.json({
-      categories:cats.rows.map(x=>x.name),origins:CARD_ORIGINS,element_types:CARD_ELEMENT_TYPES,cost_types:CARD_COST_TYPES,statuses:CARD_STATUSES,
-      cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_jp:c.name_jp||"",name_pt:c.name_pt||c.name,category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),origin:c.origin||"Exclusivo",status:c.status||"ATIVO",description:c.description||"",sort_order:Number(c.sort_order||0),active:Number(c.active),players:Number(c.players||0)}))
+      categories:cats.rows.map(x=>x.name),origins:CARD_ORIGINS,element_types:CARD_ELEMENT_TYPES,cost_types:CARD_COST_TYPES,damage_types:CARD_DAMAGE_TYPES,statuses:CARD_STATUSES,
+      cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_jp:c.name_jp||"",name_pt:c.name_pt||c.name,category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",description:c.description||"",sort_order:Number(c.sort_order||0),active:Number(c.active),players:Number(c.players||0)}))
     });
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar banco de cards."});}
 });
@@ -3032,18 +3040,21 @@ app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
   const cost=String(b.cost||"").trim();
   const power=Math.max(0,Math.round(Number(b.power_value||0)));
   const damage=Math.max(0,Math.round(Number(b.damage_value||0)));
+  const damageType=String(b.damage_type||'SEM_DANO').toUpperCase();
   const origin=String(b.origin||"Exclusivo").trim();
   const status=String(b.status||"ATIVO").toUpperCase();
   const description=String(b.description||"").trim();
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
   if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
-  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_DAMAGE_TYPES.includes(damageType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
   if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
+  if(damageType==="SEM_DANO" && damage>0)return res.status(400).json({error:"Cards sem dano devem possuir Dano 0."});
+  if(damageType!=="SEM_DANO" && damage<=0)return res.status(400).json({error:"Informe um valor de dano para este tipo de dano."});
   try{
     const categoryCheck=await pool.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
     if(!categoryCheck.rowCount)return res.status(400).json({error:"Categoria de card inválida ou inativa."});
-    const r=await pool.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,origin,status,description,sort_order,active)
-      VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,origin,status,description,sort_order,status==="ATIVO"?1:0]);
+    const r=await pool.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,damage_value,damage_type,origin,status,description,sort_order,active)
+      VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,damageType,origin,status,description,sort_order,status==="ATIVO"?1:0]);
     res.json({card:r.rows[0]});
   }catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});res.status(500).json({error:"Erro ao criar card."});}
 });
@@ -3052,16 +3063,18 @@ app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id),b=req.body||{};
   const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
   const category=String(b.category||"Outros").trim(),elementType=String(b.element_type||"NAO_ELEMENTAL").toUpperCase(),element=String(b.element||"").trim(),costType=String(b.cost_type||"SEM_CUSTO").toUpperCase(),cost=String(b.cost||"").trim();
-  const power=Math.max(0,Math.round(Number(b.power_value||0))),damage=Math.max(0,Math.round(Number(b.damage_value||0))),origin=String(b.origin||"Exclusivo").trim(),status=String(b.status||"ATIVO").toUpperCase(),description=String(b.description||"").trim();
+  const power=Math.max(0,Math.round(Number(b.power_value||0))),damage=Math.max(0,Math.round(Number(b.damage_value||0))),damageType=String(b.damage_type||'SEM_DANO').toUpperCase(),origin=String(b.origin||"Exclusivo").trim(),status=String(b.status||"ATIVO").toUpperCase(),description=String(b.description||"").trim();
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
   if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
-  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_DAMAGE_TYPES.includes(damageType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
   if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
+  if(damageType==="SEM_DANO" && damage>0)return res.status(400).json({error:"Cards sem dano devem possuir Dano 0."});
+  if(damageType!=="SEM_DANO" && damage<=0)return res.status(400).json({error:"Informe um valor de dano para este tipo de dano."});
   try{
     const categoryCheck=await pool.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
     if(!categoryCheck.rowCount)return res.status(400).json({error:"Categoria de card inválida ou inativa."});
-    const r=await pool.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,origin=$9,status=$10,description=$12,sort_order=$13,active=$14,damage_value=$9,updated_at=NOW() WHERE id=$15 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
+    const r=await pool.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,damageType,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
     if(!r.rows[0])return res.status(404).json({error:"Card não encontrado."});
     res.json({card:r.rows[0]});
   }catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});res.status(500).json({error:"Erro ao atualizar card."});}
