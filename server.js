@@ -203,6 +203,7 @@ async function initDatabase() {
       hp INTEGER DEFAULT 200 CHECK (hp >= 0),
       mana INTEGER DEFAULT 400 CHECK (mana >= 0),
       yuls BIGINT DEFAULT 0 CHECK (yuls >= 0),
+      dracmas BIGINT DEFAULT 0 CHECK (dracmas >= 0),
       missions INTEGER DEFAULT 0 CHECK (missions >= 0),
       achievements INTEGER DEFAULT 0 CHECK (achievements >= 0),
       ranking INTEGER DEFAULT 0 CHECK (ranking >= 0),
@@ -472,6 +473,31 @@ async function initDatabase() {
       balance_after BIGINT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS economy_transactions (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+      currency TEXT NOT NULL CHECK (currency IN ('YULS','DRACMAS')),
+      amount BIGINT NOT NULL CHECK (amount <> 0),
+      reason TEXT NOT NULL DEFAULT '',
+      source_type TEXT DEFAULT 'ADMINISTRATIVO',
+      source_id BIGINT,
+      status TEXT NOT NULL DEFAULT 'AGUARDANDO_APROVACAO' CHECK (status IN ('AGUARDANDO_APROVACAO','APROVADA_AGUARDANDO_PAGAMENTO','PAGA','ESTORNADA','REJEITADA')),
+      activity_date DATE DEFAULT CURRENT_DATE,
+      approval_date TIMESTAMPTZ,
+      payment_date TIMESTAMPTZ,
+      reversed_at TIMESTAMPTZ,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      approved_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      paid_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      reversed_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_economy_transactions_player ON economy_transactions(player_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_economy_transactions_status ON economy_transactions(status, created_at DESC);
+
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS dracmas BIGINT DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS missions (
       id BIGSERIAL PRIMARY KEY,
@@ -1316,12 +1342,80 @@ app.post("/api/status/:id/comments", async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Não foi possível publicar o comentário."});}
 });
 
+
+async function applyEconomyTransaction(client, tx, adminId) {
+  const player = (await client.query(`SELECT id,yuls,dracmas FROM players WHERE id=$1 FOR UPDATE`, [tx.player_id])).rows[0];
+  if (!player) throw Object.assign(new Error("Jogador não encontrado."), {statusCode:404});
+  const field = tx.currency === 'DRACMAS' ? 'dracmas' : 'yuls';
+  const current = Number(player[field] || 0);
+  const next = current + Number(tx.amount);
+  if (next < 0) throw Object.assign(new Error(`O saldo de ${tx.currency === 'DRACMAS' ? 'Dracmas' : 'Yuls'} não pode ficar negativo.`), {statusCode:400});
+  await client.query(`UPDATE players SET ${field}=$1,updated_at=NOW() WHERE id=$2`, [next, tx.player_id]);
+  if (tx.currency === 'YULS') {
+    await client.query(`INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES($1,$2,$3,$4)`, [tx.player_id, tx.amount, tx.reason || 'Movimentação de Yuls', next]);
+  }
+  return next;
+}
+
+app.get("/api/admin/economy", requireAdmin, async (req,res)=>{
+  try {
+    const status=String(req.query.status||'').toUpperCase();
+    const params=[]; let where='';
+    if(['AGUARDANDO_APROVACAO','APROVADA_AGUARDANDO_PAGAMENTO','PAGA','ESTORNADA','REJEITADA'].includes(status)){params.push(status);where='WHERE et.status=$1';}
+    const r=await pool.query(`SELECT et.*,p.nick,p.number,p.house,a.display_name AS created_by_name,ap.display_name AS approved_by_name,pp.display_name AS paid_by_name
+      FROM economy_transactions et JOIN players p ON p.id=et.player_id
+      LEFT JOIN admin_users a ON a.id=et.created_by_admin_id LEFT JOIN admin_users ap ON ap.id=et.approved_by_admin_id LEFT JOIN admin_users pp ON pp.id=et.paid_by_admin_id
+      ${where} ORDER BY et.created_at DESC LIMIT 300`,params);
+    const totals=await pool.query(`SELECT currency,COALESCE(SUM(amount) FILTER(WHERE status='PAGA'),0)::bigint AS paid,COUNT(*) FILTER(WHERE status IN ('AGUARDANDO_APROVACAO','APROVADA_AGUARDANDO_PAGAMENTO'))::int AS pending FROM economy_transactions GROUP BY currency`);
+    res.json({transactions:r.rows.map(x=>({...x,id:Number(x.id),player_id:Number(x.player_id),amount:Number(x.amount),source_id:x.source_id?Number(x.source_id):null})),totals:totals.rows});
+  } catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a economia.'});}
+});
+
+app.post("/api/admin/economy/transactions", requireAdmin, async (req,res)=>{
+  const b=req.body||{}, playerId=Number(b.player_id), amount=Math.round(Number(b.amount||0));
+  const currency=String(b.currency||'YULS').toUpperCase(); const reason=String(b.reason||'').trim();
+  if(!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:'Jogador inválido.'});
+  if(!['YULS','DRACMAS'].includes(currency))return res.status(400).json({error:'Moeda inválida.'});
+  if(!Number.isInteger(amount)||amount===0)return res.status(400).json({error:'O valor não pode ser zero.'});
+  if(!reason)return res.status(400).json({error:'Informe o motivo da transação.'});
+  try{
+    const r=await pool.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,source_id,status,activity_date,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,'AGUARDANDO_APROVACAO',$7,$8) RETURNING *`,[playerId,currency,amount,reason,String(b.source_type||'ADMINISTRATIVO'),b.source_id?Number(b.source_id):null,b.activity_date||new Date().toISOString().slice(0,10),req.admin.id]);
+    res.json({ok:true,transaction:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao criar transação.'});}
+});
+
+app.post("/api/admin/economy/transactions/:id/approve", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id); if(!Number.isInteger(id))return res.status(400).json({error:'Transação inválida.'});
+  try{const r=await pool.query(`UPDATE economy_transactions SET status='APROVADA_AGUARDANDO_PAGAMENTO',approval_date=NOW(),approved_by_admin_id=$1,updated_at=NOW() WHERE id=$2 AND status='AGUARDANDO_APROVACAO' RETURNING *`,[req.admin.id,id]);if(!r.rows[0])return res.status(404).json({error:'Transação não está aguardando aprovação.'});res.json({ok:true});}catch(e){res.status(500).json({error:'Erro ao aprovar transação.'});}
+});
+
+app.post("/api/admin/economy/transactions/:id/pay", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id); const client=await pool.connect();
+  try{await client.query('BEGIN'); const tx=(await client.query(`SELECT * FROM economy_transactions WHERE id=$1 AND status='APROVADA_AGUARDANDO_PAGAMENTO' FOR UPDATE`,[id])).rows[0]; if(!tx){await client.query('ROLLBACK');return res.status(404).json({error:'Transação não está aguardando pagamento.'});}
+    const balance=await applyEconomyTransaction(client,tx,req.admin.id);
+    await client.query(`UPDATE economy_transactions SET status='PAGA',payment_date=NOW(),paid_by_admin_id=$1,updated_at=NOW() WHERE id=$2`,[req.admin.id,id]);
+    await client.query('COMMIT');res.json({ok:true,balance});
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao efetivar pagamento.'});}finally{client.release();}
+});
+
+app.post("/api/admin/economy/transactions/:id/reject", requireAdmin, async(req,res)=>{const id=Number(req.params.id);try{const r=await pool.query(`UPDATE economy_transactions SET status='REJEITADA',updated_at=NOW() WHERE id=$1 AND status IN ('AGUARDANDO_APROVACAO','APROVADA_AGUARDANDO_PAGAMENTO') RETURNING id`,[id]);if(!r.rows[0])return res.status(404).json({error:'Transação não pode ser rejeitada neste estado.'});res.json({ok:true});}catch(e){res.status(500).json({error:'Erro ao rejeitar transação.'});}});
+
+app.post("/api/admin/economy/transactions/:id/reverse", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id), client=await pool.connect();
+  try{await client.query('BEGIN');const tx=(await client.query(`SELECT * FROM economy_transactions WHERE id=$1 AND status='PAGA' FOR UPDATE`,[id])).rows[0];if(!tx){await client.query('ROLLBACK');return res.status(404).json({error:'Somente transações pagas podem ser estornadas.'});}
+    const reverse={...tx,amount:-Number(tx.amount),reason:`Estorno: ${tx.reason||'Transação'}`}; await applyEconomyTransaction(client,reverse,req.admin.id);
+    await client.query(`UPDATE economy_transactions SET status='ESTORNADA',reversed_at=NOW(),reversed_by_admin_id=$1,updated_at=NOW() WHERE id=$2`,[req.admin.id,id]);
+    await client.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,source_id,status,activity_date,approval_date,payment_date,created_by_admin_id,approved_by_admin_id,paid_by_admin_id) VALUES($1,$2,$3,$4,'ESTORNO',$5,'PAGA',$6,NOW(),NOW(),$7,$7,$7)`,[tx.player_id,tx.currency,-Number(tx.amount),`Estorno: ${tx.reason||'Transação'}`,id,tx.activity_date,req.admin.id]);
+    await client.query('COMMIT');res.json({ok:true});
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao estornar.'});}finally{client.release();}
+});
+
 app.get("/api/me/yuls-history", async (req, res) => {
   const id = readPlayerToken(req);
   if (!id) return res.status(401).json({ error: "Não autenticado." });
   try {
     const [playerResult, historyResult] = await Promise.all([
-      pool.query("SELECT yuls FROM players WHERE id=$1", [id]),
+      pool.query("SELECT yuls,dracmas FROM players WHERE id=$1", [id]),
       pool.query(
         `SELECT id,amount,reason,balance_after,created_at
          FROM yuls_history WHERE player_id=$1 ORDER BY id DESC LIMIT 50`,
@@ -1332,6 +1426,7 @@ app.get("/api/me/yuls-history", async (req, res) => {
     if (!player) return res.status(401).json({ error: "Sessão inválida." });
     res.json({
       balance: Number(player.yuls || 0),
+      dracmas: Number(player.dracmas || 0),
       history: historyResult.rows.map(h => ({
         id: Number(h.id),
         amount: Number(h.amount),
@@ -3625,6 +3720,7 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
           `INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES ($1,$2,$3,$4)`,
           [player.id,delta,reason,newBalance]
         );
+        await client.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,status,activity_date,approval_date,payment_date,created_by_admin_id,approved_by_admin_id,paid_by_admin_id) VALUES($1,'YULS',$2,$3,'LEGADO_EM_MASSA','PAGA',CURRENT_DATE,NOW(),NOW(),$4,$4,$4)`,[player.id,delta,reason,req.admin.id]);
       }
     }
 
@@ -4384,6 +4480,7 @@ app.post("/api/admin/players/:id/yuls", requireAdmin, async (req, res) => {
        VALUES ($1,$2,$3,$4)`,
       [id, amount, reason, newBalance]
     );
+    await client.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,status,activity_date,approval_date,payment_date,created_by_admin_id,approved_by_admin_id,paid_by_admin_id) VALUES($1,'YULS',$2,$3,'LEGADO','PAGA',CURRENT_DATE,NOW(),NOW(),$4,$4,$4)`,[id,amount,reason,req.admin.id]);
     await client.query("COMMIT");
 
     const updated = await pool.query("SELECT * FROM players WHERE id=$1", [id]);
