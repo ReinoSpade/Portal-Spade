@@ -955,3 +955,20 @@ button,a,input,select,textarea{transition:box-shadow .18s ease,border-color .18s
 .settings-links>div{padding:11px;border:1px solid rgba(120,95,45,.15);border-radius:12px;background:rgba(255,255,255,.45)}
 .settings-links b{font-size:11px}.settings-links p{font-size:9px;line-height:1.45;color:#777;margin:6px 0 0}
 @media(max-width:800px){.settings-grid,.settings-lists-grid,.settings-links{grid-template-columns:1fr}.settings-add-row{align-items:stretch;flex-direction:column}.settings-add-row input,.settings-add-row button{width:100%}}
+
+
+/* V50 — Aliados Ocultos */
+.ally-mode-badge{display:inline-flex;align-items:center;gap:7px;margin-top:12px;padding:7px 11px;border:1px solid rgba(198,164,93,.35);border-radius:999px;background:rgba(198,164,93,.08);color:#c8aa68;font-size:11px;font-weight:700;}
+.ally-mode-badge[hidden]{display:none;}
+.ally-profile-card{border-color:rgba(198,164,93,.28);}
+.ally-access-copy{padding:12px 0;font-size:14px;line-height:1.6;color:#b9b4aa;}
+.ally-access-copy b{display:block;color:#e8e2d7;font-size:18px;margin-bottom:5px;}
+.ally-card-manager{margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08);}
+.ally-card-manager[hidden]{display:none;}
+.ally-card-grant-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto;gap:8px;margin-bottom:14px;}
+.ally-card-grant-row select,.ally-card-grant-row input{min-width:0;}
+.status-readonly{font-size:10px;color:#a9905a;font-weight:700;}
+.admin-allies-panel .admin-user-row small{max-width:720px;}
+@media (max-width:760px){.ally-card-grant-row{grid-template-columns:1fr;}.ally-mode-badge{font-size:10px;}.ally-access-copy{font-size:13px;}}
+
+.status-readonly-note{padding:9px 0;font-size:10px;color:#a9905a;}
