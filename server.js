@@ -1615,7 +1615,8 @@ app.post("/api/admin/notifications", requireAdmin, async (req,res)=>{
     else if(b.player_id){ ids=[Number(b.player_id)]; }
     ids=[...new Set(ids)].filter(x=>x>0);
     if(!ids.length)return res.status(400).json({error:"Selecione ao menos um jogador ou marque todos os ativos."});
-    const client=await pool.connect(); try{await client.query('BEGIN'); for(const pid of ids){await client.query(`INSERT INTO player_notifications(player_id,title,body,type,link_page,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6)`,[pid,title,body,type,link,req.admin.id]);} await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
+    const creatorId = req.admin?.legacy ? null : Number(req.admin?.id || 0) || null;
+    const client=await pool.connect(); try{await client.query('BEGIN'); for(const pid of ids){await client.query(`INSERT INTO player_notifications(player_id,title,body,type,link_page,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6)`,[pid,title,body,type,link,creatorId]);} await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
     res.json({ok:true,sent:ids.length});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao enviar notificações."});}
 });
