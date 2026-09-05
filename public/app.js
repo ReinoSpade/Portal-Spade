@@ -1983,6 +1983,7 @@ qs("#adminUserForm")?.addEventListener("submit",async e=>{
   try{await adminApi("/api/admin/admins",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();await loadAdminUsers();alert("Administrador criado com sucesso.");}
   catch(ex){if(err)err.textContent=ex.message}
 });
+qs("#exitAdminPanelBtn")?.addEventListener("click",()=>{go("home")});
 qs("#logoutAdminBtn").addEventListener("click",async()=>{try{await api("/api/admin/logout",{method:"POST"})}catch{} state.admin=false;state.adminUser=null;state.adminKey=null;clearStoredAdminKey();state.selectedPlayer=null;setAdminNav();go("home")});
 
 qs("#houseForm").addEventListener("submit",async e=>{
