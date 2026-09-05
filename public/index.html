@@ -387,7 +387,14 @@
         <input name="emblem" id="houseEmblem" placeholder="Símbolo (ex.: ♜)" maxlength="8">
         <input name="leader" id="houseLeader" placeholder="Líder">
         <input name="vice_leader" id="houseVice" placeholder="Vice-líder">
+        <input name="motto" id="houseMotto" placeholder="Lema da Casa">
+        <input name="color" id="houseColor" placeholder="Cor / identidade visual">
+        <input name="banner_url" id="houseBanner" placeholder="URL do banner (opcional)">
+        <select name="status" id="houseStatus"><option value="ATIVA">Ativa</option><option value="REORGANIZANDO">Reorganizando</option><option value="INATIVA">Inativa</option><option value="ARQUIVADA">Arquivada</option></select>
         <textarea name="description" id="houseDescription" placeholder="Descrição da Casa"></textarea>
+        <textarea name="history" id="houseHistory" placeholder="História da Casa"></textarea>
+        <textarea name="goals" id="houseGoals" placeholder="Objetivos atuais"></textarea>
+        <textarea name="achievements" id="houseAchievements" placeholder="Conquistas"></textarea>
         <div class="editor-actions"><button class="gold" type="submit" id="houseSaveBtn">Criar Casa</button><button class="outline dark-outline" type="button" id="houseCancelBtn">Limpar</button></div>
         <div class="error" id="houseError"></div>
       </form>
