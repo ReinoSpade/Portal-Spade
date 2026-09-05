@@ -512,11 +512,12 @@
           <select name="cost_type" id="cardCostType"><option value="SEM_CUSTO">Sem custo</option><option value="MANA">Mana</option><option value="VIDA">Vida</option></select>
           <input name="cost" id="cardCost" placeholder="Custo (ex.: 50/00)">
           <input name="power_value" id="cardPower" type="number" min="0" value="0" placeholder="Valor de Poder">
+          <input name="damage_value" id="cardDamage" type="number" min="0" value="0" placeholder="Valor de Dano">
           <input name="sort_order" id="cardOrder" type="number" value="0" placeholder="Ordem">
           <select name="status" id="cardStatus"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select>
           <textarea name="description" id="cardDescription" class="full" placeholder="Efeito / descrição da carta"></textarea>
         </div>
-        <div class="announcement-options" style="margin-top:9px"><span class="admin-editor-note">O valor de Poder é independente do custo e da categoria. A posse é única: o mesmo Card pode pertencer a vários jogadores.</span></div>
+        <div class="announcement-options" style="margin-top:9px"><span class="admin-editor-note">Poder e Dano são valores independentes do custo e da categoria. A posse é única: o mesmo Card pode pertencer a vários jogadores.</span></div>
         <div class="editor-actions">
           <button class="gold" type="submit" id="cardSaveBtn">Criar card</button>
           <button class="outline dark-outline" type="button" id="cardCancelBtn">Limpar</button>
