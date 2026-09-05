@@ -455,6 +455,7 @@ function renderHouses(houses){
         <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
         <h3>${escapeHtml(h.name)}</h3>
         <p>${escapeHtml(h.description||"Casa do Reino Spade.")}</p>
+        ${h.motto?`<div class="house-motto">“${escapeHtml(h.motto)}”</div>`:""}
         <div class="house-meta"><span>${h.count} membros</span><span>${h.missions} missões</span><span>🪙 ${money(h.yuls)}</span></div>
       </button>`).join("")
     : `<div class="house-empty">Nenhuma Casa cadastrada.</div>`;
@@ -479,6 +480,13 @@ async function openHouse(id){
         <div style="text-align:right"><small style="color:#777;font-size:8px;letter-spacing:.12em;text-transform:uppercase">Liderança</small><div style="font-size:11px;margin-top:6px">${escapeHtml(h.leader||"Não definida")}</div><div style="color:#888;font-size:10px;margin-top:3px">${h.vice_leader?`Vice: ${escapeHtml(h.vice_leader)}`:"Vice-liderança não definida"}</div></div>
       </div>
       <div class="house-stats"><div class="house-stat"><small>Membros</small><b>${h.count}</b></div><div class="house-stat"><small>Missões</small><b>${h.missions}</b></div><div class="house-stat"><small>Yuls somados</small><b>🪙 ${money(h.yuls)}</b></div></div>
+      ${h.motto?`<div class="house-motto house-motto-dark">“${escapeHtml(h.motto)}”</div>`:""}
+      <div class="house-institution-grid">
+        <div><small>HISTÓRIA</small><p>${escapeHtml(h.history||"A história desta Casa ainda está sendo registrada no Portal.")}</p></div>
+        <div><small>OBJETIVOS</small><p>${escapeHtml(h.goals||"Nenhum objetivo publicado.")}</p></div>
+        <div><small>CONQUISTAS</small><p>${escapeHtml(h.achievements||"Nenhuma conquista registrada ainda.")}</p></div>
+      </div>
+      <div class="house-timeline"><h3>Linha do tempo</h3>${(h.timeline||[]).length?h.timeline.map(x=>`<div class="house-timeline-item"><span>${escapeHtml(x.event_date||"")}</span><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.event_type||"REGISTRO")}</small><p>${escapeHtml(x.description||"")}</p></div></div>`).join(""):`<p style="color:#888;font-size:10px">Ainda não há registros históricos publicados.</p>`}</div>
       <div class="house-members"><h3>Membros da Casa</h3>
         ${h.members.length?h.members.map(p=>`<div class="house-member-row"><div class="member-main"><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.patent||"")} ${p.role?`• ${escapeHtml(p.role)}`:""}</small></div><div class="member-values"><span>📋 ${p.missions} missões</span><span>🪙 ${money(p.yuls)} Yuls ${p.ranking>0?`• #${p.ranking}`:""}</span></div></div>`).join(""):`<div style="color:#888;font-size:11px;padding:10px 0">Nenhum membro público cadastrado.</div>`}
       </div>
@@ -981,7 +989,7 @@ async function loadAdminHouses(){
     const list=qs("#adminHouseList");
     if(!list)return;
     list.innerHTML=state.adminHouses.map(h=>`<div class="admin-house-item">
-      <div><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><small>${h.count} membros • ${h.missions} missões • 🪙 ${money(h.yuls)}${h.leader?` • Líder: ${escapeHtml(h.leader)}`:""}</small></div>
+      <div><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><small>${h.count} membros • ${h.missions} missões • 🪙 ${money(h.yuls)}${h.leader?` • Líder: ${escapeHtml(h.leader)}`:""} • ${escapeHtml(h.status||"ATIVA")}</small></div>
       <div class="admin-house-item-actions"><button type="button" data-house-edit="${h.id}" title="Editar">✎</button><button type="button" class="delete" data-house-delete="${h.id}" title="Excluir">×</button></div>
     </div>`).join("")||`<div style="color:#888;font-size:10px;padding:10px">Nenhuma Casa.</div>`;
     qsa("[data-house-edit]").forEach(b=>b.addEventListener("click",()=>editHouseForm(Number(b.dataset.houseEdit))));
@@ -992,23 +1000,23 @@ async function loadAdminHouses(){
 }
 function resetHouseForm(){
   const form=qs("#houseForm");if(!form)return;
-  form.reset();qs("#houseId").value="";qs("#houseEmblem").value="♜";
+  form.reset();qs("#houseId").value="";qs("#houseEmblem").value="♜";qs("#houseStatus").value="ATIVA";
   qs("#houseSaveBtn").textContent="Criar Casa";qs("#houseError").textContent="";
 }
 function editHouseForm(id){
   const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
   qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseEmblem").value=h.emblem||"♜";
-  qs("#houseLeader").value=h.leader||"";qs("#houseVice").value=h.vice_leader||"";qs("#houseDescription").value=h.description||"";
+  qs("#houseLeader").value=h.leader||"";qs("#houseVice").value=h.vice_leader||"";qs("#houseMotto").value=h.motto||"";qs("#houseColor").value=h.color||"";qs("#houseBanner").value=h.banner_url||"";qs("#houseStatus").value=h.status||"ATIVA";qs("#houseDescription").value=h.description||"";qs("#houseHistory").value=h.history||"";qs("#houseGoals").value=h.goals||"";qs("#houseAchievements").value=h.achievements||"";
   qs("#houseSaveBtn").textContent="Salvar Casa";qs("#houseError").textContent="";
   qs("#houseName").focus();
 }
 async function deleteHouse(id){
   const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
-  if(!confirm(`Excluir ${h.name}? Os jogadores dessa Casa ficarão sem Casa.`))return;
+  if(!confirm(`Arquivar ${h.name}? A Casa sairá da estrutura ativa, mas seu histórico será preservado.`))return;
   try{
     await adminApi(`/api/admin/houses/${id}`,{method:"DELETE"});
     if(Number(qs("#houseId").value)===id)resetHouseForm();
-    await loadAdminHouses();await loadHouses();alert("Casa excluída.");
+    await loadAdminHouses();await loadHouses();alert("Casa arquivada. O histórico foi preservado.");
   }catch(e){alert(e.message)}
 }
 
