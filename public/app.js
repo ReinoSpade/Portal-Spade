@@ -9,6 +9,49 @@ const qsa=s=>[...document.querySelectorAll(s)];
 const escapeHtml=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const money=v=>Number(v||0).toLocaleString("pt-BR");
 
+
+let globalSearchTimer=null;
+let globalSearchAbort=null;
+function closeGlobalSearch(){const box=qs("#globalSearchResults");if(box){box.hidden=true;box.innerHTML="";}}
+function searchResultIcon(kind){return {player:'👤',house:'🏰',event:'🎪',mission:'⚔️',schedule:'📅',article:'📰',library:'📚',card:'🃏'}[kind]||'•';}
+function renderGlobalSearchResults(data){
+  const box=qs("#globalSearchResults"); if(!box)return;
+  const results=data?.results||[];
+  if(!results.length){box.innerHTML='<div class="global-search-empty">Nenhum resultado encontrado.</div>';box.hidden=false;return;}
+  const labels={player:'Jogador',house:'Casa',event:'Evento',mission:'Missão',schedule:'Cronograma',article:'Jornal',library:'Biblioteca',card:'Card'};
+  box.innerHTML=`<div class="global-search-head"><span>RESULTADOS</span><small>${results.length} encontrado${results.length===1?'':'s'}</small></div>`+
+    results.map((r,i)=>`<button type="button" class="global-search-result" data-search-kind="${escapeHtml(r.kind)}" data-search-id="${Number(r.id)||0}" data-search-page="${escapeHtml(r.page||'home')}"><span class="global-search-icon">${searchResultIcon(r.kind)}</span><span class="global-search-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(labels[r.kind]||'Portal')}${r.meta?` • ${escapeHtml(r.meta)}`:''}</small></span></button>`).join("");
+  box.hidden=false;
+}
+async function performGlobalSearch(q){
+  const box=qs("#globalSearchResults"); if(!box)return;
+  if(globalSearchAbort)globalSearchAbort.abort();
+  if(q.trim().length<2){closeGlobalSearch();return;}
+  globalSearchAbort=new AbortController();
+  box.innerHTML='<div class="global-search-loading">Pesquisando...</div>';box.hidden=false;
+  try{
+    const d=await api(`/api/search?q=${encodeURIComponent(q.trim())}`,{signal:globalSearchAbort.signal});
+    renderGlobalSearchResults(d);
+  }catch(e){if(e.name!=='AbortError'){box.innerHTML=`<div class="global-search-empty">${escapeHtml(e.message)}</div>`;box.hidden=false;}}
+}
+function initGlobalSearch(){
+  const input=qs("#globalSearchInput"); if(!input)return;
+  input.addEventListener('input',()=>{clearTimeout(globalSearchTimer);globalSearchTimer=setTimeout(()=>performGlobalSearch(input.value),180);});
+  input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.blur();closeGlobalSearch();}if(e.key==='Enter'){const first=qs('#globalSearchResults .global-search-result');if(first){e.preventDefault();first.click();}}});
+  document.addEventListener('click',e=>{if(!e.target.closest('#globalSearchWrap'))closeGlobalSearch();});
+  document.addEventListener('click',e=>{const r=e.target.closest('[data-search-page]');if(!r)return;const kind=r.dataset.searchKind,id=Number(r.dataset.searchId||0);closeGlobalSearch();input.value='';
+    if(kind==='player'&&id)return openPublicPlayer(id);
+    if(kind==='house'&&id)return openHouse(id);
+    if(kind==='event'&&id)return openPublicEvent(id);
+    if(kind==='library'){go('biblioteca');const s=qs('#librarySearch');if(s){s.value=r.querySelector('b')?.textContent||'';loadLibrary();}return;}
+    if(kind==='article'){go('jornal');return;}
+    if(kind==='mission'){go('missoes');const s=qs('#missionSearch');if(s){s.value=(r.querySelector('b')?.textContent||'').replace(/^Missão de /,'');s.dispatchEvent(new Event('input'));}return;}
+    if(kind==='schedule'){go('cronograma');const s=qs('#scheduleSearch');if(s){s.value=r.querySelector('b')?.textContent||'';s.dispatchEvent(new Event('input'));}return;}
+    if(kind==='card'){go('cards');const s=qs('#playerCardSearch');if(s){s.value=r.querySelector('b')?.textContent||'';s.dispatchEvent(new Event('input'));}return;}
+    go(r.dataset.searchPage||'home');
+  });
+}
+
 function go(page){
   state.page=page;
   qsa(".page").forEach(x=>x.classList.toggle("active",x.id===page));
@@ -854,8 +897,8 @@ async function tryMe(){
     const d=await api("/api/me");state.me=d.player;setPlayerNav();
   }catch{}
 }
-function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";const n=qs("#notificationsNav");if(n){n.style.display="inline-flex";loadNotificationBadge();}}
-function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";const n=qs("#notificationsNav");if(n)n.style.display="none";}
+function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";}
+function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";}
 
 qs("#loginForm").addEventListener("submit",async e=>{
   e.preventDefault();const err=qs("#loginError");err.textContent="";
@@ -2292,7 +2335,7 @@ async function tryAdminHash(){
   if(state.admin) go("admin"); else go("admin-login");
 }
 
-loadHome();tryMe();setAdminNav();tryAdminHash();
+initGlobalSearch();loadHome();tryMe();setAdminNav();tryAdminHash();
 
 
 function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
