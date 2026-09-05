@@ -15,7 +15,7 @@
   <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
   <nav id="nav">
     <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="cargos">Cargos</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Cargos & Patentes</button>
-    <button data-page="login" id="loginNav">Entrar</button>
+    <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
 <main>
@@ -258,6 +258,26 @@
       <select class="admin-filter" id="playerCardCategoryFilter"><option value="">Todas as categorias</option></select>
     </div>
     <div id="playerCardsGrid" class="player-cards-groups"></div>
+  </div>
+</section>
+<section class="page" id="admin-login">
+  <div class="subhero compact"><p class="eyebrow">ACESSO RESTRITO</p><h1>Administração do <em>Reino.</em></h1><p>Entre com sua conta administrativa para acessar o centro de controle de Spade.</p></div>
+  <div class="content">
+    <div class="login-wrap admin-login-wrap">
+      <div class="panel login-card admin-login-card">
+        <div class="login-seal">♛</div>
+        <p class="eyebrow">PORTAL ADMINISTRATIVO</p>
+        <h2>Bem-vindo, administrador.</h2>
+        <p class="login-help">Cada administrador possui seu próprio acesso. As alterações realizadas no Portal ficam vinculadas à conta utilizada.</p>
+        <form id="adminLoginForm">
+          <label>Usuário<input id="adminUsername" autocomplete="username" placeholder="Seu usuário" required></label>
+          <label>Senha<input id="adminPassword" type="password" autocomplete="current-password" placeholder="Sua senha" required></label>
+          <button class="gold" type="submit">Entrar na Administração</button>
+          <div class="error" id="adminLoginError"></div>
+        </form>
+        <p class="admin-login-note">Se você ainda não possui uma conta administrativa, procure o responsável pelo Portal.</p>
+      </div>
+    </div>
   </div>
 </section>
 <section class="page" id="admin"><div class="subhero compact"><div class="admin-title-line"><div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Painel do <em>Reino.</em></h1><p>Controle central de jogadores, Yuls, jornal e dados do RPG.</p></div><span class="admin-lock">♛ ADMIN</span></div></div>
@@ -579,6 +599,19 @@
       </div>
     </div>
   </div>
+  <div class="admin-users-panel panel">
+    <div class="panel-head"><div><p class="eyebrow">ACESSOS</p><h3>Administradores</h3></div><span>Contas individuais para a equipe do Portal</span></div>
+    <div class="admin-users-layout">
+      <form id="adminUserForm" class="admin-form admin-user-form">
+        <input name="username" id="newAdminUsername" placeholder="Usuário (ex.: maria.admin)" required>
+        <input name="display_name" id="newAdminDisplayName" placeholder="Nome de exibição" required>
+        <input name="password" id="newAdminPassword" type="password" minlength="8" placeholder="Senha (mínimo 8 caracteres)" required>
+        <div class="editor-actions"><button class="gold" type="submit">＋ Criar administrador</button></div>
+        <div class="error" id="adminUserError"></div>
+      </form>
+      <div id="adminUserList" class="admin-user-list"></div>
+    </div>
+  </div>
   <div class="admin-danger"><button class="outline danger" id="logoutAdminBtn">Sair da administração</button></div>
 </div></section>
 </main>
@@ -587,6 +620,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=27.1"></script>
+<script src="/app.js?v=30.0"></script>
 </body>
 </html>
