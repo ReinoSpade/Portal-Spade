@@ -869,7 +869,7 @@ document.addEventListener("submit",async e=>{
   catch(ex){alert(ex.message)}
 });
 
-qs("#adminRankingRefresh")?.addEventListener("click",loadAdminRankingBattles);qs("#adminRankingBattleStatus")?.addEventListener("change",loadAdminRankingBattles);
+qs("#adminRankingRefresh")?.addEventListener("click",loadAdminRankingBattles);qs("#adminReportsRefresh")?.addEventListener("click",loadAdminReports);qs("#adminRankingBattleStatus")?.addEventListener("change",loadAdminRankingBattles);
 qs("#backToDashboard")?.addEventListener("click",()=>go("dashboard"));
 
 function getStoredAdminKey(){
@@ -1163,6 +1163,7 @@ async function initAdmin(){
   setAdminPermissionVisibility();
   try{
     if(hasAdminPermission("dashboard")){ const ov=await adminApi("/api/admin/overview"); renderAdminStats(ov); }
+    if(hasAdminPermission("reports")) await loadAdminReports();
     if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
     if(hasAdminPermission("cards")) await loadAdminCards();
     if(hasAdminPermission("economy")){ populateEconomyPlayers(); await loadAdminEconomy(); }
@@ -1175,6 +1176,32 @@ async function initAdmin(){
     if(hasAdminPermission("library")) await loadAdminLibrary();
     if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
   }catch(e){console.error(e)}
+}
+
+
+async function loadAdminReports(){
+  try{
+    const d=await adminApi("/api/admin/reports");
+    const k=[
+      ["👥","Jogadores ativos",d.players.active],
+      ["⏸️","Suspensos",d.players.suspended],
+      ["🃏","Cards ativos",d.cards.active],
+      ["🪙","Yuls em circulação",money(d.economy.yuls)],
+      ["⚫","Dracmas registrados",money(d.economy.dracmas)],
+      ["⚔️","Missões em andamento",d.missions.ongoing],
+      ["🎪","Eventos em andamento",d.events.ongoing],
+      ["⏳","Batalhas aguardando aprovação",d.battles.pending],
+      ["💬","Status publicados hoje",d.statuses.today]
+    ];
+    qs("#adminReportsSummary").innerHTML=k.map(x=>`<div class="report-kpi"><span>${x[0]} ${x[1]}</span><b>${x[2]}</b></div>`).join("");
+    const row=(p,metric)=>`<div class="report-row"><span class="report-rank">${metric.i}</span><div><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")}</small></div><strong>${metric.v}</strong></div>`;
+    qs("#reportTopPower").innerHTML=d.topPower.length?d.topPower.map((p,i)=>row(p,{i:i+1,v:`⚔️ ${Number(p.power||0).toLocaleString("pt-BR")}`})).join(""):"<p class='admin-history-empty'>Sem dados.</p>";
+    qs("#reportTopActivity").innerHTML=d.topActivity.length?d.topActivity.map((p,i)=>row(p,{i:i+1,v:`⭐ ${Number(p.activity||0).toLocaleString("pt-BR")}`})).join(""):"<p class='admin-history-empty'>Sem dados.</p>";
+    qs("#reportHouseStats").innerHTML=d.houseStats.length?`<div class="report-house-table"><div class="report-house-head"><span>Casa</span><span>Membros</span><span>Missões</span><span>Poder</span><span>Yuls</span></div>${d.houseStats.map(h=>`<div class="report-house-row"><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><span>${h.members}</span><span>${h.missions}</span><span>${Number(h.power||0).toLocaleString("pt-BR")}</span><span>🪙 ${money(h.yuls)}</span></div>`).join("")}</div>`:"<p class='admin-history-empty'>Nenhuma Casa cadastrada.</p>";
+    qs("#reportUpdatedAt").textContent=`Atualizado em ${new Date().toLocaleString("pt-BR")}`;
+  }catch(e){
+    const el=qs("#adminReportsSummary"); if(el) el.innerHTML=`<div class="report-error">${escapeHtml(e.message)}</div>`;
+  }
 }
 
 function renderAdminStats(ov){
