@@ -207,9 +207,24 @@ function renderStatusBoard(items){
     <div class="status-body">
       <div class="status-post-head"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")}${x.patent?` • ${escapeHtml(x.patent)}`:""}</small></div><time>${escapeHtml(statusDateHuman(x.status_date))}</time></div>
       <p>${escapeHtml(x.message)}</p>
-      ${x.mine?`<span class="status-own">Seu status</span>`:""}
+      <div class="status-actions">
+        <button type="button" class="status-react ${x.reacted?"active":""}" data-status-react="${x.id}">❤️ <span>${x.reaction_count||0}</span></button>
+        <button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 <span>${x.comment_count||0}</span></button>
+        ${x.mine?`<span class="status-own">Seu status</span>`:""}
+      </div>
+      <div class="status-comments" id="status-comments-${x.id}" hidden></div>
     </div>
   </article>`).join(""):`<div class="panel status-empty"><div>♠</div><h3>Nenhum status publicado</h3><p>Seja o primeiro a compartilhar algo com o Reino hoje.</p></div>`;
+}
+async function toggleStatusReaction(id,button){
+  try{const d=await api(`/api/status/${id}/react`,{method:"POST"});button.classList.toggle("active",!!d.reacted);const span=button.querySelector("span");if(span)span.textContent=d.count;}catch(e){alert(e.message)}
+}
+async function toggleStatusComments(id){
+  const box=qs(`#status-comments-${id}`);if(!box)return;
+  if(!box.hidden){box.hidden=true;return;}
+  box.hidden=false;box.innerHTML=`<div class="comments-loading">Carregando comentários...</div>`;
+  try{const d=await api(`/api/status/${id}/comments`);box.innerHTML=(d.comments||[]).map(c=>`<div class="status-comment"><b>${escapeHtml(c.nick)}</b><span>${escapeHtml(c.message)}</span></div>`).join("")+`<form class="status-comment-form" data-comment-form="${id}"><input maxlength="280" placeholder="Comente neste status..."><button class="gold small" type="submit">Enviar</button></form>`;
+  }catch(e){box.innerHTML=`<div class="comments-loading">${escapeHtml(e.message)}</div>`}
 }
 async function loadSchedule(){
   try{
@@ -863,6 +878,17 @@ qs("#playerStatusPublishBtn")?.addEventListener("click",publishPlayerStatus);
 qs("#statusRefreshBtn")?.addEventListener("click",loadStatusBoard);
 qs("#playerCardSearch")?.addEventListener("input",e=>{state.cardSearch=e.target.value;renderPlayerCards(state.playerCards)});
 qs("#playerCardCategoryFilter")?.addEventListener("change",e=>{state.cardFilter=e.target.value;renderPlayerCards(state.playerCards)});
+document.addEventListener("click",e=>{
+  const react=e.target.closest("[data-status-react]"); if(react){toggleStatusReaction(Number(react.dataset.statusReact),react);return;}
+  const comments=e.target.closest("[data-status-comments]"); if(comments){toggleStatusComments(Number(comments.dataset.statusComments));return;}
+});
+document.addEventListener("submit",async e=>{
+  const form=e.target.closest("[data-comment-form]"); if(!form)return; e.preventDefault();
+  const id=Number(form.dataset.commentForm),input=form.querySelector("input"),message=(input?.value||"").trim(); if(!message)return;
+  try{await api(`/api/status/${id}/comments`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message})}); await toggleStatusComments(id);}
+  catch(ex){alert(ex.message)}
+});
+
 qs("#backToDashboard")?.addEventListener("click",()=>go("dashboard"));
 
 function getStoredAdminKey(){
