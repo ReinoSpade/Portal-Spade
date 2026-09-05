@@ -28,7 +28,8 @@ const ADMIN_PERMISSION_DEFS = {
   audit: "Auditoria",
   reports: "Relatórios",
   settings: "Configurações",
-  library: "Biblioteca"
+  library: "Biblioteca",
+  community: "Comunidade / Status"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -610,6 +611,26 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_player_statuses_date ON player_statuses(status_date DESC,id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_statuses_player ON player_statuses(player_id,status_date DESC);
 
+    CREATE TABLE IF NOT EXISTS status_reactions (
+      id BIGSERIAL PRIMARY KEY,
+      status_id BIGINT NOT NULL REFERENCES player_statuses(id) ON DELETE CASCADE,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      reaction TEXT NOT NULL DEFAULT '❤️',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(status_id,player_id,reaction)
+    );
+    CREATE INDEX IF NOT EXISTS idx_status_reactions_status ON status_reactions(status_id);
+
+    CREATE TABLE IF NOT EXISTS status_comments (
+      id BIGSERIAL PRIMARY KEY,
+      status_id BIGINT NOT NULL REFERENCES player_statuses(id) ON DELETE CASCADE,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      CHECK (char_length(message) BETWEEN 1 AND 280)
+    );
+    CREATE INDEX IF NOT EXISTS idx_status_comments_status ON status_comments(status_id,created_at);
+
     CREATE INDEX IF NOT EXISTS idx_player_cards_card ON player_cards(card_id);
     CREATE INDEX IF NOT EXISTS idx_player_card_history_player ON player_card_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_card_history_card ON player_card_history(card_id, id DESC);
@@ -1119,19 +1140,66 @@ app.get("/api/status-board", async (req,res)=>{
     const days=Math.min(14,Math.max(1,Number(req.query?.days||7)));
     const r=await pool.query(`
       SELECT ps.id,ps.player_id,ps.status_date,ps.message,ps.created_at,ps.updated_at,
-             p.nick,p.house,p.patent,p.public_profile
+             p.nick,p.house,p.patent,p.public_profile,
+             COALESCE((SELECT COUNT(*) FROM status_reactions sr WHERE sr.status_id=ps.id),0) AS reaction_count,
+             COALESCE((SELECT COUNT(*) FROM status_comments sc WHERE sc.status_id=ps.id),0) AS comment_count,
+             EXISTS(SELECT 1 FROM status_reactions sr2 WHERE sr2.status_id=ps.id AND sr2.player_id=$2 AND sr2.reaction='❤️') AS reacted
       FROM player_statuses ps
       JOIN players p ON p.id=ps.player_id
-      WHERE ps.status_date >= (${saoPauloTodaySql()} - $1::int)
+      WHERE ps.status_date >= (${saoPauloTodaySql()} - $1::int) AND COALESCE(p.active,1)=1
       ORDER BY ps.status_date DESC,ps.updated_at DESC,ps.id DESC
-      LIMIT 500`,[days-1]);
+      LIMIT 500`,[days-1,viewerId]);
     res.json({statuses:r.rows.map(x=>({
       id:Number(x.id),player_id:Number(x.player_id),status_date:x.status_date,
       message:x.message,created_at:x.created_at,updated_at:x.updated_at,
       nick:x.nick,house:x.house||"",patent:x.patent||"",
+      reaction_count:Number(x.reaction_count||0),comment_count:Number(x.comment_count||0),reacted:Boolean(x.reacted),
       mine:Number(x.player_id)===Number(viewerId)
     }))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar quadro de status."});}
+});
+
+app.post("/api/status/:id/react", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const statusId=Number(req.params.id);
+  if(!Number.isFinite(statusId))return res.status(400).json({error:"Status inválido."});
+  try{
+    const exists=await pool.query("SELECT id FROM player_statuses WHERE id=$1",[statusId]);
+    if(!exists.rows[0])return res.status(404).json({error:"Status não encontrado."});
+    const q=await pool.query("SELECT id FROM status_reactions WHERE status_id=$1 AND player_id=$2 AND reaction='❤️'",[statusId,playerId]);
+    if(q.rows[0]) await pool.query("DELETE FROM status_reactions WHERE id=$1",[q.rows[0].id]);
+    else await pool.query("INSERT INTO status_reactions(status_id,player_id,reaction) VALUES($1,$2,'❤️') ON CONFLICT DO NOTHING",[statusId,playerId]);
+    const c=await pool.query("SELECT COUNT(*) FROM status_reactions WHERE status_id=$1",[statusId]);
+    res.json({reacted:!q.rows[0],count:Number(c.rows[0].count)});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível atualizar a reação."});}
+});
+
+app.get("/api/status/:id/comments", async (req,res)=>{
+  const viewer=readPlayerToken(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  const statusId=Number(req.params.id);
+  try{
+    const r=await pool.query(`SELECT sc.id,sc.player_id,sc.message,sc.created_at,p.nick,p.house
+      FROM status_comments sc JOIN players p ON p.id=sc.player_id
+      WHERE sc.status_id=$1 ORDER BY sc.created_at ASC LIMIT 100`,[statusId]);
+    res.json({comments:r.rows.map(x=>({id:Number(x.id),player_id:Number(x.player_id),message:x.message,created_at:x.created_at,nick:x.nick,house:x.house||"",mine:Number(x.player_id)===Number(viewer)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível carregar os comentários."});}
+});
+
+app.post("/api/status/:id/comments", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  const statusId=Number(req.params.id);
+  const message=String(req.body?.message||"").trim();
+  if(!message)return res.status(400).json({error:"Escreva um comentário."});
+  if(message.length>280)return res.status(400).json({error:"O comentário pode ter no máximo 280 caracteres."});
+  try{
+    const r=await pool.query("INSERT INTO status_comments(status_id,player_id,message) SELECT $1,$2,$3 WHERE EXISTS(SELECT 1 FROM player_statuses WHERE id=$1) RETURNING id,created_at",[statusId,playerId,message]);
+    if(!r.rows[0])return res.status(404).json({error:"Status não encontrado."});
+    const p=await pool.query("SELECT nick,house FROM players WHERE id=$1",[playerId]);
+    res.json({comment:{id:Number(r.rows[0].id),player_id:playerId,message,created_at:r.rows[0].created_at,nick:p.rows[0]?.nick||"",house:p.rows[0]?.house||"",mine:true}});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível publicar o comentário."});}
 });
 
 app.get("/api/me/yuls-history", async (req, res) => {
