@@ -1615,8 +1615,7 @@ app.post("/api/admin/notifications", requireAdmin, async (req,res)=>{
     else if(b.player_id){ ids=[Number(b.player_id)]; }
     ids=[...new Set(ids)].filter(x=>x>0);
     if(!ids.length)return res.status(400).json({error:"Selecione ao menos um jogador ou marque todos os ativos."});
-    const creatorId = req.admin?.legacy ? null : Number(req.admin?.id || 0) || null;
-    const client=await pool.connect(); try{await client.query('BEGIN'); for(const pid of ids){await client.query(`INSERT INTO player_notifications(player_id,title,body,type,link_page,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6)`,[pid,title,body,type,link,creatorId]);} await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
+    const client=await pool.connect(); try{await client.query('BEGIN'); for(const pid of ids){await client.query(`INSERT INTO player_notifications(player_id,title,body,type,link_page,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6)`,[pid,title,body,type,link,req.admin.id]);} await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
     res.json({ok:true,sent:ids.length});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao enviar notificações."});}
 });
@@ -1972,6 +1971,43 @@ app.get("/api/roles/:id", async (req,res)=>{
       requirements:x.requirements||"",benefits:x.benefits||"",scope:x.scope||""
     }});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar o cargo."});}
+});
+
+
+app.get("/api/search", async (req,res)=>{
+  const q=String(req.query.q||"").trim().slice(0,80);
+  if(q.length<2)return res.json({query:q,results:[]});
+  const like=`%${q.replace(/[%_]/g,"\\$&")}%`;
+  const ilike=(idx)=>`(name ILIKE $${idx} OR title ILIKE $${idx} OR description ILIKE $${idx})`;
+  try{
+    const playerId=readPlayerToken(req);
+    const isAdmin=!!(await resolveAdmin(req));
+    const cardsAllowed=!!playerId||isAdmin;
+    const queries=[
+      pool.query(`SELECT id,nick,house,patent FROM players WHERE public_profile=1 AND active=1 AND (nick ILIKE $1 OR house ILIKE $1 OR patent ILIKE $1) ORDER BY nick ASC LIMIT 8`,[like]),
+      pool.query(`SELECT id,name,emblem FROM houses WHERE active=1 AND (name ILIKE $1 OR description ILIKE $1 OR motto ILIKE $1) ORDER BY name ASC LIMIT 8`,[like]),
+      pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND (title ILIKE $1 OR description ILIKE $1 OR event_type ILIKE $1) ORDER BY CASE status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,start_date DESC,id DESC LIMIT 8`,[like]),
+      pool.query(`SELECT id,mission_type,start_at,end_at,status,description FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND (mission_type ILIKE $1 OR description ILIKE $1 OR instructions ILIKE $1) ORDER BY start_at DESC,id DESC LIMIT 8`,[like]),
+      pool.query(`SELECT id,title,activity_type,activity_date,start_time,end_time,status FROM schedule_activities WHERE published=1 AND (title ILIKE $1 OR activity_type ILIKE $1 OR description ILIKE $1) ORDER BY activity_date DESC,start_time DESC NULLS LAST,id DESC LIMIT 8`,[like]),
+      pool.query(`SELECT id,title,subtitle,category,excerpt,date FROM articles WHERE published=1 AND (title ILIKE $1 OR subtitle ILIKE $1 OR category ILIKE $1 OR excerpt ILIKE $1 OR body ILIKE $1) ORDER BY date DESC,id DESC LIMIT 8`,[like]),
+      pool.query(`SELECT id,title,category,description FROM library_items WHERE published=1 AND (title ILIKE $1 OR category ILIKE $1 OR description ILIKE $1 OR content ILIKE $1) ORDER BY sort_order ASC,title ASC LIMIT 8`,[like])
+    ];
+    if(cardsAllowed){
+      queries.push(pool.query(`SELECT id,name_jp,name_pt,category,origin,power_value FROM cards WHERE active=1 AND (name_jp ILIKE $1 OR name_pt ILIKE $1 OR category ILIKE $1 OR origin ILIKE $1) ORDER BY name_pt ASC LIMIT 8`,[like]));
+    }
+    const out=await Promise.all(queries);
+    const [players,houses,events,missions,schedule,articles,library,cards]=out;
+    const results=[];
+    players.rows.forEach(x=>results.push({kind:'player',icon:'👤',title:x.nick,meta:[x.house,x.patent].filter(Boolean).join(' • '),page:'jogadores',id:Number(x.id)}));
+    houses.rows.forEach(x=>results.push({kind:'house',icon:x.emblem||'🏰',title:x.name,meta:'Casa de Spade',page:'casas',id:Number(x.id)}));
+    events.rows.forEach(x=>results.push({kind:'event',icon:'🎪',title:x.title,meta:`${x.event_type||'Evento'} • ${x.status||''}`.replace(/ • $/,''),page:'eventos',id:Number(x.id)}));
+    missions.rows.forEach(x=>results.push({kind:'mission',icon:'⚔️',title:`Missão de ${x.mission_type||'Missão'}`,meta:`${x.status||''}${x.start_at?` • ${new Date(x.start_at).toLocaleDateString('pt-BR')}`:''}`.replace(/^ • | • $/g,''),page:'missoes',id:Number(x.id)}));
+    schedule.rows.forEach(x=>results.push({kind:'schedule',icon:'📅',title:x.title,meta:`${x.activity_type||'Atividade'} • ${x.activity_date||''}`.replace(/ • $/,''),page:'cronograma',id:Number(x.id)}));
+    articles.rows.forEach(x=>results.push({kind:'article',icon:'📰',title:x.title,meta:`${x.category||'Jornal'} • ${x.date||''}`.replace(/ • $/,''),page:'jornal',id:Number(x.id)}));
+    library.rows.forEach(x=>results.push({kind:'library',icon:x.icon||'📚',title:x.title,meta:x.category||'Biblioteca',page:'biblioteca',id:Number(x.id)}));
+    if(cards){cards.rows.forEach(x=>results.push({kind:'card',icon:'🃏',title:x.name_pt||x.name_jp,meta:`${x.name_jp && x.name_pt?x.name_jp+' • ':''}${x.category||'Card'}${x.origin?` • ${x.origin}`:''}`,page:'cards',id:Number(x.id)}));}
+    res.json({query:q,results:results.slice(0,40),cards_visible:cardsAllowed});
+  }catch(e){console.error('Erro em /api/search:',e);res.status(500).json({error:'Erro ao pesquisar no Portal.'});}
 });
 
 app.get("/api/home", async (req, res) => {
