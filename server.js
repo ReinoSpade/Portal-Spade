@@ -30,7 +30,8 @@ const ADMIN_PERMISSION_DEFS = {
   settings: "Configurações",
   library: "Biblioteca",
   community: "Comunidade / Status",
-  rankings: "Rankings"
+  rankings: "Rankings",
+  notifications: "Notificações & Alertas"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -59,6 +60,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/announcements")) return "announcements";
   if (path.startsWith("/library")) return "library";
   if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings";
+  if (path.startsWith("/notifications")) return "notifications";
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
@@ -617,6 +619,18 @@ async function initDatabase() {
       PRIMARY KEY (player_id, role_id)
     );
 
+    CREATE TABLE IF NOT EXISTS player_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      body TEXT DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'INFORMATIVO' CHECK (type IN ('URGENTE','IMPORTANTE','INFORMATIVO','SISTEMA')),
+      link_page TEXT DEFAULT '',
+      read_at TIMESTAMPTZ,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS announcements (
       id BIGSERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -743,6 +757,7 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_ranking_battles_status ON ranking_battles(status, ranking_type, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ranking_battles_players ON ranking_battles(challenger_id, opponent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ranking_history_player ON ranking_history(player_id, ranking_type, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_player_notifications_player ON player_notifications(player_id, read_at, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_cards_player ON player_cards(player_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_player_statuses_date ON player_statuses(status_date DESC,id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_statuses_player ON player_statuses(player_id,status_date DESC);
@@ -1560,6 +1575,50 @@ app.get("/api/me/alerts", async (req,res)=>{
   }
 });
 
+
+app.get("/api/me/notifications", async (req,res)=>{
+  const id=readPlayerToken(req); if(!id)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const r=await pool.query(`SELECT id,title,body,type,link_page,read_at,created_at FROM player_notifications WHERE player_id=$1 ORDER BY id DESC LIMIT 60`,[id]);
+    const unread=r.rows.filter(x=>!x.read_at).length;
+    res.json({notifications:r.rows.map(x=>({...x,id:Number(x.id),read:Boolean(x.read_at)})),unread});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar notificações."});}
+});
+
+app.post("/api/me/notifications/:id/read", async (req,res)=>{
+  const playerId=readPlayerToken(req), id=Number(req.params.id); if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  try{const r=await pool.query(`UPDATE player_notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=$1 AND player_id=$2 RETURNING id`,[id,playerId]); if(!r.rowCount)return res.status(404).json({error:"Notificação não encontrada."}); res.json({ok:true});}
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao marcar notificação."});}
+});
+
+app.post("/api/me/notifications/read-all", async (req,res)=>{
+  const playerId=readPlayerToken(req); if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  try{await pool.query(`UPDATE player_notifications SET read_at=COALESCE(read_at,NOW()) WHERE player_id=$1 AND read_at IS NULL`,[playerId]);res.json({ok:true});}
+  catch(e){console.error(e);res.status(500).json({error:"Erro ao marcar notificações."});}
+});
+
+app.get("/api/admin/notifications", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT n.id,n.title,n.body,n.type,n.link_page,n.created_at,p.id player_id,p.nick,p.house FROM player_notifications n JOIN players p ON p.id=n.player_id ORDER BY n.id DESC LIMIT 200`);
+    res.json({notifications:r.rows.map(x=>({...x,id:Number(x.id),player_id:Number(x.player_id)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar notificações administrativas."});}
+});
+
+app.post("/api/admin/notifications", requireAdmin, async (req,res)=>{
+  const b=req.body||{}, title=String(b.title||'').trim(), body=String(b.body||'').trim(), type=String(b.type||'INFORMATIVO').trim(), link=String(b.link_page||'').trim();
+  if(!title)return res.status(400).json({error:"Título obrigatório."});
+  if(!['URGENTE','IMPORTANTE','INFORMATIVO','SISTEMA'].includes(type))return res.status(400).json({error:"Tipo inválido."});
+  try{
+    let ids=[];
+    if(b.all_active){ const r=await pool.query(`SELECT id FROM players WHERE active=1 ORDER BY id`); ids=r.rows.map(x=>x.id); }
+    else if(Array.isArray(b.player_ids)){ ids=b.player_ids.map(Number).filter(Number.isInteger); }
+    else if(b.player_id){ ids=[Number(b.player_id)]; }
+    ids=[...new Set(ids)].filter(x=>x>0);
+    if(!ids.length)return res.status(400).json({error:"Selecione ao menos um jogador ou marque todos os ativos."});
+    const client=await pool.connect(); try{await client.query('BEGIN'); for(const pid of ids){await client.query(`INSERT INTO player_notifications(player_id,title,body,type,link_page,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6)`,[pid,title,body,type,link,req.admin.id]);} await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
+    res.json({ok:true,sent:ids.length});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao enviar notificações."});}
+});
 
 app.get("/api/library", async (req,res)=>{
   try{
