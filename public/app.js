@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[]};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -631,59 +631,29 @@ async function openPublicPlayer(id){
 
 async function loadRanking(){
   try{
-    const d=await api("/api/rankings");
-    rankingData=d;
-    renderRanking(activeRanking);
-    qsa(".ranking-tab").forEach(b=>{
-      b.onclick=()=>{activeRanking=b.dataset.rankingTab;renderRanking(activeRanking)};
-    });
-  }catch(e){
-    qs("#rankingBody").innerHTML=`<tr><td colspan="5">${escapeHtml(e.message)}</td></tr>`;
-  }
+    const d=await api("/api/rankings"); rankingData=d; await renderRanking(activeRanking);
+    qsa(".ranking-tab").forEach(b=>{b.onclick=async()=>{activeRanking=b.dataset.rankingTab;await renderRanking(activeRanking)}});
+    await loadRankingPlayerActions();
+  }catch(e){qs("#rankingBody").innerHTML=`<tr><td colspan="5">${escapeHtml(e.message)}</td></tr>`;}
 }
 
-function renderRanking(type){
-  const body=qs("#rankingBody"), info=qs("#rankingExplainer");
-  if(!body)return;
+async function renderRanking(type){
+  const body=qs("#rankingBody"), info=qs("#rankingExplainer"); if(!body)return;
   qsa(".ranking-tab").forEach(b=>b.classList.toggle("active",b.dataset.rankingTab===type));
-
-  const descriptions={
-    force:"Força é definida pelo atributo de poder cadastrado no perfil do jogador.",
-    activity:"Atividade considera missões e conquistas registradas no sistema.",
-    missions:"Classificação pela quantidade de missões concluídas.",
-    wealth:"Classificação pelo saldo atual de Yuls.",
-    houses:"Classificação das Casas pelo poder somado dos seus membros."
-  };
+  const descriptions={force:"Poder é o valor atual cadastrado para o jogador. A automação pelo catálogo de Cards será consolidada no módulo de Cards.",skill_sc:"Skill em SC é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",skill_vt:"Skill em VT é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",activity:"Atividade considera missões e conquistas registradas no sistema.",missions:"Classificação pela quantidade de missões concluídas.",wealth:"Classificação pelo saldo atual de Yuls.",houses:"Classificação das Casas pelo poder somado dos seus membros."};
   info.textContent=descriptions[type]||"";
-
-  if(type==="houses"){
-    const rows=rankingData.houses||[];
-    body.innerHTML=rows.length?rows.map((h,i)=>`<tr>
-      <td><span class="rank-number">${i+1}</span></td>
-      <td><div class="house-rank-main"><span class="house-rank-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="rank-main">${escapeHtml(h.name)}<small>${h.members} membros</small></span></div></td>
-      <td class="rank-house">${h.leader?`Líder: ${escapeHtml(h.leader)}`:"Sem líder definida"}</td>
-      <td class="rank-secondary">⚔️ ${h.power.toLocaleString("pt-BR")}</td>
-      <td class="rank-secondary">📋 ${h.missions}</td>
-    </tr>`).join(""):`<tr><td colspan="5">Nenhuma Casa cadastrada.</td></tr>`;
-    return;
-  }
-
-  const rows=rankingData[type]||[];
-  body.innerHTML=rows.length?rows.map((p,i)=>{
-    let main="",secondary="";
-    if(type==="force"){main=`⚔️ ${p.power.toLocaleString("pt-BR")}`;secondary=`📋 ${p.missions} missões`}
-    if(type==="activity"){main=`⭐ ${(p.missions + p.achievements*3).toLocaleString("pt-BR")}`;secondary=`🏆 ${p.achievements} conquistas`}
-    if(type==="missions"){main=`📋 ${p.missions}`;secondary=`🪙 ${money(p.yuls)} Yuls`}
-    if(type==="wealth"){main=`🪙 ${money(p.yuls)}`;secondary=`📋 ${p.missions} missões`}
-    return `<tr>
-      <td><span class="rank-number">${i+1}</span></td>
-      <td><div class="rank-main">${escapeHtml(displayPlayerName(p))}<small>${escapeHtml(p.identifier)}</small></div></td>
-      <td class="rank-house">${escapeHtml(p.house||"Sem Casa")}</td>
-      <td class="rank-secondary">${main}</td>
-      <td class="rank-secondary">${secondary}</td>
-    </tr>`;
-  }).join(""):`<tr><td colspan="5">Nenhum jogador disponível.</td></tr>`;
+  if(type==="houses"){const rows=rankingData.houses||[];body.innerHTML=rows.length?rows.map((h,i)=>`<tr><td><span class="rank-number">${i+1}</span></td><td><div class="house-rank-main"><span class="house-rank-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="rank-main">${escapeHtml(h.name)}<small>${h.members} membros</small></span></div></td><td class="rank-house">${h.leader?`Líder: ${escapeHtml(h.leader)}`:"Sem líder definida"}</td><td class="rank-secondary">⚔️ ${h.power.toLocaleString("pt-BR")}</td><td class="rank-secondary">📋 ${h.missions}</td></tr>`).join(""):`<tr><td colspan="5">Nenhuma Casa cadastrada.</td></tr>`;return;}
+  const rows=rankingData[type]||[];body.innerHTML=rows.length?rows.map((p,i)=>{let main="",secondary="";if(type==="force"){main=`⚔️ ${p.power.toLocaleString("pt-BR")}`;secondary=`📋 ${p.missions} missões`;}if(type==="skill_sc"){main=`⚔️ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em SC";}if(type==="skill_vt"){main=`⚡ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em VT";}if(type==="activity"){main=`⭐ ${(p.missions+p.achievements*3).toLocaleString("pt-BR")}`;secondary=`🏆 ${p.achievements} conquistas`;}if(type==="missions"){main=`📋 ${p.missions}`;secondary=`🪙 ${money(p.yuls)} Yuls`;}if(type==="wealth"){main=`🪙 ${money(p.yuls)}`;secondary=`📋 ${p.missions} missões`;}return `<tr><td><span class="rank-number">${i+1}</span></td><td><div class="rank-main">${escapeHtml(displayPlayerName(p))}<small>${escapeHtml(p.identifier)}</small></div></td><td class="rank-house">${escapeHtml(p.house||"Sem Casa")}</td><td class="rank-secondary">${main}</td><td class="rank-secondary">${secondary}</td></tr>`;}).join(""):`<tr><td colspan="5">Nenhum jogador disponível.</td></tr>`;
 }
+
+async function loadRankingPlayerActions(){
+  const el=qs("#rankingPlayerActions");if(!el)return;
+  if(!state.me){el.innerHTML=`<div class="ranking-note">Entre no Portal para registrar e acompanhar suas batalhas de SC e VT.</div>`;return;}
+  try{const d=await api("/api/ranking-players"),b=await api("/api/me/ranking-battles");state.rankingPlayers=d.players||[];state.rankingBattles=b.battles||[];const opponents=state.rankingPlayers.filter(x=>Number(x.id)!==Number(state.me.id));el.innerHTML=`<div class="ranking-battle-box"><div><p class="eyebrow">BATALHA OFICIAL</p><h3>Registrar resultado para avaliação</h3><p>O adversário deverá confirmar. Depois, a Administração define as pontuações finais — nenhuma fórmula é presumida pelo Portal.</p></div><form id="rankingBattleForm" class="ranking-battle-form"><select id="battleType" required><option value="SC">Skill em SC</option><option value="VT">Skill em VT</option></select><select id="battleOpponent" required><option value="">Escolha o adversário</option>${opponents.map(x=>`<option value="${x.id}">${escapeHtml(x.nick)}${x.house?` — ${escapeHtml(x.house)}`:""}</option>`).join("")}</select><select id="battleResult"><option value="CHALLENGER">Vitória</option><option value="OPPONENT">Derrota</option><option value="EMPATE">Empate</option></select><input id="battleProof" placeholder="Link da prova (opcional)"><input id="battleNotes" placeholder="Observações (opcional)"><button class="gold" type="submit">⚔️ Enviar batalha</button><span class="error" id="battleError"></span></form><div class="ranking-my-battles"><b>Meus registros</b>${state.rankingBattles.slice(0,8).map(x=>`<div class="my-battle-row"><span><b>${x.ranking_type}</b> • ${escapeHtml(x.challenger_nick)} × ${escapeHtml(x.opponent_nick)}</span><small>${escapeHtml(x.status)}${x.opponent_id===state.me.id&&x.status==="AGUARDANDO_OPONENTE"?` <button type="button" data-confirm-battle="${x.id}">Confirmar</button>`:""}</small></div>`).join("")||`<small>Nenhum registro ainda.</small>`}</div></div>`;qs("#rankingBattleForm").onsubmit=async e=>{e.preventDefault();const err=qs("#battleError");err.textContent="";try{await api("/api/ranking-battles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ranking_type:qs("#battleType").value,opponent_id:Number(qs("#battleOpponent").value),result:qs("#battleResult").value,proof_url:qs("#battleProof").value,notes:qs("#battleNotes").value})});await loadRanking();}catch(ex){err.textContent=ex.message;}};qsa("[data-confirm-battle]").forEach(btn=>btn.onclick=async()=>{try{await api(`/api/ranking-battles/${btn.dataset.confirmBattle}/confirm`,{method:"POST"});await loadRanking();}catch(ex){alert(ex.message)}});
+  }catch(e){el.innerHTML=`<div class="ranking-note">${escapeHtml(e.message)}</div>`;}
+}
+
+async function loadAdminRankingBattles(){const list=qs("#adminRankingBattleList");if(!list)return;try{const status=qs("#adminRankingBattleStatus")?.value||"AGUARDANDO_ADMIN";const d=await adminApi(`/api/admin/ranking-battles?status=${encodeURIComponent(status)}`);state.adminRankingBattles=d.battles||[];list.innerHTML=state.adminRankingBattles.length?state.adminRankingBattles.map(x=>`<div class="admin-battle-row"><div><b>${escapeHtml(x.ranking_type)} • ${escapeHtml(x.challenger_nick)} × ${escapeHtml(x.opponent_nick)}</b><small>${escapeHtml(x.status)} • Resultado: ${escapeHtml(x.result)} • Antes: ${x.challenger_score_before} × ${x.opponent_score_before}</small>${x.proof_url?`<a href="${escapeHtml(x.proof_url)}" target="_blank" rel="noopener">Abrir prova</a>`:""}</div>${x.status==="AGUARDANDO_ADMIN"?`<div class="admin-battle-actions"><input type="number" min="0" id="cs-${x.id}" value="${x.challenger_score_before}" placeholder="SC/VT final"><input type="number" min="0" id="os-${x.id}" value="${x.opponent_score_before}" placeholder="SC/VT final"><button class="gold small" type="button" data-approve-battle="${x.id}">Aprovar</button><button class="outline danger small" type="button" data-reject-battle="${x.id}">Rejeitar</button></div>`:`<div class="admin-battle-final">${x.challenger_score_after??"—"} × ${x.opponent_score_after??"—"}</div>`}</div>`).join(""):`<div class="admin-history-empty">Nenhum registro nesta categoria.</div>`;qsa("[data-approve-battle]").forEach(b=>b.onclick=async()=>{const id=b.dataset.approveBattle;try{await adminApi(`/api/admin/ranking-battles/${id}/approve`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({challenger_score_after:Number(qs(`#cs-${id}`).value),opponent_score_after:Number(qs(`#os-${id}`).value)})});await loadAdminRankingBattles();}catch(ex){alert(ex.message)}});qsa("[data-reject-battle]").forEach(b=>b.onclick=async()=>{const reason=prompt("Motivo da rejeição:")??"";try{await adminApi(`/api/admin/ranking-battles/${b.dataset.rejectBattle}/reject`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason})});await loadAdminRankingBattles();}catch(ex){alert(ex.message)}});}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
 
 
 function playerAlertStorageKey(id){
@@ -897,6 +867,7 @@ document.addEventListener("submit",async e=>{
   catch(ex){alert(ex.message)}
 });
 
+qs("#adminRankingRefresh")?.addEventListener("click",loadAdminRankingBattles);qs("#adminRankingBattleStatus")?.addEventListener("change",loadAdminRankingBattles);
 qs("#backToDashboard")?.addEventListener("click",()=>go("dashboard"));
 
 function getStoredAdminKey(){
@@ -918,7 +889,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -1163,6 +1134,7 @@ qs("#adminMissionClear")?.addEventListener("click",clearAdminMissionForm);
 qs("#adminMissionForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#adminMissionError");err.textContent="";const body={mission_type:qs("#adminMissionType").value,start_at:qs("#adminMissionStart").value,end_at:qs("#adminMissionEnd").value,status:qs("#adminMissionStatus").value,reward_yuls:Number(qs("#adminMissionYuls").value||0),reward_exp:Number(qs("#adminMissionExp").value||0),reward_cards:qs("#adminMissionCards").value,description:qs("#adminMissionDescription").value,instructions:qs("#adminMissionInstructions").value};const id=qs("#adminMissionId").value;try{await adminApi(id?`/api/admin/missions/${id}`:"/api/admin/missions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminMissionForm();await loadAdminMissions();await loadMissions();alert(id?"Missão atualizada.":"Missão publicada.");}catch(ex){err.textContent=ex.message}});
 
 async function initAdmin(){
+  if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
   setAdminPermissionVisibility();
   try{
