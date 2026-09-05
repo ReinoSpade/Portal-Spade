@@ -2049,65 +2049,6 @@ function missionStatusFromDates(startAt,endAt,status){
   return "CONCLUIDA";
 }
 
-function spadeToday(){
-  return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo"}).format(new Date());
-}
-
-// Eventos usam datas (não horário) como referência pública no Portal.
-function eventIsLiveSql(alias="events"){
-  const a=alias;
-  return `((${a}.status='ATIVO') OR (${a}.start_date IS NOT NULL AND ${a}.start_date <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (${a}.end_date IS NULL OR ${a}.end_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)))`;
-}
-
-function eventDisplayStatus(event){
-  const stored=String(event?.status||"").toUpperCase();
-  if(stored==="CANCELADO"||stored==="CANCELADA") return "CANCELADO";
-  if(stored==="ENCERRADO"||stored==="CONCLUIDO"||stored==="CONCLUÍDO") return "ENCERRADO";
-  const today=spadeToday();
-  const start=event?.start_date?String(event.start_date).slice(0,10):"";
-  const end=event?.end_date?String(event.end_date).slice(0,10):"";
-  if(start && today<start) return "PLANEJADO";
-  if(start && today>=start && (!end || today<=end)) return "ATIVO";
-  if(end && today>end) return "ENCERRADO";
-  return stored||"PLANEJADO";
-}
-
-function brDate(value){
-  const s=String(value||"").slice(0,10);
-  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m?`${m[3]}/${m[2]}/${m[1]}`:s;
-}
-
-function brDateTime(value){
-  const d=new Date(value);
-  if(Number.isNaN(d.getTime())) return String(value||"");
-  return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",dateStyle:"short",timeStyle:"short"}).format(d);
-}
-
-function mergeLiveActivities(scheduleRows=[],eventRows=[],missionRows=[]){
-  const out=[];
-  const seenEvents=new Set();
-  const seenMissions=new Set();
-  for(const s of scheduleRows||[]){
-    if(s.event_id){ seenEvents.add(Number(s.event_id)); continue; }
-    if(s.mission_id){ seenMissions.add(Number(s.mission_id)); continue; }
-    out.push({source:"SCHEDULE",id:Number(s.id),title:s.title||"Atividade",activity_type:s.activity_type||"ATIVIDADE",description:s.description||"",activity_date:s.activity_date,start_time:s.start_time,end_time:s.end_time,status:s.status||"EM_ANDAMENTO",event_id:null,mission_id:null,end_label:s.end_time||brDate(s.activity_date)});
-  }
-  for(const e of eventRows||[]){
-    if(seenEvents.has(Number(e.id))) continue;
-    out.push({source:"EVENT",id:Number(e.id),event_id:Number(e.id),mission_id:null,title:e.title||"Evento",activity_type:e.event_type||"EVENTO",description:e.description||"",activity_date:e.start_date,start_time:null,end_time:null,status:eventDisplayStatus(e),end_label:e.end_date?brDate(e.end_date):""});
-  }
-  for(const m of missionRows||[]){
-    if(seenMissions.has(Number(m.id))) continue;
-    out.push({source:"MISSION",id:Number(m.id),event_id:null,mission_id:Number(m.id),title:`Missão de ${m.mission_type||"Missão"}`,activity_type:"MISSÃO",description:m.description||"",activity_date:m.start_at,start_time:null,end_time:null,status:missionStatusFromDates(m.start_at,m.end_at,m.status),end_label:m.end_at?brDateTime(m.end_at):""});
-  }
-  return out.sort((a,b)=>{
-    const ae=a.source==="EVENT"?0:a.source==="MISSION"?1:2;
-    const be=b.source==="EVENT"?0:b.source==="MISSION"?1:2;
-    return ae-be || String(a.activity_date||"").localeCompare(String(b.activity_date||""));
-  });
-}
-
 app.get("/api/missions", async (req,res)=>{
   const viewer=await resolveViewer(req);
   if(!viewer) return res.status(401).json({error:"Faça login para visualizar as missões."});
@@ -3049,7 +2990,6 @@ app.delete("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
 });
 
 
-const CARD_CATEGORIES=["Falha","Fuga","Ataque/Defesa","Barreira","Paralisia","Magia Ofensiva","Réplica","Técnica","Ativação","Invocação","Ilusão","Regeneração","Outros"];
 let CARD_ORIGINS=["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"];
 const CARD_ELEMENT_TYPES=["ELEMENTAL","NAO_ELEMENTAL"];
 const CARD_COST_TYPES=["MANA","VIDA","SEM_CUSTO"];
@@ -3091,10 +3031,11 @@ app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
   const description=String(b.description||"").trim();
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
   if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
-  if(!CARD_CATEGORIES.includes(category))return res.status(400).json({error:"Categoria de card inválida."});
   if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
   if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
   try{
+    const categoryCheck=await pool.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
+    if(!categoryCheck.rowCount)return res.status(400).json({error:"Categoria de card inválida ou inativa."});
     const r=await pool.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,origin,status,description,sort_order,active)
       VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,origin,status,description,sort_order,status==="ATIVO"?1:0]);
     res.json({card:r.rows[0]});
@@ -3109,9 +3050,11 @@ app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
   if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
-  if(!CARD_CATEGORIES.includes(category)||!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
   if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
   try{
+    const categoryCheck=await pool.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
+    if(!categoryCheck.rowCount)return res.status(400).json({error:"Categoria de card inválida ou inativa."});
     const r=await pool.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,origin=$9,status=$10,description=$11,sort_order=$12,active=$13,updated_at=NOW() WHERE id=$14 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
     if(!r.rows[0])return res.status(404).json({error:"Card não encontrado."});
     res.json({card:r.rows[0]});
