@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[]};
+const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -44,22 +44,11 @@ async function api(url,options={}){
 
 async function loadHome(){
   try{
-    const d=await api("/api/home");state.data=d;renderHomeAnnouncements(d.announcements||[]);
-    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url(\'${escapeHtml(n.image_url)}\')`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
+    const [d,active]=await Promise.all([api("/api/home"),api("/api/active-activities")]);state.data=d;state.activeActivities=active.activities||[];renderHomeAnnouncements(d.announcements||[]);renderHomeActiveActivities(state.activeActivities);
+    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
     const e=d.editions[0];qs("#editionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
-    try{ const ev=await api("/api/events"); state.events=ev.events||[]; renderHomeEventAlert(state.events); }catch{}
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
 }
-
-function renderHomeEventAlert(items){
-  const el=qs("#homeEventAlert"); if(!el)return;
-  const active=(items||[]).filter(e=>e.status==="ATIVO");
-  if(!active.length){el.innerHTML="";return;}
-  const e=active[0];
-  el.innerHTML=`<div class="event-live-alert"><div class="event-live-alert-icon">🎪</div><div class="event-live-alert-main"><p class="eyebrow">ACONTECENDO AGORA</p><h3>${escapeHtml(e.title)}</h3><p>${escapeHtml(e.description||"Um evento oficial de Spade está acontecendo agora.")}</p><small>${e.end_date?`Encerra em ${escapeHtml(statusDateLabel(e.end_date))}`:"Consulte as informações do evento."}</small></div><button class="gold small" type="button" data-home-event-open="${e.id}">Ver evento</button></div>`;
-  qs("[data-home-event-open]")?.addEventListener("click",()=>openPublicEvent(Number(e.id)));
-}
-
 
 async function loadAnnouncements(){
   try{
@@ -113,6 +102,11 @@ function renderAnnouncements(items){
         </article>`).join("")
       : `<div class="panel"><p>Nenhum outro comunicado publicado.</p></div>`;
   }
+}
+
+function renderHomeActiveActivities(items){
+  const el=qs("#homeActiveActivities"); if(!el)return;
+  el.innerHTML=(items||[]).length?`<div class="home-active-wrap"><div class="section-head"><div><p class="eyebrow">♠️ ATIVIDADE OFICIAL</p><h2>Acontecendo agora</h2></div><button class="outline dark-outline" data-page="cronograma">Ver cronograma</button></div><div class="home-active-grid">${items.slice(0,4).map(a=>{const kind=a.mission_type?`Missão de ${a.mission_type}`:(a.event_title?`Evento: ${a.event_title}`:(a.activity_type||"Atividade"));const end=a.end_time?String(a.end_time).slice(0,5):(a.mission_end_at?new Date(a.mission_end_at).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"");return `<article class="home-active-card"><span class="tag">ACONTECENDO AGORA</span><h3>${escapeHtml(a.title||kind)}</h3><p>${escapeHtml(a.description||kind)}</p>${end?`<small>Encerra às <b>${escapeHtml(end)}</b></small>`:""}<button class="gold small" data-page="cronograma">Ver atividade</button></article>`}).join("")}</div></div>`:"";
 }
 
 function renderHomeAnnouncements(items){
@@ -307,7 +301,7 @@ async function openPublicEvent(id){
     const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`;
     wrap.innerHTML=`<div class="event-public-detail">
       <button class="journal-close" id="closeEventReader">×</button>
-      <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span>${e.status==="ATIVO"?`<span class="event-live-pill">🎪 ACONTECENDO AGORA</span>`:""}</div>
+      <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span></div>
       <h2>${escapeHtml(e.title)}</h2><p>${escapeHtml(e.description||"")}</p>${e.rules?`<div style="margin-top:12px;font-size:10px;color:#666;white-space:pre-line"><b>Regras:</b><br>${escapeHtml(e.rules)}</div>`:""}</div>
       <div class="event-public-section"><h3>Como ganhar</h3><div class="event-action-list">${actions}</div></div>
       <div class="event-public-section"><h3>Cards disponíveis</h3><div class="event-reward-list">${rewards}</div></div>
@@ -1044,6 +1038,7 @@ async function loadAdminSchedule(){
     const d=await adminApi("/api/admin/schedule");
     state.adminSchedule=d.activities||[];
     populateScheduleEventSelect();
+    populateScheduleMissionSelect();
     renderAdminSchedule();
   }catch(e){
     const er=qs("#scheduleError");if(er)er.textContent=e.message;
@@ -1053,6 +1048,12 @@ function populateScheduleEventSelect(){
   const el=qs("#scheduleEvent");if(!el)return;
   const current=el.value;
   el.innerHTML=`<option value="">Sem evento vinculado</option>`+(state.adminEvents||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.title)}</option>`).join("");
+  if(current)el.value=current;
+}
+function populateScheduleMissionSelect(){
+  const el=qs("#scheduleMission");if(!el)return;
+  const current=el.value;
+  el.innerHTML=`<option value="">Sem missão vinculada</option>`+(state.adminMissions||[]).map(m=>`<option value="${m.id}">Missão de ${escapeHtml(m.mission_type||"Missão")} — ${escapeHtml(m.start_at?new Date(m.start_at).toLocaleDateString("pt-BR"):"")}</option>`).join("");
   if(current)el.value=current;
 }
 function resetScheduleForm(){
@@ -1074,7 +1075,7 @@ function editAdminSchedule(id){
   qs("#scheduleStart").value=a.start_time?String(a.start_time).slice(0,5):"";
   qs("#scheduleEnd").value=a.end_time?String(a.end_time).slice(0,5):"";
   qs("#scheduleLocation").value=a.location||"";qs("#scheduleLink").value=a.link||"";
-  qs("#scheduleEvent").value=a.event_id?String(a.event_id):"";
+  qs("#scheduleEvent").value=a.event_id?String(a.event_id):"";qs("#scheduleMission").value=a.mission_id?String(a.mission_id):"";
   qs("#scheduleDescription").value=a.description||"";
   qs("#scheduleFeatured").checked=Number(a.featured)===1;
   qs("#schedulePublished").checked=Number(a.published)===1;
@@ -2047,7 +2048,7 @@ qs("#scheduleForm").addEventListener("submit",async e=>{
   const b=Object.fromEntries(new FormData(e.target).entries());
   b.featured=qs("#scheduleFeatured").checked?1:0;
   b.published=qs("#schedulePublished").checked?1:0;
-  b.event_id=qs("#scheduleEvent").value||null;
+  b.event_id=qs("#scheduleEvent").value||null;b.mission_id=qs("#scheduleMission").value||null;
   try{
     if(b.id)await adminApi(`/api/admin/schedule/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
     else await adminApi("/api/admin/schedule",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
