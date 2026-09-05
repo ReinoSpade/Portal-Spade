@@ -1185,3 +1185,13 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-2;ba
 @media(max-width:900px){.magic-crest{right:5%;top:22%;transform:none;width:150px;height:150px;opacity:.55}.magic-rune{width:56px;height:56px;font-size:32px}.magic-seal-glow{box-shadow:none}}
 @media(max-width:620px){.hero::before,.hero::after{display:none}.magic-crest{position:relative;right:auto;top:auto;margin:26px auto 0;opacity:.46;width:150px;height:150px}.hero{grid-template-columns:1fr}.magic-traits{gap:6px}.magic-traits span{font-size:8px;padding:6px 8px}.subhero::after{display:none}}
 @media(prefers-reduced-motion:reduce){body::before,.magic-atmosphere,.hero::before,.hero::after,.magic-ring,.magic-rune,.magic-star,.subhero::after,.site-footer::before{animation:none!important}.news-card:hover,.panel:hover,.player-card:hover,.house-card:hover,.edition:hover{transform:none}}
+
+/* V52.7 — cargos, ocupantes e segurança visual do importador */
+.player-import-modal[hidden]{display:none!important}
+.public-patent-card:hover{border-color:#b79a63;background:#fffdf8;box-shadow:var(--shadow-sm)}
+.role-occupants-block{grid-column:1/-1}
+.role-occupants-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.role-occupant{background:#fff;border:1px solid #e2d9cc;border-radius:8px;padding:9px 10px}
+.role-occupant b{display:block;font:600 11px Cinzel;color:#2b2824}
+.role-occupant small{display:block;color:#7a736a;font-size:8px;margin-top:4px}
+@media(max-width:600px){.role-occupants-list{grid-template-columns:1fr}}
