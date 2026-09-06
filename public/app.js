@@ -147,7 +147,7 @@ async function api(url,options={}){
 
 async function loadHome(){
   try{
-    const [d,active]=await Promise.all([api("/api/home"),api("/api/active-activities")]);state.data=d;state.activeActivities=active.activities||[];renderHomeAnnouncements(d.announcements||[]);renderHomeActiveActivities(state.activeActivities);
+    const d=await api("/api/home");let active={activities:[]};try{active=await api("/api/active-activities")}catch(_){/* feed ao vivo indisponível não bloqueia a Home */}state.data=d;state.activeActivities=active.activities||[];renderHomeAnnouncements(d.announcements||[]);renderHomeActiveActivities(state.activeActivities);
     qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
     const e=d.editions[0];qs("#editionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
