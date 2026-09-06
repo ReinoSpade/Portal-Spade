@@ -17,19 +17,12 @@ const AMBIENT_TRACKS={
   journal:"/assets/audio/spade-journal.ogg",
   market:"/assets/audio/spade-market.ogg"
 };
-const PAGE_THEME={home:"home",guia:"guide",grimorio:"grimoire",biblioteca:"grimoire",jornal:"journal",comunicados:"journal",cards:"battle",missoes:"battle",eventos:"battle",cronograma:"battle",ranking:"battle",casas:"home",jogadores:"home",status:"home",cargos:"home",hierarquia:"home",admin:"home",
-  "admin-login":"home"};
-function setAmbientTheme(page){
-  state.ambient.theme=PAGE_THEME[page]||"home";
-  document.body.dataset.ambientTheme=state.ambient.theme;
-  if(state.ambient.sound) playAmbientTheme();
-}
-async function playAmbientTheme(){
-  const audio=qs("#ambientAudio"); if(!audio||!state.ambient.sound)return;
-  const src=AMBIENT_TRACKS[state.ambient.theme]||AMBIENT_TRACKS.home;
-  if(!audio.src.endsWith(src)){audio.src=src;audio.load();}
-  audio.volume=.18;
-  try{await audio.play();}catch{}
+const PAGE_THEME={home:"home",guia:"guide",grimorio:"grimoire",biblioteca:"grimoire",jornal:"journal",comunicados:"journal",cards:"battle",missoes:"battle",eventos:"battle",cronograma:"battle",ranking:"battle",casas:"home",jogadores:"home",status:"home",cargos:"home",hierarquia:"home",admin:"home","admin-login":"home"};
+function ambientReadStorage(){
+  try{
+    state.ambient.effects=localStorage.getItem("spade-effects")!=="0";
+    state.ambient.sound=localStorage.getItem("spade-sound")==="1";
+  }catch{}
 }
 function updateAmbientButtons(){
   const eb=qs("#ambientEffectsBtn"),sb=qs("#ambientSoundBtn");
@@ -37,12 +30,70 @@ function updateAmbientButtons(){
   if(sb){sb.textContent=state.ambient.sound?"🔊 Som ON":"🔊 Som OFF";sb.setAttribute("aria-pressed",String(state.ambient.sound));}
   document.body.classList.toggle("magic-effects-off",!state.ambient.effects);
 }
-function initSpadeAmbient(){
-  try{state.ambient.effects=localStorage.getItem("spade-effects")!=="0";state.ambient.sound=localStorage.getItem("spade-sound")==="1";}catch{}
-  updateAmbientButtons();
-  qs("#ambientEffectsBtn")?.addEventListener("click",()=>{state.ambient.effects=!state.ambient.effects;try{localStorage.setItem("spade-effects",state.ambient.effects?"1":"0")}catch{};updateAmbientButtons();});
-  qs("#ambientSoundBtn")?.addEventListener("click",()=>{state.ambient.sound=!state.ambient.sound;try{localStorage.setItem("spade-sound",state.ambient.sound?"1":"0")}catch{};updateAmbientButtons();if(state.ambient.sound)playAmbientTheme();else qs("#ambientAudio")?.pause();});
+function setAmbientTheme(page){
+  state.ambient.theme=PAGE_THEME[page]||"home";
+  document.body.dataset.ambientTheme=state.ambient.theme;
+  if(state.ambient.sound) playAmbientTheme();
 }
+async function playAmbientTheme(){
+  const audio=qs("#ambientAudio");
+  if(!audio || !state.ambient.sound)return false;
+  const src=AMBIENT_TRACKS[state.ambient.theme]||AMBIENT_TRACKS.home;
+  try{
+    if(!audio.dataset.loadedTheme || audio.dataset.loadedTheme!==state.ambient.theme){
+      audio.src=src;
+      audio.dataset.loadedTheme=state.ambient.theme;
+      audio.load();
+    }
+    audio.loop=true;
+    audio.volume=.18;
+    audio.muted=false;
+    await audio.play();
+    return true;
+  }catch(e){
+    // The browser may reject media playback. The toggle itself still stays functional.
+    console.warn("Ambiente Spade: não foi possível tocar a trilha de áudio.",e);
+    return false;
+  }
+}
+function stopAmbientTheme(){
+  const audio=qs("#ambientAudio");
+  if(audio){audio.pause();audio.currentTime=0;audio.muted=true;}
+}
+function saveAmbientSettings(){
+  try{
+    localStorage.setItem("spade-effects",state.ambient.effects?"1":"0");
+    localStorage.setItem("spade-sound",state.ambient.sound?"1":"0");
+  }catch{}
+}
+function initSpadeAmbient(){
+  ambientReadStorage();
+  updateAmbientButtons();
+
+  // Delegação de eventos: continua funcionando mesmo que a interface seja re-renderizada.
+  document.addEventListener("click",async e=>{
+    const effects=e.target.closest("#ambientEffectsBtn");
+    const sound=e.target.closest("#ambientSoundBtn");
+    if(effects){
+      state.ambient.effects=!state.ambient.effects;
+      saveAmbientSettings();
+      updateAmbientButtons();
+      return;
+    }
+    if(sound){
+      const enabled=!state.ambient.sound;
+      state.ambient.sound=enabled;
+      saveAmbientSettings();
+      updateAmbientButtons();
+      if(enabled){
+        await playAmbientTheme();
+      }else{
+        stopAmbientTheme();
+      }
+    }
+  });
+}
+
 function runPageTransition(){
   const el=qs("#pageTransition"); if(!el||!state.ambient.effects||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
   el.classList.remove("show");void el.offsetWidth;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),520);
