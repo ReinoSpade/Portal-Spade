@@ -9,6 +9,17 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<!-- V53.1 — Ambiente Spade -->
+<div class="ambient-controls" id="spadeAmbientControls" aria-label="Controles de ambiente do Portal">
+  <div class="ambient-title"><span class="ambient-pulse"></span><b>♠ Ambiente Spade</b></div>
+  <div class="ambient-buttons">
+    <button type="button" class="ambient-btn" id="ambientEffectsBtn" aria-pressed="true">✨ Efeitos ON</button>
+    <button type="button" class="ambient-btn" id="ambientSoundBtn" aria-pressed="false">🔊 Som OFF</button>
+  </div>
+</div>
+<div class="page-transition" id="pageTransition" aria-hidden="true"><div class="transition-sigil">♠</div></div>
+<audio id="ambientAudio" preload="auto" loop></audio>
+
 <a class="skip-link" href="#mainContent">Pular para o conteúdo</a>
 
 <!-- V52.1 — Atmosfera mágica do RPG Black Clover -->
@@ -28,7 +39,7 @@
     <div id="globalSearchResults" class="global-search-results" hidden></div>
   </div>
   <nav id="nav">
-    <button data-page="home">Início</button><button data-page="guia">📖 Guia do Novato</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="notificacoes" id="notificationsNav" class="player-only-nav" style="display:none">🔔 Avisos <span id="notificationBadge" class="notification-badge" style="display:none">0</span></button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos & Ocupantes</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Hierarquia</button><button data-page="biblioteca">📚 Biblioteca</button>
+    <button data-page="home">Início</button><button data-page="guia">📖 Guia do Novato</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="notificacoes" id="notificationsNav" class="player-only-nav" style="display:none">🔔 Avisos <span id="notificationBadge" class="notification-badge" style="display:none">0</span></button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos & Ocupantes</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="grimorio" id="grimoireNav" class="player-only-nav" style="display:none">📖 Meu Grimório</button><button data-page="hierarquia">Hierarquia</button><button data-page="biblioteca">📚 Biblioteca</button>
     <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
@@ -391,6 +402,23 @@
     <div class="sheet-footer-note">Esta ficha é atualizada automaticamente pelos registros administrativos.</div>
   </div>
 </div></section>
+
+<section class="page" id="grimorio" aria-label="Meu Grimório">
+  <div class="grimoire-hero">
+    <div class="grimoire-intro">
+      <p class="eyebrow">📖 GRIMÓRIO DO MAGO</p>
+      <h1 id="grimoireTitle">Seu Grimório</h1>
+      <p id="grimoireIntroText">Cada página guarda uma conquista da sua evolução. Conforme os níveis avançam, novas magias passam a fazer parte do seu livro.</p>
+      <div class="grimoire-stats"><span>✨ EXP <b id="grimoireExp">0</b></span><span>🎖️ <b id="grimoirePatent">—</b></span><span>📜 <b id="grimoirePageCount">0</b> páginas</span></div>
+    </div>
+    <div class="grimoire-book" id="grimoireBook" aria-label="Grimório aberto">
+      <div class="book-spine"></div>
+      <div class="book-page book-left"><div class="page-ornament">♠</div></div>
+      <div class="book-page book-right"><div class="grimoire-pages" id="grimoirePages"><p class="grimoire-empty">As páginas do seu Grimório ainda aguardam seus registros.</p></div></div>
+      <div class="book-glow"></div>
+    </div>
+  </div>
+</section>
 <section class="page" id="cards">
   <div class="subhero">
     <p class="eyebrow">INVENTÁRIO DO JOGADOR</p>
