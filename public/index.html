@@ -834,9 +834,13 @@
       <div class="edition-builder-head">
         <div>
           <p class="eyebrow">EDIÇÃO</p>
-          <h3>Crie ou escolha uma edição</h3>
+          <h3 id="editionEditorHeading">Crie ou escolha uma edição</h3>
+          <p id="editionEditorMode" class="editor-mode-note">Cadastre uma nova edição ou selecione uma edição antiga para editar.</p>
         </div>
-        <select id="editorEditionSelect" class="admin-filter"></select>
+        <div class="edition-editor-head-actions">
+          <select id="editorEditionSelect" class="admin-filter"></select>
+          <button class="outline dark-outline small" type="button" id="newEditionBtn">＋ Nova edição</button>
+        </div>
       </div>
       <form id="editionForm" class="admin-form" style="margin-bottom:14px">
         <div class="article-form-grid">
