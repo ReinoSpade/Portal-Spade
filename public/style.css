@@ -1283,3 +1283,24 @@ button.gold,button.outline{position:relative}.gold::before,.outline::before{cont
 @media(max-width:900px){.grimoire-hero{grid-template-columns:1fr}.grimoire-book{height:420px;max-width:620px;width:100%;margin:0 auto}.ambient-controls{right:10px;bottom:10px}.ambient-title{font-size:9px}}
 @media(max-width:700px){.grimoire-book{height:370px}.grimoire-pages{inset:25px 20px 25px 25px}.grimoire-magic-page h3{font-size:13px}.grimoire-stats{gap:5px}.grimoire-stats span{font-size:8px}.ambient-controls{left:10px;right:auto;min-width:0}.ambient-buttons{justify-content:flex-start}}
 @media(prefers-reduced-motion:reduce){body::before,.mana-mote,.magic-ring,.card-magic-aura,.book-glow,.ambient-pulse,.grimoire-book{animation:none!important}.page-transition{display:none!important}}
+
+/* V53.2 — progressão de EXP e Grimório */
+.grimoire-progress-wrap{margin-top:18px;max-width:760px;padding:14px 16px;border:1px solid rgba(212,168,76,.18);border-radius:14px;background:rgba(8,12,18,.42);backdrop-filter:blur(8px)}
+.grimoire-progress-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;color:rgba(255,255,255,.78);font-size:12px}
+.grimoire-progress-head b{font-family:Cinzel,serif;color:#e8c879;white-space:nowrap}
+.grimoire-progress{height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.grimoire-progress span{display:block;height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,rgba(143,111,207,.85),rgba(232,200,121,.95));box-shadow:0 0 18px rgba(170,135,230,.35);transition:width .7s ease}
+.grimoire-progress-wrap small{display:block;margin-top:8px;color:rgba(255,255,255,.56);line-height:1.45}
+.exp-box{margin-bottom:20px;padding:16px;border:1px solid rgba(212,168,76,.18);border-radius:16px;background:linear-gradient(180deg,rgba(19,23,33,.96),rgba(10,14,21,.92))}
+.exp-box-head{display:grid;grid-template-columns:1fr 160px;gap:16px;align-items:center}
+.exp-box-head h4{margin:.2rem 0 .35rem;font-family:Cinzel,serif;color:#f3dfab}
+.exp-box-head small{color:rgba(255,255,255,.58)}
+.exp-mini-progress{height:9px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden}
+.exp-mini-progress span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#7f61ba,#e0bd6e);transition:width .6s ease}
+.exp-admin-form{display:grid;grid-template-columns:1.1fr .7fr 1fr 1fr auto;gap:8px;margin-top:14px}
+.exp-admin-form input,.exp-admin-form select{min-width:0}
+.exp-rules-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:12px}
+.exp-rules-grid span{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05);font-size:10px}
+.exp-rules-grid b{font-weight:600;color:rgba(255,255,255,.8)}
+.exp-rules-grid small{color:#d7b968;white-space:nowrap}
+@media(max-width:760px){.exp-box-head{grid-template-columns:1fr}.exp-admin-form{grid-template-columns:1fr}.exp-rules-grid{grid-template-columns:1fr}.grimoire-progress-head{align-items:flex-start;flex-direction:column;gap:4px}}
