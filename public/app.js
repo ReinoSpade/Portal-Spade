@@ -87,6 +87,13 @@ qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.pag
 qs("#hamb").addEventListener("click",()=>qs("#nav").classList.toggle("open"));
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();}});
 
+
+function initGuideNavigation(){
+  qsa('[data-guide-scroll]').forEach(btn=>btn.addEventListener('click',()=>{
+    const target=qs(`#${btn.dataset.guideScroll}`);
+    if(target) target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+  }));
+}
 async function api(url,options={}){
   options.credentials="same-origin";
   const r=await fetch(url,options);let d={};
@@ -2605,7 +2612,7 @@ async function tryAdminHash(){
   if(state.admin) go("admin"); else go("admin-login");
 }
 
-loadPortalPublicSettings();initGlobalSearch();loadHome();tryMe();setAdminNav();tryAdminHash();
+loadPortalPublicSettings();initGlobalSearch();initGuideNavigation();loadHome();tryMe();setAdminNav();tryAdminHash();
 
 
 function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
