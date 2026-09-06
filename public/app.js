@@ -2401,7 +2401,7 @@ async function deleteArticle(id){
 
 function populateEditorEditionSelect(){
   const el=qs("#editorEditionSelect");if(!el)return;
-  el.innerHTML=(state.adminEditions||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.edition||"Edição")} — ${escapeHtml(e.title)}</option>`).join("");
+  el.innerHTML=`<option value="">Selecione uma edição</option>`+(state.adminEditions||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.edition||"Edição")} — ${escapeHtml(e.title)}</option>`).join("");
   if(state.editorEditionId)el.value=String(state.editorEditionId);
   if(!state.editorEditionId&&state.adminEditions?.[0]){state.editorEditionId=Number(state.adminEditions[0].id);el.value=String(state.editorEditionId);}
 }
@@ -2554,8 +2554,9 @@ async function loadAdminEditorial(){
 function renderAdminEditorial(){
   const nl=qs("#adminNewsList"),el=qs("#adminEditionList");
   if(nl)nl.innerHTML=(state.adminNews||[]).map(n=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}${n.published?"":" • Rascunho"}</small></div><div class="editorial-actions"><button type="button" data-news-delete="${n.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma notícia.</div>`;
-  if(el)el.innerHTML=(state.adminEditions||[]).map(x=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.edition||"Edição")} • ${escapeHtml(String(x.date||""))}${x.pdf_url?" • PDF":" • sem PDF"}</small></div><div class="editorial-actions"><button type="button" data-edition-delete="${x.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição.</div>`;
+  if(el)el.innerHTML=(state.adminEditions||[]).map(x=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.edition||"Edição")} • ${escapeHtml(String(x.date||""))}${x.pdf_url?" • PDF":" • sem PDF"}</small></div><div class="editorial-actions"><button type="button" class="edit" data-edition-edit-short="${x.id}">✎ Editar</button><button type="button" class="delete" data-edition-delete="${x.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição.</div>`;
   qsa("[data-news-delete]").forEach(b=>b.onclick=()=>deleteNews(Number(b.dataset.newsDelete)));
+  qsa("[data-edition-edit-short]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionEditShort)));
   qsa("[data-edition-delete]").forEach(b=>b.onclick=()=>deleteEdition(Number(b.dataset.editionDelete)));
 }
 
@@ -2653,22 +2654,45 @@ qs("#eventRegisterActionBtn").addEventListener("click",async()=>{
   try{await adminApi(`/api/admin/events/${state.selectedEventId}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id,action_id,note})});qs("#eventActionNote").value="";await loadEventAdminDetails(state.selectedEventId);alert("Pontos registrados.")}catch(e){alert(e.message)}
 });
 
+function updateEditionEditorHeader(editing=false){
+  const h=qs("#editionEditorHeading"),m=qs("#editionEditorMode"),b=qs("#editionSaveBtn");
+  if(h)h.textContent=editing?"Editar edição existente":"Criar nova edição";
+  if(m)m.textContent=editing?"Altere os dados da edição e, abaixo, ajuste as matérias e a ordem em que serão publicadas.":"Cadastre uma nova edição ou selecione uma edição antiga para editar.";
+  if(b)b.textContent=editing?"Salvar alterações":"Criar edição";
+}
 function resetEditionForm(){
   const f=qs("#editionForm");if(!f)return;f.reset();
   qs("#editionId").value="";qs("#editionDate").value=new Date().toISOString().slice(0,10);
-  qs("#editionPublished").checked=false;qs("#editionSaveBtn").textContent="Criar edição";qs("#editionError").textContent="";
+  qs("#editionPublished").checked=false;qs("#editionError").textContent="";
+  const sel=qs("#editorEditionSelect");if(sel&&state.adminEditions?.[0])sel.value=String(state.adminEditions[0].id);
+  updateEditionEditorHeader(false);
+  renderEditionPicker(new Map());renderEditionOrder(new Map());
 }
-function editEdition(id){
+async function editEdition(id){
   const e=(state.adminEditions||[]).find(x=>Number(x.id)===id);if(!e)return;
   qs("#editionId").value=e.id;qs("#editionTitle").value=e.title||"";qs("#editionNumber").value=e.edition||"";
   qs("#editionDate").value=String(e.date||"").slice(0,10);qs("#editionCover").value=e.cover_url||"";qs("#editionPdf").value=e.pdf_url||"";
-  qs("#editionDescription").value=e.description||"";qs("#editionPublished").checked=!!e.published;qs("#editionSaveBtn").textContent="Salvar edição";
-  qs("#editionError").textContent="";qs("#editionTitle").focus();
+  qs("#editionDescription").value=e.description||"";qs("#editionPublished").checked=!!e.published;qs("#editionError").textContent="";
+  const sel=qs("#editorEditionSelect");if(sel)sel.value=String(e.id);
+  state.editorEditionId=Number(e.id);
+  updateEditionEditorHeader(true);
+  qsa(".journal-editor-tab").forEach(x=>x.classList.toggle("active",x.dataset.editorTab==="edition"));
+  qsa("[data-editor-panel]").forEach(x=>x.classList.toggle("active",x.dataset.editorPanel==="edition"));
+  await loadEditionComposition(Number(e.id));
+  qs("#editionTitle").focus();
+  qs("#editionForm")?.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function newEdition(){
+  const sel=qs("#editorEditionSelect");if(sel)sel.value="";
+  state.editorEditionId=0;
+  resetEditionForm();
+  qs("#editionTitle")?.focus();
 }
 function renderAdminEditions(){
   const el=qs("#adminEditionList");if(!el)return;
-  el.innerHTML=(state.adminEditions||[]).map(e=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(e.title)}</b><small>${escapeHtml(e.edition||"Edição")} • ${escapeHtml(String(e.date||""))} • ${e.article_count||0} matérias${e.published?"":" • Arquivada"}</small></div><div class="editorial-actions"><button type="button" data-edition-edit="${e.id}">✎</button><button type="button" class="delete" data-edition-delete="${e.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição cadastrada.</div>`;
+  el.innerHTML=(state.adminEditions||[]).map(e=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(e.title)}</b><small>${escapeHtml(e.edition||"Edição")} • ${escapeHtml(String(e.date||""))} • ${e.article_count||0} matérias${e.published?"":" • Arquivada"}</small><div class="edition-edit-hint">Clique em Editar para alterar dados e composição.</div></div><div class="editorial-actions"><button type="button" class="edit" data-edition-edit="${e.id}">✎ Editar</button><button type="button" class="outline dark-outline small" data-edition-compose="${e.id}">☷ Composição</button><button type="button" class="delete" data-edition-delete="${e.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição cadastrada.</div>`;
   qsa("[data-edition-edit]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionEdit)));
+  qsa("[data-edition-compose]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionCompose)));
   qsa("[data-edition-delete]").forEach(b=>b.onclick=async()=>{if(!confirm("Arquivar esta edição? O histórico será preservado."))return;try{await adminApi(`/api/admin/editions/${b.dataset.editionDelete}`,{method:"DELETE"});await loadAdminArticles();alert("Edição arquivada.")}catch(e){alert(e.message)}});
 }
 
@@ -2694,7 +2718,8 @@ qs("#editionForm").addEventListener("submit",async e=>{
   try{await adminApi(id?`/api/admin/editions/${id}`:"/api/admin/editions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});resetEditionForm();await loadAdminArticles();alert("Edição salva com sucesso.");}
   catch(ex){qs("#editionError").textContent=ex.message}
 });
-qs("#editorEditionSelect").addEventListener("change",e=>loadEditionComposition(Number(e.target.value)));
+qs("#editorEditionSelect").addEventListener("change",async e=>{const id=Number(e.target.value||0);if(!id){state.editorEditionId=0;resetEditionForm();return;}await editEdition(id);});
+qs("#newEditionBtn")?.addEventListener("click",newEdition);
 qs("#saveEditionCompositionBtn").addEventListener("click",saveEditionComposition);
 qsa(".journal-editor-tab").forEach(tab=>{
   tab.onclick=()=>{
