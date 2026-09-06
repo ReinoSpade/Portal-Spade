@@ -409,7 +409,12 @@
       <p class="eyebrow">📖 GRIMÓRIO DO MAGO</p>
       <h1 id="grimoireTitle">Seu Grimório</h1>
       <p id="grimoireIntroText">Cada página guarda uma conquista da sua evolução. Conforme os níveis avançam, novas magias passam a fazer parte do seu livro.</p>
-      <div class="grimoire-stats"><span>✨ EXP <b id="grimoireExp">0</b></span><span>🎖️ <b id="grimoirePatent">—</b></span><span>📜 <b id="grimoirePageCount">0</b> páginas</span></div>
+      <div class="grimoire-stats"><span>✨ EXP <b id="grimoireExp">0</b>%</span><span>🎖️ <b id="grimoirePatent">—</b></span><span>📈 Nível <b id="grimoireLevel">1</b></span><span>📜 <b id="grimoirePageCount">0</b> páginas</span></div>
+      <div class="grimoire-progress-wrap">
+        <div class="grimoire-progress-head"><span>Progresso para o próximo nível</span><b id="grimoireProgressLabel">—</b></div>
+        <div class="grimoire-progress"><span id="grimoireProgressBar"></span></div>
+        <small id="grimoireProgressHint">A EXP volta a zero quando o nível é alcançado.</small>
+      </div>
     </div>
     <div class="grimoire-book" id="grimoireBook" aria-label="Grimório aberto">
       <div class="book-spine"></div>
