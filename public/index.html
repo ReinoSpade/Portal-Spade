@@ -28,15 +28,125 @@
     <div id="globalSearchResults" class="global-search-results" hidden></div>
   </div>
   <nav id="nav">
-    <button data-page="home">Início</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="notificacoes" id="notificationsNav" class="player-only-nav" style="display:none">🔔 Avisos <span id="notificationBadge" class="notification-badge" style="display:none">0</span></button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos & Ocupantes</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Hierarquia</button><button data-page="biblioteca">📚 Biblioteca</button>
+    <button data-page="home">Início</button><button data-page="guia">📖 Guia do Novato</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="notificacoes" id="notificationsNav" class="player-only-nav" style="display:none">🔔 Avisos <span id="notificationBadge" class="notification-badge" style="display:none">0</span></button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos & Ocupantes</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="hierarquia">Hierarquia</button><button data-page="biblioteca">📚 Biblioteca</button>
     <button data-page="admin-login" id="adminNav">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
   </nav>
 </header>
 <main id="mainContent" tabindex="-1">
 <section class="page active" id="home">
-  <div class="hero"><div><p class="eyebrow magic-kicker">BLACK CLOVER RPG • PORTAL OFICIAL DO REINO SPADE</p><h1>A história do RPG<br><em>vive aqui.</em></h1><p class="lead">Jornal, jogadores, Casas, rankings e os grandes acontecimentos do Reino em um só lugar.</p><div class="magic-traits"><span>✦ Mana</span><span>♣ Grimórios</span><span>♠ Casas</span><span>⚔️ Magia</span></div><div class="actions"><button class="gold" data-page="jornal">Ler o jornal</button><button class="outline" data-page="login">Entrar como jogador</button></div></div><div class="magic-crest" aria-hidden="true"><div class="magic-ring ring-a"></div><div class="magic-ring ring-b"></div><div class="magic-rune">♣</div><div class="magic-star">✦</div></div><div class="seal">♠<small>REINO SPADE<br>PORTAL OFICIAL</small></div></div>
+  <div class="hero"><div><p class="eyebrow magic-kicker">BLACK CLOVER RPG • PORTAL OFICIAL DO REINO SPADE</p><h1>A história do RPG<br><em>vive aqui.</em></h1><p class="lead">Jornal, jogadores, Casas, rankings e os grandes acontecimentos do Reino em um só lugar.</p><div class="magic-traits"><span>✦ Mana</span><span>♣ Grimórios</span><span>♠ Casas</span><span>⚔️ Magia</span></div><div class="actions"><button class="gold" data-page="guia">Conhecer o RPG</button><button class="outline" data-page="login">Entrar no Reino</button></div>
+<div class="welcome-note"><p class="eyebrow">BEM-VINDO A SPADE</p><p>Antes de entrar para as Casas, conhecer os Cards ou buscar seu primeiro Grimório, reserve alguns minutos para entender como o Reino funciona e descobrir o caminho que você poderá construir aqui.</p></div></div><div class="magic-crest" aria-hidden="true"><div class="magic-ring ring-a"></div><div class="magic-ring ring-b"></div><div class="magic-rune">♣</div><div class="magic-star">✦</div></div><div class="seal">♠<small>REINO SPADE<br>PORTAL OFICIAL</small></div></div>
   <div class="content"><div id="homeActiveActivities"></div><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
   <div class="split"><div class="panel"><p class="eyebrow">EDIÇÃO ATUAL</p><h3 id="editionTitle">Carregando...</h3><p id="editionDesc"></p><button class="gold small" data-page="jornal">Abrir jornal</button></div><div class="panel"><p class="eyebrow">REINO</p><h3>O portal está vivo.</h3><p>As páginas públicas serão alimentadas pelos dados que você cadastrar no painel administrativo.</p></div></div></div>
+</section>
+<section class="page" id="guia">
+  <div class="guide-hero">
+    <div class="guide-hero-copy">
+      <p class="eyebrow">GUIA DO NOVATO • REINO SPADE</p>
+      <h1>Bem-vindo, <em>Mago.</em></h1>
+      <p class="guide-intro">Você não precisa conhecer todo o Reino antes de começar. Esta é a primeira página da sua jornada: uma apresentação para que você entenda onde está, como chegou até aqui e quais caminhos estarão diante de você.</p>
+      <div class="guide-actions">
+        <button class="gold" type="button" data-guide-scroll="como-comeca">Começar pelo essencial</button>
+        <button class="outline" type="button" data-guide-scroll="casas-iniciais">Conhecer as Casas</button>
+      </div>
+    </div>
+    <div class="guide-seal" aria-hidden="true"><div class="guide-ring"></div><div class="guide-symbol">♠</div><small>REINO<br>SPADE</small></div>
+  </div>
+
+  <div class="content guide-content">
+    <section class="guide-section intro-story" id="o-reino">
+      <div class="guide-heading"><span>01</span><div><p class="eyebrow">O REINO</p><h2>Uma nova potência começa a escrever sua história.</h2></div></div>
+      <div class="guide-prose">
+        <p>O Reino Spade iniciou suas atividades em 08 de agosto de 2026, tornando-se o terceiro reino aberto no RPG Black Clover, depois de Clover e Diamond. Sua criação trouxe uma proposta diferente para o universo do RPG: formar um reino de identidade militarizada e sombria, onde organização, competitividade e vontade de vencer ocupam um lugar central.</p>
+        <p>No anime, Spade é conhecido por sua força militar e por uma história marcada pela queda da Casa Grinberryall e pela ascensão da Tríade Negra. No RPG, essa inspiração serve como ponto de partida para uma versão própria do Reino: um ambiente mais rígido, mais organizado e construído para que seus Magos tenham espaço para disputar, evoluir e conquistar reconhecimento independentemente da diferença de poder com que iniciam sua caminhada.</p>
+        <p>Spade está sob a égide do Imperador Supremo Cooper Luminaris, enquanto a administração do próprio Reino é conduzida por Mattiel Novachrono, o Rei; Wesyx Zogratis, o Rei Mago; e Matityahu Grinberryall, o Conselheiro.</p>
+      </div>
+      <blockquote>Em Spade, poder mágico e determinação caminham juntos; o que você fará com aquilo que conquistar é parte da própria jornada.</blockquote>
+    </section>
+
+    <section class="guide-section steps-section" id="como-comeca">
+      <div class="guide-heading"><span>02</span><div><p class="eyebrow">PRIMEIROS PASSOS</p><h2>Sua entrada acontece aos poucos.</h2></div></div>
+      <p class="section-lead">Você não precisa descobrir tudo sozinho. A entrada no Reino segue um caminho simples, e cada etapa marca uma pequena mudança na sua posição dentro da comunidade.</p>
+      <div class="guide-steps">
+        <article><b>01</b><h3>Recrutamento</h3><p>Você é convidado para o RPG e recebe as orientações iniciais para preparar sua entrada.</p></article>
+        <article><b>02</b><h3>Ficha</h3><p>Preenche sua ficha e informa quem o convidou. Em seguida, envia o material no grupo responsável pela entrada.</p></article>
+        <article><b>03</b><h3>Seu elemento</h3><p>Um sorteio define seu elemento. A partir dele, sua identidade dentro do universo começa a ganhar forma.</p></article>
+        <article><b>04</b><h3>Sua Casa</h3><p>O líder da Casa o adiciona ao grupo, onde você começa a acompanhar a rotina e as orientações do Reino.</p></article>
+        <article><b>05</b><h3>Primeira missão</h3><p>Depois da sua primeira missão, sua entrada no Reino é oficialmente registrada.</p></article>
+      </div>
+    </section>
+
+    <section class="guide-section houses-section" id="casas-iniciais">
+      <div class="guide-heading"><span>03</span><div><p class="eyebrow">CASAS INICIAIS</p><h2>Três linhagens, três maneiras de jogar.</h2></div></div>
+      <p class="section-lead">As Casas representam sua origem dentro de Spade. Cada uma possui uma identidade própria e uma característica que influencia a forma como seus Magos lidam com a batalha.</p>
+      <div class="guide-house-grid">
+        <article class="guide-house house-zogratis"><div class="guide-house-symbol">☠️</div><p class="eyebrow">CASA ZOGRATIS</p><h3>Ossos</h3><p>A linhagem associada à força, resistência e domínio sobre aumento e redução de dano.</p><span>A Casa Zogratis esteve por trás do golpe que derrubou a antiga família real e instaurou a Tríade Negra no universo de Black Clover.</span></article>
+        <article class="guide-house house-grin"><div class="guide-house-symbol">🌟</div><p class="eyebrow">CASA GRINBERRYALL</p><h3>Estrelas</h3><p>Magos ligados à economia de Mana a cada magia, capazes de permanecer mais tempo em batalha utilizando seu arsenal.</p><span>É a linhagem da antiga família real de Spade, lembrada por seu governo pacífico e benevolente.</span></article>
+        <article class="guide-house house-nova"><div class="guide-house-symbol">⏳</div><p class="eyebrow">CASA NOVACHRONO</p><h3>Tempo</h3><p>Uma linhagem marcada pelo controle e pela sobrevivência, com imunidade a dano durante um turno de batalha.</p><span>Está ligada à figura de Julius Novachrono e aos mistérios que envolvem sua ligação com Lucius Zogratis.</span></article>
+      </div>
+    </section>
+
+    <section class="guide-section progression-section" id="progressao">
+      <div class="guide-heading"><span>04</span><div><p class="eyebrow">PROGRESSÃO</p><h2>Seu lugar no Reino pode mudar.</h2></div></div>
+      <p class="section-lead">Você começa como Mago Júnior. A evolução acontece por exames e períodos específicos do calendário, e cada nova patente representa uma etapa diferente da sua trajetória.</p>
+      <div class="patent-road"><article><b>☪️</b><strong>Júnior</strong><small>Início da jornada</small></article><i>→</i><article><b>⚜️</b><strong>Intermediário</strong><small>Exame dominical • VT</small></article><i>→</i><article><b>🔱</b><strong>Sênior</strong><small>Exame aos sábados • VT</small></article><i>→</i><article><b>⚛️</b><strong>Grão Mago</strong><small>Exame especial • 6 meses</small></article></div>
+      <div class="attribute-table-wrap"><table class="guide-attribute-table"><thead><tr><th>Patente</th><th>❤️ Vida</th><th>♦️ Mana</th><th>Como avançar</th></tr></thead><tbody><tr><td>☪️ Júnior</td><td>200</td><td>400</td><td>Ponto de partida</td></tr><tr><td>⚜️ Intermediário</td><td>300</td><td>600</td><td>Exame aos domingos • VT</td></tr><tr><td>🔱 Sênior</td><td>400</td><td>800</td><td>Exame aos sábados • 2x/mês • VT</td></tr><tr><td>⚛️ Grão Mago</td><td>800</td><td>1600</td><td>Exame especial • 6 em 6 meses</td></tr></tbody></table></div>
+      <div class="progression-note"><p>A cada nível ímpar, o Mago recebe uma nova Ativação. A cada nível par, recebe uma Magia Exclusiva.</p></div>
+    </section>
+
+    <section class="guide-section cards-guide-section" id="cards-iniciais">
+      <div class="guide-heading"><span>05</span><div><p class="eyebrow">CARDS</p><h2>O combate nasce das cartas que você conquista.</h2></div></div>
+      <div class="guide-prose"><p>O RPG é construído em torno de Cards. Ao entrar, você recebe o conjunto inicial correspondente à sua estrutura de Casa. Depois disso, sua coleção cresce através da participação no Reino: missões, eventos, torneios, organizações, loja e outras oportunidades podem colocar novas habilidades em suas mãos.</p><p>Você não precisa decorar seus Cards antes de começar. O sistema foi pensado para que o conhecimento aumente junto com a sua experiência. O Portal guardará seus Cards e, conforme você avança, poderá acompanhar seu arsenal e seu Poder.</p></div>
+      <div class="guide-flow"><span>🃏 Receber</span><b>→</b><span>⚔️ Utilizar</span><b>→</b><span>🏆 Conquistar</span><b>→</b><span>🃏 Evoluir</span><b>→</b><span>⚡ Aumentar o Poder</span></div>
+    </section>
+
+    <section class="guide-section activities-section" id="atividades">
+      <div class="guide-heading"><span>06</span><div><p class="eyebrow">A VIDA EM SPADE</p><h2>Sempre existe algo acontecendo.</h2></div></div>
+      <div class="guide-activities-grid">
+        <article><span>⚔️</span><h3>Missões</h3><p>Ocorrem às segundas, terças, quintas e sextas. Cada missão oferece um Card, ao menos 50 Yuls e 10 EXP.</p></article>
+        <article><span>🎉</span><h3>Eventos</h3><p>Possuem calendário próprio e podem abrir novas oportunidades de participação e recompensa.</p></article>
+        <article><span>🏆</span><h3>Torneios</h3><p>Podem acontecer em SC, VT ou Semi-VT, dependendo da proposta do torneio.</p></article>
+        <article><span>🎖️</span><h3>Exames</h3><p>Marcam sua evolução de patente e seguem o calendário geral do RPG.</p></article>
+        <article><span>📊</span><h3>Rankings</h3><p>Spade possui ranking interno, Arena Mágica para Júnior e Intermediário e Ranking Superior para Sênior e patentes acima.</p></article>
+        <article><span>🛠️</span><h3>Forja</h3><p>Existem Forjas de Reino e a Forja Geral, com funções diferentes para a criação de Cards.</p></article>
+        <article><span>🏪</span><h3>Loja Mágica</h3><p>Espaço de aquisição de Cards através de Yuls.</p></article>
+        <article><span>🌑</span><h3>Mercado Negro</h3><p>Área especial onde Cards são negociados por Dracmas.</p></article>
+      </div>
+    </section>
+
+    <section class="guide-section grimoires-section" id="grimorios">
+      <div class="guide-heading"><span>07</span><div><p class="eyebrow">GRIMÓRIOS</p><h2>Algumas coisas precisam esperar o momento certo.</h2></div></div>
+      <div class="guide-prose"><p>A Torre de Grimórios aparece no Cronograma do Reino e, quando aberta, permite que os Magos interessados coloquem seus nomes para participar do sorteio. É ali que sua relação com um Grimório pode começar.</p><p>No universo de Black Clover, a diferença entre três, quatro e cinco folhas está ligada à raridade e às características especiais do Grimório. Três folhas representam a forma comum; quatro folhas são extremamente raras e estão associadas à boa sorte; cinco folhas estão ligadas ao desespero e à relação com demônios.</p></div>
+      <div class="grimoire-cards"><article><b>🍀 3</b><h3>Folhas</h3><p>Comum</p><small>Fé, esperança e amor.</small></article><article><b>🍀 4</b><h3>Folhas</h3><p>Extremamente raro</p><small>Boa sorte e potencial excepcional.</small></article><article><b>🍀 5</b><h3>Folhas</h3><p>Anormal e temido</p><small>Desespero e ligação com demônios.</small></article></div>
+    </section>
+
+    <section class="guide-section world-section" id="outros-reinos">
+      <div class="guide-heading"><span>08</span><div><p class="eyebrow">UM MUNDO MAIOR</p><h2>Spade faz parte de algo maior.</h2></div></div>
+      <div class="world-grid"><article><b>♠️</b><h3>Spade</h3><p>Militarização, competição, organização e crescimento acelerado.</p></article><article><b>♣️</b><h3>Clover</h3><p>Outro Reino do mesmo RPG, com suas próprias Casas, esquadrões e identidade.</p></article><article><b>💎</b><h3>Diamond</h3><p>Um terceiro Reino do cenário, com sua própria estrutura e história.</p></article></div>
+      <p class="world-note">Os Reinos mantêm identidades separadas. Atualmente, os Magos Sênior e superiores atuam nos três e cooperam entre si.</p>
+    </section>
+
+    <section class="guide-section faq-section" id="duvidas">
+      <div class="guide-heading"><span>09</span><div><p class="eyebrow">PRINCIPAIS DÚVIDAS</p><h2>O que quase todo novato quer saber.</h2></div></div>
+      <div class="faq-grid">
+        <details><summary>Como consigo novas Magias e Cards?</summary><p>Você pode conquistá-los em missões, eventos, torneios, organizações, Loja Mágica, Mercado Negro e outras atividades especiais do RPG.</p></details>
+        <details><summary>Como ganho Yuls?</summary><p>Yuls podem vir de missões, torneios, eventos e da venda de produtos ou serviços para outras pessoas do RPG.</p></details>
+        <details><summary>Como entro em uma organização?</summary><p>Você participa do exame de admissão, que acontece nas segundas. Ao final, caso seja aprovado, recebe propostas e escolhe aquela que preferir.</p></details>
+        <details><summary>Como consigo um Grimório?</summary><p>Acompanhe a abertura da Torre de Grimórios no Cronograma e coloque seu nome quando o período de inscrição for aberto.</p></details>
+        <details><summary>Como compro Cards?</summary><p>A Loja Mágica utiliza Yuls. O Mercado Negro utiliza Dracmas e possui acesso separado.</p></details>
+        <details><summary>O que são Classes Sociais?</summary><p>São categorias de origem definidas na entrada do RPG. Elas representam a condição social inicial e fazem parte da história do personagem.</p></details>
+      </div>
+    </section>
+
+    <section class="guide-section final-welcome">
+      <div class="final-welcome-card">
+        <p class="eyebrow">AGORA VOCÊ SABE POR ONDE COMEÇAR</p>
+        <h2>O Reino está diante de você.</h2>
+        <p>Não é necessário conhecer tudo de uma vez. Entre em uma Casa, faça sua primeira missão, descubra seus Cards e deixe que o restante do Reino se revele enquanto sua história avança.</p>
+        <div class="actions"><button class="gold" data-page="login">Entrar no Reino</button><button class="outline" data-page="casas">Conhecer as Casas</button></div>
+      </div>
+    </section>
+  </div>
 </section>
 <section class="page" id="jornal">
   <div class="subhero journal-subhero">
@@ -866,6 +976,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=52.1"></script>
+<script src="/app.js?v=53.0"></script>
 </body>
 </html>
