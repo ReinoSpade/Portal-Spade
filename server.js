@@ -2139,6 +2139,66 @@ function missionStatusFromDates(startAt,endAt,status){
   return "CONCLUIDA";
 }
 
+
+function spadeToday(){
+  return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo"}).format(new Date());
+}
+
+function eventIsLiveSql(alias="events"){
+  const a=alias;
+  return `((${a}.status='ATIVO') OR (${a}.start_date IS NOT NULL AND ${a}.start_date <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (${a}.end_date IS NULL OR ${a}.end_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)))`;
+}
+
+function eventDisplayStatus(event){
+  const stored=String(event?.status||"").toUpperCase();
+  if(stored==="CANCELADO"||stored==="CANCELADA") return "CANCELADO";
+  if(stored==="ENCERRADO"||stored==="CONCLUIDO"||stored==="CONCLUÍDO") return "ENCERRADO";
+  const today=spadeToday();
+  const start=event?.start_date?String(event.start_date).slice(0,10):"";
+  const end=event?.end_date?String(event.end_date).slice(0,10):"";
+  if(start && today<start) return "PLANEJADO";
+  if(start && today>=start && (!end || today<=end)) return "ATIVO";
+  if(end && today>end) return "ENCERRADO";
+  return stored||"PLANEJADO";
+}
+
+function brDate(value){
+  const s=String(value||"").slice(0,10);
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m?`${m[3]}/${m[2]}/${m[1]}`:s;
+}
+
+function brDateTime(value){
+  const d=new Date(value);
+  if(Number.isNaN(d.getTime())) return String(value||"");
+  return new Intl.DateTimeFormat("pt-BR",{timeZone:"America/Sao_Paulo",dateStyle:"short",timeStyle:"short"}).format(d);
+}
+
+function mergeLiveActivities(scheduleRows=[],eventRows=[],missionRows=[]){
+  const out=[];
+  const seenEvents=new Set();
+  const seenMissions=new Set();
+  for(const s of scheduleRows||[]){
+    if(s.event_id){ seenEvents.add(Number(s.event_id)); continue; }
+    if(s.mission_id){ seenMissions.add(Number(s.mission_id)); continue; }
+    out.push({source:"SCHEDULE",id:Number(s.id),title:s.title||"Atividade",activity_type:s.activity_type||"ATIVIDADE",description:s.description||"",activity_date:s.activity_date,start_time:s.start_time,end_time:s.end_time,status:s.status||"EM_ANDAMENTO",event_id:null,mission_id:null,end_label:s.end_time||brDate(s.activity_date)});
+  }
+  for(const e of eventRows||[]){
+    if(seenEvents.has(Number(e.id))) continue;
+    out.push({source:"EVENT",id:Number(e.id),event_id:Number(e.id),mission_id:null,title:e.title||"Evento",activity_type:e.event_type||"EVENTO",description:e.description||"",activity_date:e.start_date,start_time:null,end_time:null,status:eventDisplayStatus(e),end_label:e.end_date?brDate(e.end_date):""});
+  }
+  for(const m of missionRows||[]){
+    if(seenMissions.has(Number(m.id))) continue;
+    out.push({source:"MISSION",id:Number(m.id),event_id:null,mission_id:Number(m.id),title:`Missão de ${m.mission_type||"Missão"}`,activity_type:"MISSÃO",description:m.description||"",activity_date:m.start_at,start_time:null,end_time:null,status:missionStatusFromDates(m.start_at,m.end_at,m.status),end_label:m.end_at?brDateTime(m.end_at):""});
+  }
+  return out.sort((a,b)=>{
+    const ae=a.source==="EVENT"?0:a.source==="MISSION"?1:2;
+    const be=b.source==="EVENT"?0:b.source==="MISSION"?1:2;
+    return ae-be || String(a.activity_date||"").localeCompare(String(b.activity_date||""));
+  });
+}
+
+
 app.get("/api/missions", async (req,res)=>{
   const viewer=await resolveViewer(req);
   if(!viewer) return res.status(401).json({error:"Faça login para visualizar as missões."});
