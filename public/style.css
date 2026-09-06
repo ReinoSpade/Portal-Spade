@@ -301,7 +301,7 @@
 .article-form-grid input[type=date]{height:39px}
 .editorial-item.article-item{cursor:pointer}
 .article-item.selected{border-color:#ad8a4e;background:#f8f2e8}
-.edition-builder-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin-bottom:15px}
+.edition-builder-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin-bottom:15px}.edition-editor-head-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.editor-mode-note{margin:4px 0 0;font-size:11px;color:#6c665f}.editorial-actions .edit{color:#6a5631;font-weight:700}.edition-edit-hint{font-size:10px;color:#777;margin-top:3px}
 .edition-builder-layout{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .edition-article-picker,.edition-article-order{display:grid;gap:7px;margin-top:8px;max-height:420px;overflow:auto}
 .edition-picker-item{display:flex;gap:8px;align-items:flex-start;background:#faf8f3;border:1px solid #ddd5c9;border-radius:8px;padding:10px}
