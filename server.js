@@ -249,6 +249,7 @@ function publicPlayer(row) {
     patent: row.patent || "",
     role: row.role || "",
     grimoire: row.grimoire || "",
+    grimoire_level: Number(row.grimoire_level || 1),
     hp: Number(row.hp || 0),
     mana: Number(row.mana || 0),
     yuls: Number(row.yuls || 0),
@@ -377,6 +378,34 @@ async function initDatabase() {
       UNIQUE(player_id, level_number)
     );
     CREATE INDEX IF NOT EXISTS idx_grimoire_pages_player ON grimoire_pages(player_id, level_number);
+
+    CREATE TABLE IF NOT EXISTS exp_history (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL CHECK (amount > 0),
+      source_code TEXT NOT NULL DEFAULT 'AJUSTE',
+      source_detail TEXT DEFAULT '',
+      reason TEXT DEFAULT '',
+      exp_before INTEGER NOT NULL DEFAULT 0 CHECK (exp_before >= 0),
+      exp_after INTEGER NOT NULL DEFAULT 0 CHECK (exp_after >= 0),
+      level_before INTEGER NOT NULL DEFAULT 1 CHECK (level_before >= 1),
+      level_after INTEGER NOT NULL DEFAULT 1 CHECK (level_after >= 1),
+      upgraded INTEGER NOT NULL DEFAULT 0 CHECK (upgraded IN (0,1)),
+      created_by_admin_id BIGINT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_history_player ON exp_history(player_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS exp_rules (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      percent_value INTEGER,
+      notes TEXT DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
 
     CREATE TABLE IF NOT EXISTS admin_users (
       id BIGSERIAL PRIMARY KEY,
@@ -913,6 +942,7 @@ async function initDatabase() {
     ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
 
     ALTER TABLE players ADD COLUMN IF NOT EXISTS exp BIGINT NOT NULL DEFAULT 0 CHECK (exp >= 0);
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS grimoire_level INTEGER NOT NULL DEFAULT 1 CHECK (grimoire_level >= 1);
     ALTER TABLE roles ADD COLUMN IF NOT EXISTS rank_code TEXT DEFAULT 'V';
     ALTER TABLE roles ADD COLUMN IF NOT EXISTS vacancies TEXT DEFAULT '';
     ALTER TABLE roles ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT '';
@@ -933,6 +963,22 @@ async function initDatabase() {
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS damage_value INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS damage_type TEXT NOT NULL DEFAULT 'SEM_DANO';
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS origin TEXT DEFAULT 'Exclusivo';
+
+    INSERT INTO exp_rules(code,label,percent_value,notes) VALUES
+      ('MISSAO_LUTA','Missão de Luta',10,'Participação em missão de luta.'),
+      ('MISSAO_RECRUTA','Missão de Recruta',15,'Participação em missão de recrutamento.'),
+      ('EVENTO_PARTICIPACAO','Participação em Evento',2,'Participação em evento.'),
+      ('TORNEIO_PARTICIPACAO','Participação em Torneio',5,'Participação em torneio.'),
+      ('EXAME_VENCEDOR','Vencedor do Exame',12,'Vencedor de exame.'),
+      ('EVENTO_VITORIA','Vitória em Evento',7,'Vitória em evento.'),
+      ('TORNEIO_VITORIA','Vitória em Torneio',20,'Vitória em torneio.'),
+      ('RANKING_VITORIA','Vitória em Luta de Ranking',2,'Por luta ganha no ranking.'),
+      ('JUIZ_INTER','Juiz de Lutas — Exame Intermediário/Torneio',4,'W.O. não conta.'),
+      ('JUIZ_SENIOR','Juiz de Lutas — Exame Sênior',8,'W.O. não conta.'),
+      ('ORGANIZAR_EXAME','Organizar Exame',10,'Organização de exame.'),
+      ('EMPREGO','Emprego/Cargo',NULL,'Valor variável conforme função.'),
+      ('EVENTO_ESPECIAL','Premiação Especial',NULL,'Valor variável conforme evento.')
+    ON CONFLICT (code) DO NOTHING;
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ATIVO';
     ALTER TABLE player_cards ADD COLUMN IF NOT EXISTS acquisition_type TEXT DEFAULT 'OUTRO';
     ALTER TABLE player_cards ADD COLUMN IF NOT EXISTS acquisition_id BIGINT;
@@ -1590,11 +1636,16 @@ app.get("/api/me/grimoire", async (req,res)=>{
   if(!viewer) return res.status(401).json({error:"Não autenticado."});
   if(viewer.type==="ALLY") return res.json({available:false,read_only:true,grimoire:null,pages:[]});
   try{
-    const p=await pool.query(`SELECT id,nick,grimoire,patent,exp FROM players WHERE id=$1 AND active=1 LIMIT 1`,[viewer.id]);
+    const p=await pool.query(`SELECT id,nick,grimoire,patent,exp,grimoire_level FROM players WHERE id=$1 AND active=1 LIMIT 1`,[viewer.id]);
     if(!p.rows[0]) return res.status(404).json({error:"Jogador não encontrado."});
     const player=p.rows[0];
     const pages=await pool.query(`SELECT id,level_number,magic_name,description,sort_order FROM grimoire_pages WHERE player_id=$1 ORDER BY level_number ASC,sort_order ASC,id ASC`,[viewer.id]);
-    res.json({available:Boolean(String(player.grimoire||'').trim()),grimoire:String(player.grimoire||''),patent:String(player.patent||''),exp:Number(player.exp||0),pages:pages.rows.map(g=>({id:Number(g.id),level_number:Number(g.level_number),magic_name:g.magic_name||'',description:g.description||'',kind:Number(g.level_number)%2===1?'ATIVACAO':'MAGIA_EXCLUSIVA'}))});
+    const level=Math.max(1,Number(player.grimoire_level||1));
+    const thresholds={1:120,2:200,3:300,4:450,5:500,6:650,7:700};
+    const nextThreshold=thresholds[level]||null, exp=Number(player.exp||0);
+    const progressPct=nextThreshold?Math.min(100,Math.round((exp/nextThreshold)*100)):100;
+    const visiblePages=pages.rows.filter(g=>Number(g.level_number)<=level);
+    res.json({available:Boolean(String(player.grimoire||'').trim()),grimoire:String(player.grimoire||''),patent:String(player.patent||''),level,exp,next_level:nextThreshold?level+1:null,next_threshold:nextThreshold,progress_percent:progressPct,pages:visiblePages.map(g=>({id:Number(g.id),level_number:Number(g.level_number),magic_name:g.magic_name||'',description:g.description||'',kind:Number(g.level_number)%2===1?'ATIVACAO':'MAGIA_EXCLUSIVA'}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar o grimório."});}
 });
 
@@ -4440,7 +4491,7 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   try {
-    const [playerResult, historyResult, grimoirePagesResult] = await Promise.all([
+    const [playerResult, historyResult, grimoirePagesResult, expHistoryResult] = await Promise.all([
       pool.query("SELECT * FROM players WHERE id=$1", [id]),
       pool.query(
         `SELECT id,amount,reason,balance_after,created_at
@@ -4450,6 +4501,11 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
       pool.query(
         `SELECT id,level_number,magic_name,description,sort_order,created_at,updated_at
          FROM grimoire_pages WHERE player_id=$1 ORDER BY level_number ASC, sort_order ASC, id ASC`,
+        [id]
+      ),
+      pool.query(
+        `SELECT id,amount,source_code,source_detail,reason,exp_before,exp_after,level_before,level_after,upgraded,created_at
+         FROM exp_history WHERE player_id=$1 ORDER BY id DESC LIMIT 50`,
         [id]
       )
     ]);
@@ -4471,6 +4527,9 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
       },
       history: historyResult.rows.map(h => ({
         ...h, amount: Number(h.amount), balance_after: Number(h.balance_after)
+      })),
+      expHistory: expHistoryResult.rows.map(h => ({
+        ...h, amount:Number(h.amount), exp_before:Number(h.exp_before), exp_after:Number(h.exp_after), level_before:Number(h.level_before), level_after:Number(h.level_after), upgraded:Number(h.upgraded)
       }))
     });
   } catch (e) {
@@ -4580,16 +4639,50 @@ app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
   }finally{client.release();}
 });
 
+const GRIMOIRE_EXP_THRESHOLDS={1:120,2:200,3:300,4:450,5:500,6:650,7:700};
+
+app.get("/api/admin/exp-rules", requireAdmin, async(req,res)=>{
+  try{const r=await pool.query(`SELECT code,label,percent_value,notes FROM exp_rules WHERE active=1 ORDER BY id ASC`);res.json({rules:r.rows.map(x=>({code:x.code,label:x.label,percent_value:x.percent_value===null?null:Number(x.percent_value),notes:x.notes||''}))});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar regras de EXP.'});}
+});
+
+app.post("/api/admin/players/:id/exp", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id), amount=Number(req.body?.amount);
+  if(!Number.isInteger(id)||id<=0||!Number.isInteger(amount)||amount<=0)return res.status(400).json({error:'Informe um valor de EXP inteiro e positivo.'});
+  const sourceCode=String(req.body?.source_code||'AJUSTE').trim().toUpperCase();
+  const sourceDetail=String(req.body?.source_detail||'').trim();
+  const reason=String(req.body?.reason||'').trim()||'Registro de EXP pela Administração.';
+  try{
+    const rule=(await pool.query(`SELECT code,label,percent_value FROM exp_rules WHERE code=$1 AND active=1`,[sourceCode])).rows[0];
+    if(rule && rule.percent_value!==null && amount!==Number(rule.percent_value))return res.status(400).json({error:`A fonte selecionada concede ${rule.percent_value}% de EXP.`});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const row=(await client.query(`SELECT id,nick,grimoire,exp,grimoire_level FROM players WHERE id=$1 FOR UPDATE`,[id])).rows[0];
+      if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Jogador não encontrado.'});}
+      if(!String(row.grimoire||'').trim()){await client.query('ROLLBACK');return res.status(400).json({error:'Este jogador ainda não possui Grimório.'});}
+      const level=Math.max(1,Number(row.grimoire_level||1)), before=Math.max(0,Number(row.exp||0)), threshold=GRIMOIRE_EXP_THRESHOLDS[level]||null;
+      let after=before+amount,newLevel=level,upgraded=0;
+      if(threshold!==null && after>=threshold){newLevel=Math.min(8,level+1);after=0;upgraded=newLevel>level?1:0;}
+      await client.query(`UPDATE players SET exp=$1,grimoire_level=$2,updated_at=NOW() WHERE id=$3`,[after,newLevel,id]);
+      await client.query(`INSERT INTO exp_history(player_id,amount,source_code,source_detail,reason,exp_before,exp_after,level_before,level_after,upgraded,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[id,amount,sourceCode,sourceDetail,reason,before,after,level,newLevel,upgraded,req.admin.id||null]);
+      await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,$2,$3)`,[id,'EXP',`${amount}% EXP • ${rule?.label||sourceCode}${sourceDetail?` • ${sourceDetail}`:''}${upgraded?` • Upgrade para nível ${newLevel}`:''}`]);
+      if(upgraded){try{await client.query(`INSERT INTO player_notifications(player_id,title,body,type,link_page,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6)`,[id,'Grimório evoluiu!',`Seu Grimório avançou para o nível ${newLevel}. A EXP foi zerada; a nova página pode ser cadastrada pela Administração.` ,'SISTEMA','grimorio',req.admin.id||null]);}catch{}}
+      await client.query('COMMIT');res.json({ok:true,exp:after,level:newLevel,upgraded:Boolean(upgraded),threshold:GRIMOIRE_EXP_THRESHOLDS[newLevel]||null});
+    }catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao registrar EXP.'});}
+});
+
 app.get("/api/admin/grimoire/:playerId", requireAdmin, async (req,res)=>{
   const playerId=Number(req.params.playerId);
   if(!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:"Jogador inválido."});
   try{
     const [p,g]=await Promise.all([
-      pool.query(`SELECT id,nick,grimoire,patent,exp FROM players WHERE id=$1`,[playerId]),
+      pool.query(`SELECT id,nick,grimoire,patent,exp,grimoire_level FROM players WHERE id=$1`,[playerId]),
       pool.query(`SELECT id,level_number,magic_name,description,sort_order FROM grimoire_pages WHERE player_id=$1 ORDER BY level_number ASC,sort_order ASC,id ASC`,[playerId])
     ]);
     if(!p.rows[0])return res.status(404).json({error:"Jogador não encontrado."});
-    res.json({player:{id:Number(p.rows[0].id),nick:p.rows[0].nick,grimoire:p.rows[0].grimoire||'',patent:p.rows[0].patent||'',exp:Number(p.rows[0].exp||0)},pages:g.rows.map(x=>({id:Number(x.id),level_number:Number(x.level_number),magic_name:x.magic_name||'',description:x.description||'',sort_order:Number(x.sort_order||0)}))});
+    res.json({player:{id:Number(p.rows[0].id),nick:p.rows[0].nick,grimoire:p.rows[0].grimoire||'',patent:p.rows[0].patent||'',exp:Number(p.rows[0].exp||0),grimoire_level:Number(p.rows[0].grimoire_level||1)},pages:g.rows.map(x=>({id:Number(x.id),level_number:Number(x.level_number),magic_name:x.magic_name||'',description:x.description||'',sort_order:Number(x.sort_order||0)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar páginas do grimório."});}
 });
 
