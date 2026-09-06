@@ -2,12 +2,51 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[]};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
 const escapeHtml=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const money=v=>Number(v||0).toLocaleString("pt-BR");
+
+const AMBIENT_TRACKS={
+  home:"/assets/audio/spade-home.ogg",
+  guide:"/assets/audio/spade-guide.ogg",
+  grimoire:"/assets/audio/spade-grimoire.ogg",
+  battle:"/assets/audio/spade-battle.ogg",
+  journal:"/assets/audio/spade-journal.ogg",
+  market:"/assets/audio/spade-market.ogg"
+};
+const PAGE_THEME={home:"home",guia:"guide",grimorio:"grimoire",biblioteca:"grimoire",jornal:"journal",comunicados:"journal",cards:"battle",missoes:"battle",eventos:"battle",cronograma:"battle",ranking:"battle",casas:"home",jogadores:"home",status:"home",cargos:"home",hierarquia:"home",admin:"home",
+  "admin-login":"home"};
+function setAmbientTheme(page){
+  state.ambient.theme=PAGE_THEME[page]||"home";
+  document.body.dataset.ambientTheme=state.ambient.theme;
+  if(state.ambient.sound) playAmbientTheme();
+}
+async function playAmbientTheme(){
+  const audio=qs("#ambientAudio"); if(!audio||!state.ambient.sound)return;
+  const src=AMBIENT_TRACKS[state.ambient.theme]||AMBIENT_TRACKS.home;
+  if(!audio.src.endsWith(src)){audio.src=src;audio.load();}
+  audio.volume=.18;
+  try{await audio.play();}catch{}
+}
+function updateAmbientButtons(){
+  const eb=qs("#ambientEffectsBtn"),sb=qs("#ambientSoundBtn");
+  if(eb){eb.textContent=state.ambient.effects?"✨ Efeitos ON":"✨ Efeitos OFF";eb.setAttribute("aria-pressed",String(state.ambient.effects));}
+  if(sb){sb.textContent=state.ambient.sound?"🔊 Som ON":"🔊 Som OFF";sb.setAttribute("aria-pressed",String(state.ambient.sound));}
+  document.body.classList.toggle("magic-effects-off",!state.ambient.effects);
+}
+function initSpadeAmbient(){
+  try{state.ambient.effects=localStorage.getItem("spade-effects")!=="0";state.ambient.sound=localStorage.getItem("spade-sound")==="1";}catch{}
+  updateAmbientButtons();
+  qs("#ambientEffectsBtn")?.addEventListener("click",()=>{state.ambient.effects=!state.ambient.effects;try{localStorage.setItem("spade-effects",state.ambient.effects?"1":"0")}catch{};updateAmbientButtons();});
+  qs("#ambientSoundBtn")?.addEventListener("click",()=>{state.ambient.sound=!state.ambient.sound;try{localStorage.setItem("spade-sound",state.ambient.sound?"1":"0")}catch{};updateAmbientButtons();if(state.ambient.sound)playAmbientTheme();else qs("#ambientAudio")?.pause();});
+}
+function runPageTransition(){
+  const el=qs("#pageTransition"); if(!el||!state.ambient.effects||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  el.classList.remove("show");void el.offsetWidth;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),520);
+}
 
 
 let globalSearchTimer=null;
@@ -54,7 +93,10 @@ function initGlobalSearch(){
 
 function go(page){
   const previous=state.page;
+  if(page==="grimorio" && (!state.me || state.me.account_type==="ALLY" || !String(state.me.grimoire||"").trim())){ if(previous!==page) go("dashboard"); return; }
+  runPageTransition();
   state.page=page;
+  setAmbientTheme(page);
   qsa(".page").forEach(x=>x.classList.toggle("active",x.id===page));
   qsa("nav button[data-page]").forEach(x=>{
     const active=x.dataset.page===page;
@@ -78,6 +120,7 @@ function go(page){
   if(page==="hierarquia") loadHierarchy();
   if(page==="biblioteca") loadLibrary();
   if(page==="dashboard"){ if(state.me) loadPlayerDashboardData(); else refreshDashboard(); }
+  if(page==="grimorio"){ if(state.me) loadMyGrimoire(); else go("login"); }
   if(page==="cards"){ if(state.me) loadPlayerCards(); else { state.page="login"; return go("login"); } }
   if(page==="admin"){ if(state.admin) initAdmin(); else go("admin-login"); }
   if(page==="admin-login") refreshAdminSession();
@@ -848,6 +891,36 @@ function acquisitionLabel(c){
   const label=labels[c.acquisition_type]||"Outra origem";
   return c.acquisition_name?`${label}: ${c.acquisition_name}`:label;
 }
+async function loadMyGrimoire(){
+  if(!state.me||state.me.account_type==="ALLY")return;
+  try{
+    const d=await api("/api/me/grimoire");
+    state.grimoireData=d; state.grimoirePages=d.pages||[];
+    if(!d.available){const g=qs("#grimoireNav");if(g)g.style.display="none";go("dashboard");return;}
+    const title=qs("#grimoireTitle"),intro=qs("#grimoireIntroText"),exp=qs("#grimoireExp"),pat=qs("#grimoirePatent"),count=qs("#grimoirePageCount"),pages=qs("#grimoirePages");
+    if(title)title.textContent=d.grimoire||"Seu Grimório";
+    if(intro)intro.textContent="Cada página registra uma magia conquistada durante sua evolução. Níveis ímpares representam Ativações; níveis pares representam Magias Exclusivas, acompanhando o avanço do seu Mago.";
+    if(exp)exp.textContent=money(d.exp||0); if(pat)pat.textContent=d.patent||"—"; if(count)count.textContent=String((d.pages||[]).length);
+    if(pages){
+      pages.innerHTML=(d.pages||[]).length?(d.pages||[]).map((p,i)=>`<article class="grimoire-magic-page"><div class="grimoire-page-number">${String(p.level_number).padStart(2,"0")}</div><div class="grimoire-page-copy"><span class="grimoire-kind">${p.kind==="ATIVACAO"?"✦ ATIVAÇÃO":"✧ MAGIA EXCLUSIVA"}</span><h3>${escapeHtml(p.magic_name)}</h3><p>${escapeHtml(p.description||"Magia registrada nesta etapa de evolução.")}</p><small>Conquistada no nível ${p.level_number} • Página ${i+1}</small></div></article>`).join(""):'<p class="grimoire-empty">Seu Grimório foi registrado, mas ainda não possui magias preenchidas pela Administração.</p>';
+    }
+  }catch(e){const p=qs("#grimoirePages");if(p)p.innerHTML=`<p class="grimoire-empty">${escapeHtml(e.message)}</p>`;}
+}
+
+function renderPlayerCardItem(c){
+  const elemental=c.element_type==="ELEMENTAL";
+  const glyph={Fogo:"🔥",Água:"💧",Vento:"🌪️",Raio:"⚡",Sombra:"🌑",Cristal:"💎",Fumaça:"💨",Estrelas:"🌟",Tempo:"⏳",Ossos:"☠️"}[c.element]||"✦";
+  return `<article class="card-inventory-item ${elemental?"card-elemental":"card-non-elemental"}" data-element="${escapeHtml(c.element||"")}">
+    <div class="card-magic-aura" aria-hidden="true">${elemental?glyph:"✦"}</div>
+    <div class="card-inventory-top"><span class="card-type-pill">${escapeHtml(c.category)}</span><span class="card-nature-pill">${elemental?"ELEMENTAL":"NÃO ELEMENTAL"}</span></div>
+    <h3>${escapeHtml(c.name_pt||c.name)}</h3>
+    ${c.name_jp?`<div class="card-jp-name">${escapeHtml(c.name_jp)}</div>`:""}
+    <p class="card-description">${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
+    <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>Dano: <b>${Number(c.damage_value||0)}</b> <small>${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}</small></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${elemental&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
+    ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
+    <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}</div>
+  </article>`;
+}
 function renderPlayerCards(cards){
   const grid=qs("#playerCardsGrid"),summary=qs("#playerCardsSummary");
   if(!grid)return;
@@ -861,24 +934,10 @@ function renderPlayerCards(cards){
     grid.innerHTML=`<div class="cards-empty"><div style="font:28px Georgia;color:#c6a45d">♠</div><b>${(cards||[]).length?"Nenhum card corresponde ao filtro.":"Seu inventário ainda está vazio."}</b><p>${(cards||[]).length?"Tente outra categoria ou pesquisa.":"Os cards serão adicionados pela administração do RPG."}</p></div>`;
     return;
   }
-  const groups={};
-  filtered.forEach(c=>(groups[c.category]??=[]).push(c));
-  grid.innerHTML=Object.entries(groups).map(([category,items])=>`
-    <section class="player-card-group">
-      <div class="player-card-group-head"><h2>${escapeHtml(category)}</h2><span>${items.length} card(s)</span></div>
-      <div class="player-card-grid">
-        ${items.map(c=>`<article class="card-inventory-item">
-          <div class="card-inventory-top"><span class="card-type-pill">${escapeHtml(c.category)}</span></div>
-          <h3>${escapeHtml(c.name_pt||c.name)}</h3>
-          ${c.name_jp?`<div class="card-jp-name">${escapeHtml(c.name_jp)}</div>`:""}
-          <p class="card-description">${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
-          <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>Dano: <b>${Number(c.damage_value||0)}</b> <small>${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}</small></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${c.element_type==="ELEMENTAL"&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
-          ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
-          <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}</div>
-        </article>`).join("")}
-      </div>
-    </section>`).join("");
+  const groups={}; filtered.forEach(c=>(groups[c.category]??=[]).push(c));
+  grid.innerHTML=Object.entries(groups).map(([category,items])=>`<section class="player-card-group"><div class="player-card-group-head"><h2>${escapeHtml(category)}</h2><span>${items.length} card(s)</span></div><div class="player-card-grid">${items.map(renderPlayerCardItem).join("")}</div></section>`).join("");
 }
+
 async function loadAllyCards(){
   try{
     const d=await api("/api/me/ally-cards");
@@ -1027,8 +1086,8 @@ function setViewerModeUI(){
   const statusDesc=qs("#status .subhero p:last-child");
   if(statusDesc)statusDesc.textContent=ally?"Acompanhe os Status do Reino. Aliados Ocultos possuem acesso somente para leitura.":"Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.";
 }
-function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";setViewerModeUI();}
-function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;setViewerModeUI();}
+function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";const g=qs("#grimoireNav");if(g)g.style.display=(state.me?.account_type!=="ALLY"&&String(state.me?.grimoire||"").trim())?"inline-flex":"none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";setViewerModeUI();}
+function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";const g=qs("#grimoireNav");if(g)g.style.display="none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;setViewerModeUI();}
 
 qs("#loginForm").addEventListener("submit",async e=>{
   e.preventDefault();const err=qs("#loginError");err.textContent="";
@@ -1824,6 +1883,16 @@ function renderHistoryPanel(p){
   return `<div class="admin-history-list">${entries.length?entries.map(e=>`<div class="admin-history-entry"><span class="admin-history-dot"></span><div><b>${escapeHtml(e.title)}</b><p>${escapeHtml(e.desc)}</p><small>${escapeHtml(String(e.date||""))}</small></div></div>`).join(""):`<div class="admin-history-empty">Nenhum histórico registrado.</div>`}</div>`;
 }
 
+function renderAdminGrimoirePageItem(pg){
+  const kind=Number(pg.level_number)%2===1?"ATIVAÇÃO":"MAGIA EXCLUSIVA";
+  return `<div class="admin-grimoire-row"><div><b>Nível ${pg.level_number} • ${kind}</b><small>${escapeHtml(pg.magic_name)}</small>${pg.description?`<p>${escapeHtml(pg.description)}</p>`:""}</div><div class="admin-grimoire-actions"><button type="button" class="outline small" data-grimoire-edit="${pg.id}">Editar</button><button type="button" class="outline danger small" data-grimoire-delete="${pg.id}">Excluir</button></div></div>`;
+}
+function renderAdminGrimoirePanel(p){
+  const pages=p.grimoirePages||[];
+  const list=pages.length?pages.map(renderAdminGrimoirePageItem).join(""):"<div class='admin-history-empty'>Nenhuma magia registrada no Grimório.</div>";
+  return `<div><p class="admin-editor-note">O sistema associa automaticamente níveis ímpares a Ativações e níveis pares a Magias Exclusivas. Cadastre aqui as páginas que o Mago conquista ao evoluir.</p><form id="adminGrimoireForm" class="admin-form"><input type="hidden" id="adminGrimoireId"><input id="adminGrimoireLevel" type="number" min="1" placeholder="Nível" required><input id="adminGrimoireName" class="full" placeholder="Nome da magia" required><textarea id="adminGrimoireDescription" class="full" placeholder="Descrição / efeito da magia"></textarea><input id="adminGrimoireOrder" type="number" value="0" placeholder="Ordem"><div class="editor-actions"><button class="gold" type="submit">＋ Salvar página</button><button class="outline dark-outline" type="button" id="adminGrimoireClear">Limpar</button></div><div class="error" id="adminGrimoireError"></div></form><div class="eyebrow" style="margin-top:18px">PÁGINAS REGISTRADAS</div><div class="admin-grimoire-list">${list}</div></div>`;
+}
+
 function renderEditor(p){
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">EDITANDO JOGADOR</p><h3>${escapeHtml(displayPlayerName(p))}</h3><p>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent||"Sem patente")}</p></div><button class="icon-button" type="button" id="closeEditor">×</button></div>
   <div class="admin-tabs">
@@ -1832,6 +1901,7 @@ function renderEditor(p){
     ${adminTabButton("missions","Missões")}
     ${adminTabButton("cards","Cards")}
     ${adminTabButton("roles","Cargos")}
+    ${String(p.grimoire||"").trim()?adminTabButton("grimoire","📖 Grimório"):""}
     ${adminTabButton("history","Histórico")}
   </div>
   <div class="admin-tab-panel active" data-admin-tab-panel="overview">${renderOverviewPanel(p)}</div>
@@ -1839,6 +1909,7 @@ function renderEditor(p){
   <div class="admin-tab-panel" data-admin-tab-panel="missions">${renderMissionsPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="cards">${renderAdminPlayerCardsPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="roles">${renderRolesPanel(p)}</div>
+  ${String(p.grimoire||"").trim()?`<div class="admin-tab-panel" data-admin-tab-panel="grimoire">${renderAdminGrimoirePanel(p)}</div>`:""}
   <div class="admin-tab-panel" data-admin-tab-panel="history">${renderHistoryPanel(p)}</div>`;
 
   const empty=`<div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados, lançar Yuls, registrar missões ou administrar seus cargos.</p></div>`;
@@ -1862,6 +1933,10 @@ function renderEditor(p){
   updateAdminCardSourceFields();
   qsa("[data-admin-card-remove]").forEach(b=>b.addEventListener("click",()=>removeAdminCard(Number(b.dataset.adminCardRemove))));
   qsa("[data-mission-delete]").forEach(b=>b.addEventListener("click",()=>deleteMission(Number(b.dataset.missionDelete))));
+  qs("#adminGrimoireForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminGrimoireId").value;const err=qs("#adminGrimoireError");err.textContent="";try{await adminApi(id?`/api/admin/grimoire/${id}`:`/api/admin/grimoire/${p.id}`,{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({level_number:Number(qs("#adminGrimoireLevel").value),magic_name:qs("#adminGrimoireName").value,description:qs("#adminGrimoireDescription").value,sort_order:Number(qs("#adminGrimoireOrder").value||0)})});await selectAdminPlayer(p.id);alert(id?"Página atualizada.":"Página do grimório registrada.")}catch(ex){err.textContent=ex.message}});
+  qs("#adminGrimoireClear")?.addEventListener("click",()=>{qs("#adminGrimoireId").value="";qs("#adminGrimoireLevel").value="";qs("#adminGrimoireName").value="";qs("#adminGrimoireDescription").value="";qs("#adminGrimoireOrder").value="0";});
+  qsa("[data-grimoire-edit]").forEach(b=>b.addEventListener("click",()=>{const pg=(p.grimoirePages||[]).find(x=>Number(x.id)===Number(b.dataset.grimoireEdit));if(!pg)return;qs("#adminGrimoireId").value=pg.id;qs("#adminGrimoireLevel").value=pg.level_number;qs("#adminGrimoireName").value=pg.magic_name;qs("#adminGrimoireDescription").value=pg.description||"";qs("#adminGrimoireOrder").value=pg.sort_order||0;qs("#adminGrimoireForm")?.scrollIntoView({behavior:"smooth",block:"center"});}));
+  qsa("[data-grimoire-delete]").forEach(b=>b.addEventListener("click",async()=>{if(!confirm("Excluir esta página do Grimório?"))return;try{await adminApi(`/api/admin/grimoire/${b.dataset.grimoireDelete}`,{method:"DELETE"});await selectAdminPlayer(p.id);}catch(ex){alert(ex.message)}}));
 }
 function rolesMultiField(selected,items){
   const ids=new Set((selected||[]).map(x=>String(typeof x==="object"?x.id:x)));
@@ -2619,3 +2694,7 @@ function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!s
 async function loadAdminNotifications(){const list=qs("#adminNotificationList");if(!list)return;try{const d=await adminApi("/api/admin/notifications");list.innerHTML=(d.notifications||[]).map(n=>`<div class="editorial-item"><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.type)} • ${escapeHtml(n.nick)}${n.house?` • ${escapeHtml(n.house)}`:""} • ${new Date(n.created_at).toLocaleString("pt-BR")}</small></div></div>`).join("")||`<div class="admin-history-empty">Nenhuma notificação enviada.</div>`;}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
 qs("#adminNotificationForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#notificationAdminError");err.textContent="";try{const all=qs("#notificationAllActive").checked;const pid=Number(qs("#notificationPlayer").value||0);if(!all&&!pid)throw new Error("Escolha um jogador ou marque todos os ativos.");await adminApi("/api/admin/notifications",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:qs("#notificationTitle").value,body:qs("#notificationBody").value,type:qs("#notificationType").value,link_page:qs("#notificationLink").value,all_active:all,player_id:pid})});e.target.reset();await loadAdminNotifications();alert("Notificação enviada.");}catch(ex){err.textContent=ex.message;}});
 qs("#markAllNotifications")?.addEventListener("click",async()=>{try{await api("/api/me/notifications/read-all",{method:"POST"});await loadNotifications();}catch(e){alert(e.message)}});
+
+// V53.1 ambiente
+initSpadeAmbient();
+setAmbientTheme(state.page);
