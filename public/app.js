@@ -2549,8 +2549,18 @@ qs("#eventAdminForm").addEventListener("submit",async e=>{
 qs("#eventCancelBtn").addEventListener("click",resetEventForm);
 
 qsa("[data-event-admin-tab]").forEach(tab=>tab.onclick=()=>{
+  const key=tab.dataset.eventAdminTab;
+  qsa("[data-event-admin-tab]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminTab===key));
+  qsa("[data-event-admin-panel]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminPanel===key));
+  const selectId={actions:"eventActionEventSelect",rewards:"eventRewardEventSelect",players:"eventPlayerEventSelect",results:"eventResultEventSelect"}[key];
+  if(selectId){ const el=qs("#"+selectId); const id=Number(el?.value||state.selectedEventId||0); if(id){ state.selectedEventId=id; loadEventAdminDetails(id); } }
+});
+// Delegated fallback keeps event tabs operational even if other admin widgets are initialized late.
+document.addEventListener("click",e=>{
+  const tab=e.target.closest("[data-event-admin-tab]"); if(!tab)return;
+  const key=tab.dataset.eventAdminTab;
   qsa("[data-event-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));
-  qsa("[data-event-admin-panel]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminPanel===tab.dataset.eventAdminTab));
+  qsa("[data-event-admin-panel]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminPanel===key));
 });
 ["eventActionEventSelect","eventRewardEventSelect","eventPlayerEventSelect","eventResultEventSelect"].forEach(id=>qs("#"+id)?.addEventListener("change",e=>loadEventAdminDetails(Number(e.target.value))));
 qs("#eventActionForm").addEventListener("submit",async e=>{
