@@ -94,6 +94,11 @@ function initSpadeAmbient(){
   });
 }
 
+// Initialize the ambient controls before the rest of app.js so they remain functional
+// even if another unrelated section later encounters a missing element or runtime error.
+initSpadeAmbient();
+setAmbientTheme(state.page);
+
 function runPageTransition(){
   const el=qs("#pageTransition"); if(!el||!state.ambient.effects||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
   el.classList.remove("show");void el.offsetWidth;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),520);
@@ -2765,6 +2770,5 @@ async function loadAdminNotifications(){const list=qs("#adminNotificationList");
 qs("#adminNotificationForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#notificationAdminError");err.textContent="";try{const all=qs("#notificationAllActive").checked;const pid=Number(qs("#notificationPlayer").value||0);if(!all&&!pid)throw new Error("Escolha um jogador ou marque todos os ativos.");await adminApi("/api/admin/notifications",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:qs("#notificationTitle").value,body:qs("#notificationBody").value,type:qs("#notificationType").value,link_page:qs("#notificationLink").value,all_active:all,player_id:pid})});e.target.reset();await loadAdminNotifications();alert("Notificação enviada.");}catch(ex){err.textContent=ex.message;}});
 qs("#markAllNotifications")?.addEventListener("click",async()=>{try{await api("/api/me/notifications/read-all",{method:"POST"});await loadNotifications();}catch(e){alert(e.message)}});
 
-// V53.1 ambiente
-initSpadeAmbient();
-setAmbientTheme(state.page);
+// Ambiente Spade is initialized immediately near the top so controls stay functional
+// even if a later, unrelated UI initializer throws an error.
