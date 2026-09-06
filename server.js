@@ -45,6 +45,7 @@ function adminPermissionForRequest(req) {
   if (path === "/audit") return "audit";
   if (path.startsWith("/settings")) return "settings";
   if (path === "/overview") return "dashboard";
+  if (path.startsWith("/grimoire")) return "players";
   if (path.startsWith("/players")) {
     if (path.includes("/cards") || path.includes("/cards/")) return "cards";
     if (path.includes("/yuls")) return "economy";
@@ -363,6 +364,19 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS grimoire_pages (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      level_number INTEGER NOT NULL CHECK (level_number > 0),
+      magic_name TEXT NOT NULL DEFAULT '',
+      description TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(player_id, level_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_grimoire_pages_player ON grimoire_pages(player_id, level_number);
 
     CREATE TABLE IF NOT EXISTS admin_users (
       id BIGSERIAL PRIMARY KEY,
@@ -1569,6 +1583,19 @@ app.get("/api/me/dashboard", async (req,res)=>{
     const roles=await getPlayerRoles(playerId),c=cardsR.rows[0]||{},r=rankR.rows[0]||{};
     res.json({player:{...publicPlayer({...p,roles})},cards:{count:Number(c.count||0),power:Number(c.power||0)},rankings:{power:Number(r.power_rank||0),sc:Number(r.sc_rank||0),vt:Number(r.vt_rank||0)},activeEvents:eventR.rows.map(x=>({id:Number(x.id),title:x.title,event_type:x.event_type||'EVENTO',description:x.description||'',status:eventDisplayStatus(x),start_date:x.start_date,end_date:x.end_date})),activeMissions:missionR.rows.map(x=>({id:Number(x.id),title:`Missão de ${x.mission_type||'Missão'}`,mission_type:x.mission_type||'',description:x.description||'',status:missionStatusFromDates(x.start_at,x.end_at,x.status),start_at:x.start_at,end_at:x.end_at})),activeActivities,upcoming:upcoming.slice(0,10),notifications:notesR.rows.map(x=>({id:Number(x.id),title:x.title,body:x.body,type:x.type,link_page:x.link_page||'',read:Boolean(x.read_at),created_at:x.created_at})),unreadNotifications:notesR.rows.filter(x=>!x.read_at).length,todayStatus:statusR.rows[0]?{id:Number(statusR.rows[0].id),message:statusR.rows[0].message,status_date:statusR.rows[0].status_date,created_at:statusR.rows[0].created_at,updated_at:statusR.rows[0].updated_at}:null});
   }catch(e){console.error('Erro em /api/me/dashboard:',e);res.status(500).json({error:'Erro ao carregar seu painel.'});}
+});
+
+app.get("/api/me/grimoire", async (req,res)=>{
+  const viewer=await resolveViewer(req);
+  if(!viewer) return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type==="ALLY") return res.json({available:false,read_only:true,grimoire:null,pages:[]});
+  try{
+    const p=await pool.query(`SELECT id,nick,grimoire,patent,exp FROM players WHERE id=$1 AND active=1 LIMIT 1`,[viewer.id]);
+    if(!p.rows[0]) return res.status(404).json({error:"Jogador não encontrado."});
+    const player=p.rows[0];
+    const pages=await pool.query(`SELECT id,level_number,magic_name,description,sort_order FROM grimoire_pages WHERE player_id=$1 ORDER BY level_number ASC,sort_order ASC,id ASC`,[viewer.id]);
+    res.json({available:Boolean(String(player.grimoire||'').trim()),grimoire:String(player.grimoire||''),patent:String(player.patent||''),exp:Number(player.exp||0),pages:pages.rows.map(g=>({id:Number(g.id),level_number:Number(g.level_number),magic_name:g.magic_name||'',description:g.description||'',kind:Number(g.level_number)%2===1?'ATIVACAO':'MAGIA_EXCLUSIVA'}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar o grimório."});}
 });
 
 app.get("/api/me/status/today", async (req,res)=>{
@@ -4413,11 +4440,16 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   try {
-    const [playerResult, historyResult] = await Promise.all([
+    const [playerResult, historyResult, grimoirePagesResult] = await Promise.all([
       pool.query("SELECT * FROM players WHERE id=$1", [id]),
       pool.query(
         `SELECT id,amount,reason,balance_after,created_at
          FROM yuls_history WHERE player_id=$1 ORDER BY id DESC LIMIT 30`,
+        [id]
+      ),
+      pool.query(
+        `SELECT id,level_number,magic_name,description,sort_order,created_at,updated_at
+         FROM grimoire_pages WHERE player_id=$1 ORDER BY level_number ASC, sort_order ASC, id ASC`,
         [id]
       )
     ]);
@@ -4431,7 +4463,11 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
         public_profile: Number(player.public_profile),
         has_password: Boolean(player.password_hash),
         created_at: player.created_at,
-        updated_at: player.updated_at
+        updated_at: player.updated_at,
+        grimoirePages: grimoirePagesResult.rows.map(g => ({
+          id:Number(g.id), level_number:Number(g.level_number), magic_name:g.magic_name||"",
+          description:g.description||"", sort_order:Number(g.sort_order||0), created_at:g.created_at, updated_at:g.updated_at
+        }))
       },
       history: historyResult.rows.map(h => ({
         ...h, amount: Number(h.amount), balance_after: Number(h.balance_after)
@@ -4542,6 +4578,49 @@ app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
     console.error(e);
     res.status(500).json({error:"Erro ao distribuir o card."});
   }finally{client.release();}
+});
+
+app.get("/api/admin/grimoire/:playerId", requireAdmin, async (req,res)=>{
+  const playerId=Number(req.params.playerId);
+  if(!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:"Jogador inválido."});
+  try{
+    const [p,g]=await Promise.all([
+      pool.query(`SELECT id,nick,grimoire,patent,exp FROM players WHERE id=$1`,[playerId]),
+      pool.query(`SELECT id,level_number,magic_name,description,sort_order FROM grimoire_pages WHERE player_id=$1 ORDER BY level_number ASC,sort_order ASC,id ASC`,[playerId])
+    ]);
+    if(!p.rows[0])return res.status(404).json({error:"Jogador não encontrado."});
+    res.json({player:{id:Number(p.rows[0].id),nick:p.rows[0].nick,grimoire:p.rows[0].grimoire||'',patent:p.rows[0].patent||'',exp:Number(p.rows[0].exp||0)},pages:g.rows.map(x=>({id:Number(x.id),level_number:Number(x.level_number),magic_name:x.magic_name||'',description:x.description||'',sort_order:Number(x.sort_order||0)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar páginas do grimório."});}
+});
+
+app.post("/api/admin/grimoire/:playerId", requireAdmin, async (req,res)=>{
+  const playerId=Number(req.params.playerId), b=req.body||{};
+  const level=Math.round(Number(b.level_number));
+  const name=String(b.magic_name||'').trim(), description=String(b.description||'').trim(), sortOrder=Math.round(Number(b.sort_order||0));
+  if(!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:"Jogador inválido."});
+  if(!Number.isInteger(level)||level<=0)return res.status(400).json({error:"Nível inválido."});
+  if(!name)return res.status(400).json({error:"Informe o nome da magia."});
+  try{
+    const p=await pool.query(`SELECT id,grimoire FROM players WHERE id=$1`,[playerId]);
+    if(!p.rows[0])return res.status(404).json({error:"Jogador não encontrado."});
+    if(!String(p.rows[0].grimoire||'').trim())return res.status(400).json({error:"Este jogador não possui um grimório cadastrado."});
+    const r=await pool.query(`INSERT INTO grimoire_pages(player_id,level_number,magic_name,description,sort_order) VALUES($1,$2,$3,$4,$5) RETURNING *`,[playerId,level,name,description,sortOrder]);
+    res.json({page:{id:Number(r.rows[0].id),level_number:Number(r.rows[0].level_number),magic_name:r.rows[0].magic_name,description:r.rows[0].description,sort_order:Number(r.rows[0].sort_order||0)}});
+  }catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:"Já existe uma magia registrada para este nível."});res.status(500).json({error:"Erro ao criar página do grimório."});}
+});
+
+app.put("/api/admin/grimoire/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id),b=req.body||{}; const level=Math.round(Number(b.level_number));
+  const name=String(b.magic_name||'').trim(), description=String(b.description||'').trim(), sortOrder=Math.round(Number(b.sort_order||0));
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Página inválida."});
+  if(!Number.isInteger(level)||level<=0||!name)return res.status(400).json({error:"Nível e nome da magia são obrigatórios."});
+  try{const r=await pool.query(`UPDATE grimoire_pages SET level_number=$1,magic_name=$2,description=$3,sort_order=$4,updated_at=NOW() WHERE id=$5 RETURNING *`,[level,name,description,sortOrder,id]);if(!r.rows[0])return res.status(404).json({error:"Página não encontrada."});res.json({page:{id:Number(r.rows[0].id),level_number:Number(r.rows[0].level_number),magic_name:r.rows[0].magic_name,description:r.rows[0].description,sort_order:Number(r.rows[0].sort_order||0)}})}catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:"Já existe uma magia registrada para este nível."});res.status(500).json({error:"Erro ao atualizar página do grimório."});}
+});
+
+app.delete("/api/admin/grimoire/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Página inválida."});
+  try{const r=await pool.query(`DELETE FROM grimoire_pages WHERE id=$1 RETURNING id`,[id]);if(!r.rows[0])return res.status(404).json({error:"Página não encontrada."});res.json({ok:true})}catch(e){console.error(e);res.status(500).json({error:"Erro ao remover página do grimório."});}
 });
 
 app.get("/api/admin/players/:id/cards", requireAdmin, async (req,res)=>{
