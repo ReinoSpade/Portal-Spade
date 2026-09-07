@@ -1322,3 +1322,21 @@ button.gold,button.outline{position:relative}.gold::before,.outline::before{cont
 .event-result-fixed{color:#6e665c}
 .error{font-weight:600}
 @media(max-width:700px){.admin-form input,.admin-form textarea,.admin-form select,.event-grant-grid input,.event-grant-grid select{font-size:12px}}
+
+
+/* V53.2.6 — contraste e persistência do editor */
+.journal-letter{
+  background:linear-gradient(145deg,#111216,#191a1f)!important;
+  color:#eee8db!important;
+  border-color:#2e2f35!important;
+}
+.journal-letter .eyebrow{color:#c7a660!important}
+.journal-letter h3{color:#fff!important}
+.journal-letter p:not(.eyebrow){color:#bdb7ab!important}
+.journal-letter .outline{color:#f5f0e6!important;border-color:#68646a!important}
+.journal-editor-panel .admin-form label,.journal-editor-panel label{color:#514b43}
+.journal-editor-panel input,.journal-editor-panel textarea,.journal-editor-panel select{color:#282521;background:#fff}
+.journal-editor-panel input::placeholder,.journal-editor-panel textarea::placeholder{color:#6f6a62;opacity:1}
+.admin-event-manager .journal-editor-tab{color:#514b43}
+.admin-event-manager .journal-editor-tab.active{color:#fff}
+.admin-event-manager .panel-head h3{color:#26231f}
