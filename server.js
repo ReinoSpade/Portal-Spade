@@ -1186,6 +1186,17 @@ async function initDatabase() {
     const ed=await pool.query(`SELECT id FROM editions WHERE published=1 ORDER BY id ASC LIMIT 1`);
     if(!ed.rows[0])return;
     const editionId=Number(ed.rows[0].id);
+
+    // Never overwrite a composition that already exists. The digital edition
+    // seed is only a first-install bootstrap. Previously this function ran on
+    // every restart and rewrote edition_articles, making administrator edits
+    // appear to "revert" after a deploy/restart.
+    const composition=await pool.query(
+      `SELECT COUNT(*)::int AS c FROM edition_articles WHERE edition_id=$1`,
+      [editionId]
+    );
+    if(Number(composition.rows[0]?.c||0)>0) return;
+
     const articles=[
       ["Editorial — O nascimento de Spade","A primeira página de uma história que ainda está sendo escrita.","Redação The King Magazine","EDITORIAL","Há Reinos que nascem com glórias. Outros nascem com promessas. Spade nasceu com trabalho.",`Quando os primeiros membros chegaram, ainda não havia tradição, prestígio ou história para contar. Havia apenas um Reino novo, Casas começando a criar raízes, Legiões tomando forma e gente disposta — ou curiosa o bastante — a descobrir até onde aquilo poderia chegar.\n\nOs primeiros dias trouxeram aquilo que todo Reino recém-nascido precisa enfrentar: regras, organização, competição, recrutamento, dúvidas e a velha vontade de descobrir quem conseguiria chegar primeiro.\n\nAgora já existem nomes, rivalidades, vitórias, fracassos, cargos, Cards, missões e algumas boas histórias. Esta é a primeira edição. E talvez seja justamente por isso a mais importante.\n\nPorque daqui para frente, tudo o que acontecer terá passado a fazer parte da história de Spade.`],
       ["O nascimento de um Reino","Como Spade começou a ganhar forma.","Redação The King Magazine","HISTÓRIA","Os primeiros dias foram suficientes para mostrar que o novo Reino não pretendia ficar parado.",`Spade começou como começo de todo grande ciclo: pequeno, barulhento e cheio de possibilidades. Antes que a rotina pudesse se instalar, o Reino já organizava missões, exames, eventos, recrutamentos e atividades que colocavam os jogadores diante de escolhas e desafios.\n\nA estrutura surgiu depressa. Casas passaram a reunir seus membros, Legiões começaram a selecionar seus combatentes, e o cronograma deixou de ser apenas uma lista para se tornar uma espécie de relógio do Reino.\n\nO que parecia um conjunto de atividades isoladas rapidamente virou uma comunidade com memória própria.`],
