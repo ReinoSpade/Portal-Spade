@@ -3329,7 +3329,8 @@ app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
   const cost=String(b.cost||"").trim();
   const power=Math.max(0,Math.round(Number(b.power_value||0)));
   const damage=Math.max(0,Math.round(Number(b.damage_value||0)));
-  const damageType=String(b.damage_type||'SEM_DANO').toUpperCase();
+  let damageType=String(b.damage_type||'SEM_DANO').toUpperCase();
+  if(damage===0) damageType='SEM_DANO';
   const origin=String(b.origin||"Exclusivo").trim();
   const status=String(b.status||"ATIVO").toUpperCase();
   const description=String(b.description||"").trim();
@@ -3352,7 +3353,10 @@ app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id),b=req.body||{};
   const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
   const category=String(b.category||"Outros").trim(),elementType=String(b.element_type||"NAO_ELEMENTAL").toUpperCase(),element=String(b.element||"").trim(),costType=String(b.cost_type||"SEM_CUSTO").toUpperCase(),cost=String(b.cost||"").trim();
-  const power=Math.max(0,Math.round(Number(b.power_value||0))),damage=Math.max(0,Math.round(Number(b.damage_value||0))),damageType=String(b.damage_type||'SEM_DANO').toUpperCase(),origin=String(b.origin||"Exclusivo").trim(),status=String(b.status||"ATIVO").toUpperCase(),description=String(b.description||"").trim();
+  const power=Math.max(0,Math.round(Number(b.power_value||0))),damage=Math.max(0,Math.round(Number(b.damage_value||0)));
+  let damageType=String(b.damage_type||'SEM_DANO').toUpperCase();
+  if(damage===0) damageType='SEM_DANO';
+  const origin=String(b.origin||"Exclusivo").trim(),status=String(b.status||"ATIVO").toUpperCase(),description=String(b.description||"").trim();
   const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
   if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
@@ -3507,6 +3511,7 @@ async function validateCardCatalogSheet(rows){
     try{out.power_value=parseSpreadsheetInt(r.power_value,'Poder',r.row,{allowBlank:true,min:0})??0;}catch(e){addIssue(out,'power_value',e.message)}
     try{out.damage_value=parseSpreadsheetInt(r.damage_value,'Dano',r.row,{allowBlank:true,min:0})??0;}catch(e){addIssue(out,'damage_value',e.message)}
     out.damage_type=(String(r.damage_type||'SEM_DANO').trim().toUpperCase()||'SEM_DANO');
+    if(out.damage_value===0) out.damage_type='SEM_DANO';
     if(!CARD_DAMAGE_TYPES.includes(out.damage_type))addIssue(out,'damage_type',`Tipo de dano inválido: ${out.damage_type}`);
     if(out.damage_type==='SEM_DANO' && out.damage_value>0)addIssue(out,'damage_value','Cards sem dano devem possuir Dano 0.');
     if(out.damage_type!=='SEM_DANO' && out.damage_value<=0)addIssue(out,'damage_value','Cards com dano precisam ter um valor maior que 0.');
