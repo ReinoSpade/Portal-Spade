@@ -3379,6 +3379,342 @@ app.delete("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao desativar card."});}
 });
 
+const CARD_SHEET_NAMES = { cards: 'Cards', links: 'Vinculos', players: 'Jogadores', instructions: 'Instrucoes' };
+
+function normalizeCardSpreadsheetName(v){
+  return normalizeImportHeader(v || '').replace(/[^a-z0-9]+/g,'');
+}
+function parseSpreadsheetInt(v, field, row, {allowBlank=false, min=0, max=Number.MAX_SAFE_INTEGER}={}){
+  const raw=String(v??'').trim();
+  if(raw==='' && allowBlank)return null;
+  if(raw==='')throw Object.assign(new Error(`Linha ${row}: ${field} é obrigatório.`),{statusCode:400});
+  const n=Number(raw.replace(/\./g,'').replace(',','.'));
+  if(!Number.isInteger(n)||!Number.isFinite(n)||n<min||n>max)throw Object.assign(new Error(`Linha ${row}: ${field} deve ser um número inteiro entre ${min} e ${max}.`),{statusCode:400});
+  return n;
+}
+function spreadsheetWorkbook(buffer,filename){
+  const lower=String(filename||'').toLowerCase();
+  if(lower.endsWith('.csv')){
+    return XLSX.read(buffer.toString('utf8'),{type:'string',raw:true});
+  }
+  return XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true});
+}
+function sheetRowsByAliases(wb, aliases){
+  const wanted=new Set(aliases.map(x=>normalizeCardSpreadsheetName(x)));
+  const name=wb.SheetNames.find(n=>wanted.has(normalizeCardSpreadsheetName(n)));
+  if(!name)return [];
+  return XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:'',raw:false}).map((row,index)=>({row:index+2,data:row}));
+}
+function getSheetCell(row, ...aliases){
+  const normalized={};
+  for(const [k,v] of Object.entries(row||{})) normalized[normalizeCardSpreadsheetName(k)]=String(v??'').trim();
+  for(const alias of aliases){
+    const key=normalizeCardSpreadsheetName(alias);
+    if(Object.prototype.hasOwnProperty.call(normalized,key))return normalized[key];
+  }
+  return '';
+}
+function normalizeCardAction(v){
+  const key=normalizeCardSpreadsheetName(v);
+  if(!key)return '';
+  if(['adicionar','add','a','incluir'].includes(key))return 'ADICIONAR';
+  if(['remover','remove','r','excluir'].includes(key))return 'REMOVER';
+  if(['manter','keep','m','ignorar','ignore'].includes(key))return '';
+  return '__INVALID__';
+}
+function normalizeCardIdentity(v){
+  return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
+}
+
+function cardSpreadsheetControlKey(id){
+  return crypto.createHmac('sha256',SESSION_SECRET).update(`card:${Number(id)}`).digest('hex').slice(0,24);
+}
+
+function parseCardCatalogSheet(buffer,filename){
+  const wb=spreadsheetWorkbook(buffer,filename);
+  const sheetName=wb.SheetNames.find(n=>normalizeCardSpreadsheetName(n)==='cards');
+  if(!sheetName)throw Object.assign(new Error('A planilha não possui a aba "Cards".'),{statusCode:400});
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:false});
+  if(!rows.length)throw Object.assign(new Error('A aba "Cards" não possui registros.'),{statusCode:400});
+  return rows.map((row,index)=>({
+    row:index+2,
+    internal:getSheetCell(row,'Nº interno','N° interno','Numero interno','Número interno','ID card','Card ID'),
+    control:getSheetCell(row,'Chave de controle','Chave controle','Controle'),
+    name:getSheetCell(row,'Nome','Nome do card','Card','Name'),
+    name_jp:getSheetCell(row,'Nome japonês','Nome Japones','Name JP','Name Japanese'),
+    category:getSheetCell(row,'Categoria','Category'),
+    origin:getSheetCell(row,'Origem','Origin'),
+    element_type:getSheetCell(row,'Tipo de elemento','Element Type'),
+    element:getSheetCell(row,'Elemento','Element'),
+    cost_type:getSheetCell(row,'Tipo de custo','Cost Type'),
+    cost:getSheetCell(row,'Custo','Cost'),
+    power_value:getSheetCell(row,'Poder','Valor de Poder','Power'),
+    damage_value:getSheetCell(row,'Dano','Valor de Dano','Damage'),
+    damage_type:getSheetCell(row,'Tipo de dano','Tipo de Dano','Damage Type'),
+    status:getSheetCell(row,'Status','Situação'),
+    description:getSheetCell(row,'Descrição','Descricao','Efeito','Description'),
+    sort_order:getSheetCell(row,'Ordem','Sort Order')
+  }));
+}
+
+async function validateCardCatalogSheet(rows){
+  const [existingR,catsR]=await Promise.all([
+    pool.query(`SELECT id,name,name_pt,name_jp,COALESCE(category,type) AS category,origin,element_type,element,cost_type,cost,power_value,damage_value,damage_type,status,description,sort_order,active FROM cards ORDER BY id ASC`),
+    pool.query(`SELECT name FROM card_categories WHERE active=1 ORDER BY sort_order,name COLLATE "C"`)
+  ]);
+  const existing=existingR.rows;
+  const byId=new Map(existing.map(x=>[String(x.id),x]));
+  const byName=new Map(existing.map(x=>[normalizeCardIdentity(x.name),Number(x.id)]));
+  const categories=new Set(catsR.rows.map(x=>normalizeCardIdentity(x.name)));
+  const origins=new Set([...(CARD_ORIGINS||[]),...existing.map(x=>String(x.origin||''))].map(normalizeCardIdentity));
+  const seenIds=new Set(),seenNames=new Map(),clean=[],issues=[];
+  const addIssue=(out,field,message)=>{out.errors.push({field,message});issues.push({row:out.row,field,message});};
+  for(const r of rows){
+    const out={row:r.row,id:null,isNew:false,name:'',name_jp:'',category:'',origin:'',element_type:'NAO_ELEMENTAL',element:'',cost_type:'SEM_CUSTO',cost:'',power_value:0,damage_value:0,damage_type:'SEM_DANO',status:'ATIVO',description:'',sort_order:0,errors:[],changes:[]};
+    const rawInternal=String(r.internal||'').trim();
+    if(rawInternal===''){
+      out.isNew=true;
+    }else if(!/^\d+$/.test(rawInternal)){
+      addIssue(out,'internal','Nº interno deve ser numérico. Para criar um novo card, deixe o campo vazio.');
+    }else{
+      const id=Number(rawInternal);out.id=id;
+      if(!byId.has(rawInternal)) addIssue(out,'internal',`Nº interno ${id} não existe. O número é gerado automaticamente e não pode ser criado manualmente.`);
+      if(seenIds.has(id)) addIssue(out,'internal',`Nº interno ${id} aparece mais de uma vez na planilha.`);
+      seenIds.add(id);
+    }
+    if(!r.name) addIssue(out,'name','Nome do card é obrigatório.');
+    out.name=String(r.name||'').trim();
+    const nameKey=normalizeCardIdentity(out.name);
+    if(nameKey){
+      const owner=byName.get(nameKey);
+      if(owner && owner!==out.id) addIssue(out,'name',`O nome "${out.name}" já pertence ao card ${owner}.`);
+      const prev=seenNames.get(nameKey);
+      if(prev) addIssue(out,'name',`O nome "${out.name}" aparece duplicado na planilha (linhas ${prev} e ${out.row}).`);
+      else seenNames.set(nameKey,out.row);
+    }
+    out.name_jp=String(r.name_jp||'').trim();
+    out.category=String(r.category||'').trim()||'Outros';
+    if(!categories.has(normalizeCardIdentity(out.category)))addIssue(out,'category',`Categoria não encontrada ou inativa: ${out.category}`);
+    out.origin=String(r.origin||'').trim()||'Exclusivo';
+    if(!origins.has(normalizeCardIdentity(out.origin)))addIssue(out,'origin',`Origem inválida: ${out.origin}`);
+    out.element_type=(String(r.element_type||'NAO_ELEMENTAL').trim().toUpperCase()||'NAO_ELEMENTAL');
+    if(!CARD_ELEMENT_TYPES.includes(out.element_type))addIssue(out,'element_type',`Tipo de elemento inválido: ${out.element_type}`);
+    out.element=String(r.element||'').trim();
+    if(out.element_type==='ELEMENTAL'&&!out.element)addIssue(out,'element','Informe o elemento para cards elementais.');
+    out.cost_type=(String(r.cost_type||'SEM_CUSTO').trim().toUpperCase()||'SEM_CUSTO');
+    if(!CARD_COST_TYPES.includes(out.cost_type))addIssue(out,'cost_type',`Tipo de custo inválido: ${out.cost_type}`);
+    out.cost=String(r.cost||'').trim();
+    try{out.power_value=parseSpreadsheetInt(r.power_value,'Poder',r.row,{allowBlank:true,min:0})??0;}catch(e){addIssue(out,'power_value',e.message)}
+    try{out.damage_value=parseSpreadsheetInt(r.damage_value,'Dano',r.row,{allowBlank:true,min:0})??0;}catch(e){addIssue(out,'damage_value',e.message)}
+    out.damage_type=(String(r.damage_type||'SEM_DANO').trim().toUpperCase()||'SEM_DANO');
+    if(!CARD_DAMAGE_TYPES.includes(out.damage_type))addIssue(out,'damage_type',`Tipo de dano inválido: ${out.damage_type}`);
+    if(out.damage_type==='SEM_DANO' && out.damage_value>0)addIssue(out,'damage_value','Cards sem dano devem possuir Dano 0.');
+    if(out.damage_type!=='SEM_DANO' && out.damage_value<=0)addIssue(out,'damage_value','Cards com dano precisam ter um valor maior que 0.');
+    out.status=(String(r.status||'ATIVO').trim().toUpperCase()||'ATIVO');
+    if(!CARD_STATUSES.includes(out.status))addIssue(out,'status',`Status inválido: ${out.status}`);
+    out.description=String(r.description||'').trim();
+    try{out.sort_order=parseSpreadsheetInt(r.sort_order,'Ordem',r.row,{allowBlank:true,min:0,max:2147483647})??0;}catch(e){addIssue(out,'sort_order',e.message)}
+
+    const current=out.id?byId.get(String(out.id)):null;
+    if(current){
+      const oldName=String(current.name_pt||current.name||'').trim();
+      if(String(r.control||'').trim()!==cardSpreadsheetControlKey(out.id))addIssue(out,'control','Chave de controle inválida ou ausente. Não altere a coluna de controle; ela protege o Nº interno do card.');
+      const fields=[
+        ['name','Nome',oldName,out.name],['name_jp','Nome japonês',current.name_jp||'',out.name_jp],['category','Categoria',current.category||'',out.category],['origin','Origem',current.origin||'',out.origin],['element_type','Tipo de elemento',current.element_type||'NAO_ELEMENTAL',out.element_type],['element','Elemento',current.element||'',out.element],['cost_type','Tipo de custo',current.cost_type||'SEM_CUSTO',out.cost_type],['cost','Custo',current.cost||'',out.cost],['power_value','Poder',Number(current.power_value||0),out.power_value],['damage_value','Dano',Number(current.damage_value||0),out.damage_value],['damage_type','Tipo de dano',current.damage_type||'SEM_DANO',out.damage_type],['status','Status',current.status||'ATIVO',out.status],['description','Descrição',current.description||'',out.description],['sort_order','Ordem',Number(current.sort_order||0),out.sort_order]
+      ];
+      fields.forEach(([field,label,before,after])=>{if(String(before)!==String(after))out.changes.push({field,label,before:String(before??''),after:String(after??'')});});
+    }else if(out.isNew){
+      out.changes=[
+        {field:'name',label:'Nome',before:'',after:out.name},
+        {field:'category',label:'Categoria',before:'',after:out.category}
+      ];
+    }
+    clean.push(out);
+  }
+  return {rows:clean,issues};
+}
+
+function parseCardLinksSheet(buffer,filename){
+  const wb=spreadsheetWorkbook(buffer,filename);
+  const names=wb.SheetNames.map(normalizeCardSpreadsheetName);
+  const idx=names.indexOf('vinculos');
+  if(idx<0)return [];
+  const sheet=wb.Sheets[wb.SheetNames[idx]];
+  const rows=XLSX.utils.sheet_to_json(sheet,{defval:'',raw:false});
+  return rows.map((row,index)=>({
+    row:index+2,
+    action:normalizeCardAction(getSheetCell(row,'Ação','Acao','Operação','Operacao','Action')),
+    player_id:getSheetCell(row,'ID jogador','ID do jogador','Player ID','Jogador ID'),
+    player_number:getSheetCell(row,'Número jogador','Numero jogador','Número interno jogador','Player Number'),
+    player_name:getSheetCell(row,'Jogador','Nome do jogador','Player'),
+    card_id:getSheetCell(row,'Nº interno Card','N° interno Card','Número interno Card','Card ID','ID Card'),
+    card_name:getSheetCell(row,'Card','Nome do card','Card Name'),
+    category:getSheetCell(row,'Categoria','Category'),
+    acquisition_type:getSheetCell(row,'Tipo de aquisição','Tipo aquisicao','Acquisition Type'),
+    acquisition_name:getSheetCell(row,'Origem/observação','Origem','Observação','Observacao','Acquisition')
+  })).filter(r=>Object.values(r).some(v=>String(v||'').trim()!==''));
+}
+
+async function validateCardLinksSheet(rows){
+  if(!rows.length)return {rows:[],issues:[]};
+  const [playersR,cardsR,ownedR]=await Promise.all([
+    pool.query(`SELECT id,nick,number,house,active FROM players ORDER BY id ASC`),
+    pool.query(`SELECT id,name,name_pt,COALESCE(category,type) AS category,active FROM cards ORDER BY id ASC`),
+    pool.query(`SELECT player_id,card_id,acquisition_type,acquisition_id,acquisition_name FROM player_cards`)
+  ]);
+  const players=new Map(playersR.rows.map(x=>[String(x.id),x]));
+  const cards=new Map(cardsR.rows.map(x=>[String(x.id),x]));
+  const owned=new Map(ownedR.rows.map(x=>[`${x.player_id}:${x.card_id}`,x]));
+  const seen=new Set(),actionsByKey=new Map(),clean=[],issues=[];
+  const addIssue=(out,field,message)=>{out.errors.push({field,message});issues.push({row:out.row,field,message});};
+  const validTypes=['MISSAO','EVENTO','LOJA','PATENTE','OUTRO'];
+  for(const r of rows){
+    const out={...r,player_id_num:null,card_id_num:null,action:r.action,errors:[],changes:[]};
+    if(r.action==='__INVALID__'){addIssue(out,'action','Ação inválida. Use ADICIONAR, REMOVER ou deixe em branco.');clean.push(out);continue;}
+    if(r.action==='') {out.ignored=true;clean.push(out);continue;}
+    if(!/^\d+$/.test(String(r.player_id||'')))addIssue(out,'player_id','ID jogador é obrigatório e deve ser numérico.');
+    else {out.player_id_num=Number(r.player_id);if(!players.has(String(out.player_id_num)))addIssue(out,'player_id',`Jogador ${out.player_id_num} não encontrado.`);}
+    if(!/^\d+$/.test(String(r.card_id||'')))addIssue(out,'card_id','Nº interno Card é obrigatório e deve ser numérico.');
+    else {out.card_id_num=Number(r.card_id);if(!cards.has(String(out.card_id_num)))addIssue(out,'card_id',`Card ${out.card_id_num} não encontrado.`);}
+    const p=players.get(String(out.player_id_num)); const c=cards.get(String(out.card_id_num));
+    if(p && r.player_name && normalizeCardIdentity(r.player_name)!==normalizeCardIdentity(p.nick))addIssue(out,'player_name',`O ID jogador ${p.id} pertence a "${p.nick}", não a "${r.player_name}".`);
+    if(c && r.card_name && normalizeCardIdentity(r.card_name)!==normalizeCardIdentity(c.name_pt||c.name))addIssue(out,'card_name',`O Nº interno Card ${c.id} pertence a "${c.name_pt||c.name}", não a "${r.card_name}".`);
+    const key=`${out.player_id_num}:${out.card_id_num}`;
+    if(seen.has(`${r.action}:${key}`))addIssue(out,'action','A mesma operação para o mesmo jogador e card aparece mais de uma vez.');
+    if(actionsByKey.has(key) && actionsByKey.get(key)!==r.action)addIssue(out,'action','Não misture ADICIONAR e REMOVER para o mesmo jogador e card na mesma planilha.');
+    seen.add(`${r.action}:${key}`);
+    actionsByKey.set(key,r.action);
+    if(out.action==='ADICIONAR'){
+      if(c && !Number(c.active))addIssue(out,'card_id','Este card está inativo e não pode ser adicionado a um jogador.');
+      if(owned.has(key))addIssue(out,'action','O jogador já possui este card.');
+      const type=String(r.acquisition_type||'OUTRO').trim().toUpperCase()||'OUTRO';
+      out.acquisition_type=type;
+      out.acquisition_name=String(r.acquisition_name||'').trim()||'Importação por planilha';
+      if(!validTypes.includes(type))addIssue(out,'acquisition_type',`Tipo de aquisição inválido: ${type}.`);
+    }else if(out.action==='REMOVER'){
+      if(!owned.has(key))addIssue(out,'action','O jogador não possui este card para remoção.');
+      out.acquisition_type=String(r.acquisition_type||'').trim().toUpperCase();
+      out.acquisition_name=String(r.acquisition_name||'').trim();
+    }
+    if(p && c && !out.errors.length){
+      out.changes=[{label:out.action==='ADICIONAR'?'Adicionar':'Remover',before:out.action==='ADICIONAR'?'—':'Possui',after:out.action==='ADICIONAR'?'Possui':'—',player:p.nick,card:c.name_pt||c.name}];
+    }
+    clean.push(out);
+  }
+  return {rows:clean,issues};
+}
+
+app.get('/api/admin/cards/export.xlsx', requireAdmin, async (req,res)=>{
+  try{
+    const [cardsR,playersR,linksR]=await Promise.all([
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.origin,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players,c.created_at,c.updated_at
+                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id GROUP BY c.id ORDER BY c.id ASC`),
+      pool.query(`SELECT id,nick,number,house,patent,active FROM players ORDER BY nick COLLATE "C" ASC`),
+      pool.query(`SELECT pc.player_id,pc.card_id,p.nick,p.number,p.house,c.name,c.name_pt,COALESCE(c.category,c.type) AS category,pc.acquisition_type,pc.acquisition_name
+                  FROM player_cards pc JOIN players p ON p.id=pc.player_id JOIN cards c ON c.id=pc.card_id ORDER BY p.nick COLLATE "C",c.id ASC`)
+    ]);
+    const wb=XLSX.utils.book_new();
+    const cardData=cardsR.rows.map(c=>({
+      'Nº interno':Number(c.id),'Chave de controle':cardSpreadsheetControlKey(c.id),'Nome':c.name_pt||c.name,'Nome japonês':c.name_jp||'','Categoria':c.category||'Outros','Origem':c.origin||'Exclusivo',
+      'Tipo de elemento':c.element_type||'NAO_ELEMENTAL','Elemento':c.element||'','Tipo de custo':c.cost_type||'SEM_CUSTO','Custo':c.cost||'',
+      'Poder':Number(c.power_value||0),'Dano':Number(c.damage_value||0),'Tipo de dano':c.damage_type||'SEM_DANO','Status':c.status||'ATIVO','Descrição':c.description||'','Ordem':Number(c.sort_order||0),
+      'Jogadores':Number(c.players||0),'Criado em':c.created_at?new Date(c.created_at).toISOString():'','Atualizado em':c.updated_at?new Date(c.updated_at).toISOString():''
+    }));
+    const wsCards=XLSX.utils.json_to_sheet(cardData);wsCards['!cols']=[{wch:11},{wch:28},{wch:34},{wch:24},{wch:20},{wch:20},{wch:18},{wch:14},{wch:16},{wch:20},{wch:10},{wch:10},{wch:18},{wch:14},{wch:65},{wch:9},{wch:11},{wch:24},{wch:24}];XLSX.utils.book_append_sheet(wb,wsCards,CARD_SHEET_NAMES.cards);
+    const playerData=playersR.rows.map(p=>({'ID jogador':Number(p.id),'Número interno':String(p.number||''),'Jogador':p.nick||'','Casa':p.house||'','Patente':p.patent||'','Acesso ativo':Number(p.active??1)}));
+    const wsPlayers=XLSX.utils.json_to_sheet(playerData);wsPlayers['!cols']=[{wch:12},{wch:18},{wch:28},{wch:24},{wch:28},{wch:13}];XLSX.utils.book_append_sheet(wb,wsPlayers,CARD_SHEET_NAMES.players);
+    const linkData=linksR.rows.map(x=>({'Ação':'','ID jogador':Number(x.player_id),'Número jogador':String(x.number||''),'Jogador':x.nick||'','Nº interno Card':Number(x.card_id),'Card':x.name_pt||x.name,'Categoria':x.category||'Outros','Tipo de aquisição':x.acquisition_type||'OUTRO','Origem/observação':x.acquisition_name||''}));
+    const wsLinks=XLSX.utils.json_to_sheet(linkData);wsLinks['!cols']=[{wch:13},{wch:12},{wch:18},{wch:28},{wch:17},{wch:36},{wch:20},{wch:20},{wch:42}];XLSX.utils.book_append_sheet(wb,wsLinks,CARD_SHEET_NAMES.links);
+    const instructions=[
+      ['PORTAL SPADE — GESTÃO DE CARDS POR PLANILHA',''],
+      ['FLUXO DE CARDS','Na aba Cards, linhas com Nº interno preenchido atualizam o card correspondente. Linhas com Nº interno vazio criam novos cards.'],
+      ['Nº INTERNO','É o identificador permanente do card no Portal. Nunca altere esse número. Para um novo card, deixe o campo vazio; o Portal gerará o próximo automaticamente.'],
+      ['CHAVE DE CONTROLE','Coluna técnica gerada pelo Portal. Nunca altere nem apague. Ela protege o vínculo entre o Nº interno e o card, mas permite alterar o nome do card.'],
+      ['NÃO EXCLUI','A planilha não apaga cards que estejam ausentes. Para retirar um card de circulação, use Status = INATIVO.'],
+      ['VÍNCULOS','Na aba Vinculos, use Ação = ADICIONAR ou REMOVER. Deixe a ação vazia para manter a linha sem alterações.'],
+      ['IDENTIFICAÇÃO DO JOGADOR','Use obrigatoriamente o ID jogador. Número, nick e casa são referências para conferência.'],
+      ['IDENTIFICAÇÃO DO CARD','Use obrigatoriamente o Nº interno Card. Nome e categoria servem para conferência.'],
+      ['CARDS ÚNICOS','Cada jogador pode possuir apenas uma unidade de cada card. Uma linha ADICIONAR para um card já possuído será bloqueada.'],
+      ['ORIGEM','Tipo de aquisição: MISSAO, EVENTO, LOJA, PATENTE ou OUTRO. Se a origem/observação ficar vazia em ADICIONAR, será usado "Importação por planilha".'],
+      ['NOVOS CARDS + VÍNCULOS','Para vincular um card recém-criado, primeiro importe a aba Cards. Depois baixe a planilha novamente para obter o Nº interno gerado e só então preencha a aba Vinculos.'],
+      ['SEGURANÇA','O Portal faz uma prévia completa. Se houver qualquer erro, nenhuma alteração é aplicada. Alterações de posse também geram histórico.']
+    ];
+    const wsI=XLSX.utils.aoa_to_sheet(instructions);wsI['!cols']=[{wch:28},{wch:105}];XLSX.utils.book_append_sheet(wb,wsI,CARD_SHEET_NAMES.instructions);
+    const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+    res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="cards-spade-gestao.xlsx"');res.send(out);
+  }catch(e){console.error('Export cards xlsx error:',e);res.status(500).json({error:'Não foi possível gerar a planilha de cards.'});}
+});
+
+app.post('/api/admin/cards/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{
+  try{
+    if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});
+    const cardRows=parseCardCatalogSheet(req.file.buffer,req.file.originalname);
+    const linkRows=parseCardLinksSheet(req.file.buffer,req.file.originalname);
+    const [cards,links]=await Promise.all([validateCardCatalogSheet(cardRows),validateCardLinksSheet(linkRows)]);
+    const validCards=cards.rows.filter(r=>!r.errors.length).length,validLinks=links.rows.filter(r=>!r.errors.length && !r.ignored).length;
+    const cardChanges=cards.rows.filter(r=>!r.errors.length&&(r.changes||[]).length).length;
+    const linkChanges=links.rows.filter(r=>!r.errors.length&&!r.ignored).length;
+    const issues=[...cards.issues.map(x=>({...x,section:'Cards'})),...links.issues.map(x=>({...x,section:'Vinculos'}))];
+    res.json({filename:req.file.originalname,cards:{total:cards.rows.length,valid:validCards,invalid:cards.rows.length-validCards,changes:cardChanges,rows:cards.rows},links:{total:linkRows.length,valid:validLinks,invalid:linkRows.length-validLinks,changes:linkChanges,rows:links.rows},issues});
+  }catch(e){console.error('Cards bulk preview error:',e);res.status(e.statusCode||400).json({error:e.message||'Não foi possível processar a planilha de cards.'});}
+});
+
+app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{
+  try{
+    if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});
+    const cardRows=parseCardCatalogSheet(req.file.buffer,req.file.originalname);
+    const linkRows=parseCardLinksSheet(req.file.buffer,req.file.originalname);
+    const [cards,links]=await Promise.all([validateCardCatalogSheet(cardRows),validateCardLinksSheet(linkRows)]);
+    const issues=[...cards.issues,...links.issues];
+    if(issues.length)return res.status(400).json({error:'A operação foi bloqueada porque existem dados inválidos. Nenhuma alteração foi aplicada.',issues});
+    const client=await pool.connect();
+    let created=0,updated=0,added=0,removed=0;const touchedPlayers=new Set();
+    try{
+      await client.query('BEGIN');
+      for(const r of cards.rows){
+        if(!r.changes.length&&!r.isNew)continue;
+        if(r.isNew){
+          const dup=await client.query(`SELECT id FROM cards WHERE lower(name)=lower($1) LIMIT 1`,[r.name]);
+          if(dup.rows[0])throw Object.assign(new Error(`O card "${r.name}" já existe.`),{statusCode:400});
+          const ins=await client.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,damage_value,damage_type,origin,status,description,sort_order,active)
+            VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id,name`,[r.name,r.name_jp,r.category,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0]);
+          created++;
+        }else{
+          const current=await client.query(`SELECT id,name FROM cards WHERE id=$1 FOR UPDATE`,[r.id]);
+          if(!current.rows[0])throw Object.assign(new Error(`Card ${r.id} não foi encontrado durante a gravação.`),{statusCode:400});
+          await client.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16`,[r.name,r.name_jp,r.category,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0,r.id]);
+          updated++;
+        }
+      }
+      for(const r of links.rows.filter(x=>!x.ignored)){
+        const pr=(await client.query(`SELECT id,nick FROM players WHERE id=$1 FOR UPDATE`,[r.player_id_num])).rows[0];
+        const cr=(await client.query(`SELECT id,name,active FROM cards WHERE id=$1 FOR UPDATE`,[r.card_id_num])).rows[0];
+        if(!pr||!cr)throw Object.assign(new Error(`Não foi possível localizar jogador/card da linha ${r.row}.`),{statusCode:400});
+        const exists=(await client.query(`SELECT player_id,acquisition_type,acquisition_id,acquisition_name FROM player_cards WHERE player_id=$1 AND card_id=$2 FOR UPDATE`,[pr.id,cr.id])).rows[0];
+        if(r.action==='ADICIONAR'){
+          if(!Number(cr.active))throw Object.assign(new Error(`Linha ${r.row}: o card ${cr.id} está inativo.`),{statusCode:400});
+          if(exists)throw Object.assign(new Error(`Linha ${r.row}: ${pr.nick} já possui o card ${cr.name}.`),{statusCode:400});
+          await client.query(`INSERT INTO player_cards(player_id,card_id,quantity,acquisition_type,acquisition_id,acquisition_name,acquired_at,updated_at) VALUES($1,$2,1,$3,NULL,$4,NOW(),NOW())`,[pr.id,cr.id,r.acquisition_type||'OUTRO',r.acquisition_name||'Importação por planilha']);
+          await client.query(`INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes) VALUES($1,$2,'ADQUIRIDO',$3,NULL,$4,$5)`,[pr.id,cr.id,r.acquisition_type||'OUTRO',r.acquisition_name||'Importação por planilha','Card vinculado por planilha.']);
+          await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'CARDS',$2)`,[pr.id,`Card adquirido: ${cr.name} • origem ${r.acquisition_type||'OUTRO'} — ${r.acquisition_name||'Importação por planilha'}.`]);
+          touchedPlayers.add(Number(pr.id));added++;
+        }else if(r.action==='REMOVER'){
+          if(!exists)throw Object.assign(new Error(`Linha ${r.row}: ${pr.nick} não possui o card ${cr.name}.`),{statusCode:400});
+          await client.query(`DELETE FROM player_cards WHERE player_id=$1 AND card_id=$2`,[pr.id,cr.id]);
+          await client.query(`INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes) VALUES($1,$2,'REMOVIDO',$3,$4,$5,$6)`,[pr.id,cr.id,exists.acquisition_type||'OUTRO',exists.acquisition_id||null,exists.acquisition_name||'','Card removido por planilha.']);
+          await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'CARDS',$2)`,[pr.id,`Card removido: ${cr.name}.`]);
+          touchedPlayers.add(Number(pr.id));removed++;
+        }
+      }
+      for(const playerId of touchedPlayers)await refreshPlayerCardPower(client,playerId);
+      await client.query('COMMIT');
+      res.json({ok:true,created,updated,added,removed,playersAffected:touchedPlayers.size});
+    }catch(e){await client.query('ROLLBACK');console.error('Cards bulk commit error:',e);res.status(e.statusCode||500).json({error:e.message||'Erro ao aplicar a planilha. Nenhuma alteração foi aplicada.'});}
+    finally{client.release();}
+  }catch(e){console.error('Cards bulk error:',e);res.status(e.statusCode||400).json({error:e.message||'Não foi possível aplicar a planilha de cards.'});}
+});
+
+
 app.get("/api/admin/events", requireAdmin, async (req,res)=>{
   try{
     const r=await pool.query(`
@@ -5291,7 +5627,7 @@ app.post("/api/admin/players/:id/cards", requireAdmin, async (req,res)=>{
       );
     }
 
-    await refreshPlayerCardPower(client, playerId);
+    await refreshPlayerCardPower(client, id);
     await client.query("COMMIT");
     res.json({ok:true,card:{
       id:Number(cr.rows[0].id),name:cr.rows[0].name,category:cr.rows[0].category||"Outros"
