@@ -3687,7 +3687,7 @@ app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'
         }else{
           const current=await client.query(`SELECT id,name FROM cards WHERE id=$1 FOR UPDATE`,[r.id]);
           if(!current.rows[0])throw Object.assign(new Error(`Card ${r.id} não foi encontrado durante a gravação.`),{statusCode:400});
-          await client.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16`,[r.name,r.name_jp,r.category,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0,r.id]);
+          await client.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16`,[r.name,r.name_jp,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0,r.id]);
           updated++;
         }
       }
