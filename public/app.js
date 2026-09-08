@@ -3140,7 +3140,8 @@ qs("#cardForm").addEventListener("submit",async e=>{
   e.preventDefault();
   const b=Object.fromEntries(new FormData(e.target).entries());
   b.power_value=Number(b.power_value||0);
-  b.damage_value=Number(b.damage_value||0);b.damage_type=b.damage_type||"SEM_DANO";
+  b.damage_value=Number(b.damage_value||0);
+  b.damage_type=b.damage_value<=0?"SEM_DANO":(b.damage_type||"SEM_DANO");
   try{
     if(b.id)await adminApi(`/api/admin/cards/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
     else await adminApi("/api/admin/cards",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
@@ -3149,6 +3150,7 @@ qs("#cardForm").addEventListener("submit",async e=>{
     alert("Card salvo com sucesso.");
   }catch(ex){qs("#cardError").textContent=ex.message}
 });
+qs("#cardDamage")?.addEventListener("input",e=>{if(Number(e.target.value||0)<=0&&qs("#cardDamageType"))qs("#cardDamageType").value="SEM_DANO";});
 qs("#cardCancelBtn").addEventListener("click",resetCardForm);
 qs("#addCardCategoryBtn")?.addEventListener("click",async()=>{
   const input=qs("#newCardCategory"),name=(input?.value||"").trim();if(!name)return alert("Informe o nome da categoria.");
