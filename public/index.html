@@ -578,6 +578,32 @@
       <div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados ou lançar uma movimentação de Yuls.</p></div>
     </div>
   </div>
+
+  <div class="player-import-modal" id="cardBulkSheetModal" hidden style="display:none">
+    <div class="player-import-window player-bulk-sheet-window card-bulk-sheet-window">
+      <div class="player-import-head">
+        <div><p class="eyebrow">GESTÃO EM MASSA</p><h3>Cards por planilha</h3><p>Atualize o catálogo e, pela aba Vinculos, associe ou remova Cards dos jogadores.</p></div>
+        <button type="button" class="journal-close" id="closeCardBulkSheet">×</button>
+      </div>
+      <div class="player-import-actions">
+        <button class="outline small" type="button" id="cardBulkSheetDownload">📤 Baixar planilha atual</button>
+        <label class="gold small import-file-label" for="cardBulkSheetFile">📥 Escolher planilha editada</label>
+        <input id="cardBulkSheetFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <span id="cardBulkSheetFileName">Nenhum arquivo selecionado</span>
+      </div>
+      <div class="player-import-note">
+        <b>Cards:</b> Nº interno preenchido = atualizar. Nº interno vazio = criar novo e receber número automático. O Nº interno nunca pode ser escolhido ou trocado manualmente.<br>
+        <b>Vinculos:</b> use <b>ADICIONAR</b> ou <b>REMOVER</b>. O ID jogador e o Nº interno Card são obrigatórios; os nomes servem para conferência. Linhas sem ação são ignoradas.<br>
+        <span>Novos Cards precisam ser importados primeiro. Depois baixe a planilha novamente para descobrir o Nº interno gerado e então faça os vínculos.</span>
+      </div>
+      <div id="cardBulkSheetPreview" class="player-import-preview"><p>Escolha uma planilha para começar.</p></div>
+      <div class="player-import-footer">
+        <div id="cardBulkSheetStatus" class="error"></div>
+        <button class="outline dark-outline" type="button" id="cardBulkSheetCancel">Cancelar</button>
+        <button class="gold" type="button" id="cardBulkSheetConfirm" disabled>Aplicar alterações</button>
+      </div>
+    </div>
+  </div>
   <div class="player-import-modal" id="playerImportModal" hidden style="display:none">
     <div class="player-import-window">
       <div class="player-import-head">
@@ -697,10 +723,15 @@
       <div><p class="eyebrow">BANCO DE CARDS</p><h3>Cards do RPG</h3></div>
       <span>Cadastre e organize as cartas disponíveis</span>
     </div>
+    <div class="card-sheet-toolbar">
+      <div class="card-sheet-toolbar-copy"><p class="eyebrow">PLANILHA DE GESTÃO</p><b>Cards + vínculos com jogadores</b><small>Baixe o catálogo atual, edite no Excel e reenvie. A aba Vinculos usa ADICIONAR/REMOVER.</small></div>
+      <div class="card-sheet-toolbar-actions"><button type="button" class="outline dark-outline small" id="downloadCardsSheetBtn">📤 Baixar planilha</button><button type="button" class="gold small" id="importCardsSheetBtn">📥 Importar planilha</button></div>
+    </div>
     <div class="card-catalog-layout">
       <form id="cardForm" class="admin-form">
         <input type="hidden" name="id" id="cardId">
         <div class="card-admin-grid">
+          <input id="cardInternalNumber" class="full" placeholder="Nº interno — automático" readonly>
           <input name="name_pt" id="cardNamePt" class="full" placeholder="Nome em português" required>
           <input name="name_jp" id="cardNameJp" class="full" placeholder="Nome em japonês (opcional)">
           <select name="category" id="adminCardCategory"></select>
@@ -1092,6 +1123,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=58.0.0"></script>
+<script src="/app.js?v=59.0.0"></script>
 </body>
 </html>
