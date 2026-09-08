@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -142,7 +142,7 @@ function initGlobalSearch(){
     if(kind==='player'&&id)return openPublicPlayer(id);
     if(kind==='house'&&id)return openHouse(id);
     if(kind==='event'&&id)return openPublicEvent(id);
-    if(kind==='library'){go('biblioteca');const s=qs('#librarySearch');if(s){s.value=r.querySelector('b')?.textContent||'';loadLibrary();}return;}
+    if(kind==='library'){state.libraryTopic='all';go('biblioteca');const s=qs('#librarySearch');if(s){s.value=r.querySelector('b')?.textContent||'';loadLibrary();}return;}
     if(kind==='article'){go('jornal');return;}
     if(kind==='mission'){go('missoes');const s=qs('#missionSearch');if(s){s.value=(r.querySelector('b')?.textContent||'').replace(/^Missão de /,'');s.dispatchEvent(new Event('input'));}return;}
     if(kind==='schedule'){go('cronograma');const s=qs('#scheduleSearch');if(s){s.value=r.querySelector('b')?.textContent||'';s.dispatchEvent(new Event('input'));}return;}
@@ -189,7 +189,7 @@ function go(page){
 qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 qs("#hamb").addEventListener("click",()=>{closeGlobalSearch();qs("#nav").classList.toggle("open")});
 qs("#mobileMenuBtn")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();const m=qs("#libraryReaderModal");if(m?.classList.contains("open")){m.classList.remove("open");document.body.classList.remove("library-reader-open");}}});
 
 
 function initGuideNavigation(){
@@ -214,13 +214,89 @@ async function loadHome(){
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
 }
 
+const LIBRARY_TOPICS={
+  all:{label:"Tudo",icon:"✦",category:"",description:"Todos os materiais oficiais disponíveis na Biblioteca de Spade."},
+  databook:{label:"Databook VT",icon:"⚔️",category:"DATABOOK • REGRAS",description:"Regras oficiais de combate, interações, cards e mecânicas do sistema Vale Tudo."},
+  admin:{label:"Administração",icon:"♛",category:"SISTEMA • ADMINISTRAÇÃO",description:"Cargos, hierarquia, requisitos e regras de remuneração do Reino."},
+  orgs:{label:"Organizações",icon:"🐾",category:"SISTEMA • ORGANIZAÇÕES",description:"Evolução dos Mascotes das Organizações, requisitos e benefícios de upgrade."},
+  arena:{label:"Arena",icon:"⚖️",category:"SISTEMA • ARENA",description:"Regulamento dos Juízes, procedimentos de luta e conduta dos participantes."},
+  cards:{label:"Cards & Batalha",icon:"🃏",category:"SISTEMA • CARDS",description:"Manual de Batalha e referência rápida para a utilização dos cards."}
+};
+function currentLibraryTopic(){return LIBRARY_TOPICS[state.libraryTopic]||LIBRARY_TOPICS.all;}
+function libraryTopicItems(items){return (items||[]).filter(x=>{const t=currentLibraryTopic();return !t.category||x.category===t.category;});}
 async function loadLibrary(){
-  try{const params=new URLSearchParams();const q=qs("#librarySearch")?.value.trim();const cat=qs("#libraryCategory")?.value;if(q)params.set("q",q);if(cat)params.set("category",cat);const d=await api(`/api/library?${params.toString()}`);state.libraryItems=d.items||[];renderLibrary(state.libraryItems);populateLibraryCategories(state.libraryItems);}
-  catch(e){const el=qs("#libraryGrid");if(el)el.innerHTML=`<div class="panel"><h3>Não foi possível carregar a Biblioteca.</h3><p>${escapeHtml(e.message)}</p></div>`;}
+  try{
+    const params=new URLSearchParams();
+    const q=qs("#librarySearch")?.value.trim()||"";
+    const topic=currentLibraryTopic();
+    if(q)params.set("q",q);
+    if(topic.category)params.set("category",topic.category);
+    const d=await api(`/api/library?${params.toString()}`);
+    state.libraryItems=d.items||[];
+    renderLibraryTopics(state.libraryItems);
+    renderLibrary(state.libraryItems,q);
+    const clear=qs("#librarySearchClear"); if(clear)clear.hidden=!q;
+  }catch(e){
+    const el=qs("#libraryGrid");
+    if(el)el.innerHTML=`<div class="library-empty"><div class="library-empty-seal">§</div><h3>Não foi possível carregar a Biblioteca.</h3><p>${escapeHtml(e.message)}</p></div>`;
+  }
 }
-function populateLibraryCategories(items){const sel=qs("#libraryCategory");if(!sel)return;const current=sel.value;const cats=[...new Set((items||[]).map(x=>x.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));sel.innerHTML='<option value="">Todas as categorias</option>'+cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");if(cats.includes(current))sel.value=current;}
-function renderLibrary(items){const el=qs("#libraryGrid");if(!el)return;el.innerHTML=(items||[]).length?(items||[]).map(x=>`<article class="library-card"><div class="library-icon">${escapeHtml(x.icon||"📚")}</div><span class="tag">${escapeHtml(x.category||"GERAL")}</span><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.description||"")}</p><div class="library-actions">${x.content?`<button class="outline dark-outline small" type="button" data-library-read="${x.id}">Ler no Portal</button>`:""}${x.url?`<a class="gold small library-link" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Abrir material</a>`:""}</div></article>`).join(""): '<div class="panel"><h3>Nenhum material encontrado.</h3><p>Os materiais oficiais do Reino aparecerão aqui.</p></div>';qsa("[data-library-read]").forEach(b=>b.onclick=()=>{const x=state.libraryItems.find(i=>Number(i.id)===Number(b.dataset.libraryRead));if(!x)return;openLibraryReader(x);});}
-function openLibraryReader(x){let modal=qs("#libraryReaderModal");if(!modal){modal=document.createElement("div");modal.id="libraryReaderModal";modal.className="modal-overlay";document.body.appendChild(modal);}modal.innerHTML=`<div class="modal-card library-reader"><button class="modal-close" type="button" id="libraryReaderClose">×</button><p class="eyebrow">${escapeHtml(x.category||"BIBLIOTECA")}</p><h2>${escapeHtml(x.title)}</h2><p class="library-reader-desc">${escapeHtml(x.description||"")}</p><div class="library-reader-content">${escapeHtml(x.content||"").replace(/\n/g,"<br>")}</div>${x.url?`<a class="gold small" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Abrir material original</a>`:""}</div>`;modal.classList.add("open");qs("#libraryReaderClose").onclick=()=>modal.classList.remove("open");modal.onclick=e=>{if(e.target===modal)modal.classList.remove("open")};}
+function renderLibraryTopics(items){
+  const tabs=qs("#libraryTopics"),side=qs("#libraryTopicSidebar"); if(!tabs||!side)return;
+  const allItems=state.libraryItems||[];
+  const counts={all:allItems.length}; Object.keys(LIBRARY_TOPICS).forEach(k=>{if(k!=="all")counts[k]=allItems.filter(x=>x.category===LIBRARY_TOPICS[k].category).length;});
+  const entries=Object.entries(LIBRARY_TOPICS);
+  tabs.innerHTML=entries.map(([key,t])=>`<button type="button" role="tab" aria-selected="${state.libraryTopic===key}" class="library-topic-tab ${state.libraryTopic===key?"active":""}" data-library-topic="${key}"><span class="library-topic-tab-icon">${t.icon}</span><span><b>${escapeHtml(t.label)}</b><small>${counts[key]||0} ${counts[key]===1?"material":"materiais"}</small></span></button>`).join("");
+  side.innerHTML=entries.map(([key,t])=>`<button type="button" class="library-side-topic ${state.libraryTopic===key?"active":""}" data-library-topic="${key}"><span>${t.icon}</span><div><b>${escapeHtml(t.label)}</b><small>${counts[key]||0} materiais</small></div></button>`).join("");
+  qsa("[data-library-topic]").forEach(b=>b.onclick=()=>{state.libraryTopic=b.dataset.libraryTopic||"all";loadLibrary();qs("#libraryTopicStage")?.scrollIntoView?.({behavior:"smooth",block:"start"});});
+  const hint=qs("#libraryTopicHint");if(hint){const n=currentLibraryTopic().category?counts[state.libraryTopic]||0:allItems.length;hint.textContent=`${n} ${n===1?"material disponível":"materiais disponíveis"}`;}
+}
+function buildLibraryReader(x){
+  const raw=String(x.content||"").replace(/\r/g,"");
+  const lines=raw.split("\n"); let html="", toc=[]; let para=[]; let bullet=[]; let hid=0;
+  const flushPara=()=>{if(!para.length)return;const text=para.join(" ").trim();if(text)html+=`<p>${escapeHtml(text)}</p>`;para=[];};
+  const flushBullets=()=>{if(!bullet.length)return;html+='<ul>'+bullet.map(v=>`<li>${escapeHtml(v)}</li>`).join('')+'</ul>';bullet=[];};
+  for(const rawLine of lines){
+    const line=rawLine.trim();
+    if(!line){flushBullets();flushPara();continue;}
+    if(/^(?:\d+\.\d+|\d+\.\d+\.\d+)\s+.+:$/u.test(line)){
+      flushBullets();flushPara();const id=`library-section-${++hid}`;const title=line.replace(/:$/,'');toc.push({id,title});html+=`<h3 id="${id}">${escapeHtml(title)}</h3>`;continue;
+    }
+    if(/^•\s*/.test(line)||/^[-–—]\s*/.test(line)){
+      flushPara();bullet.push(line.replace(/^•\s*|^[-–—]\s*/,'').trim());continue;
+    }
+    if(/^(CAPÍTULO|NÍVEL|ART\.|ARTIGO|RANK\s+[IVX]+)/i.test(line) && line.length<150){
+      flushBullets();flushPara();const id=`library-section-${++hid}`;toc.push({id,title:line});html+=`<h3 id="${id}">${escapeHtml(line)}</h3>`;continue;
+    }
+    para.push(line);
+  }
+  flushBullets();flushPara();
+  return {html:html||'<p>Este material ainda não possui conteúdo para leitura.</p>',toc};
+}
+function renderLibrary(items,q=""){
+  const el=qs("#libraryGrid"),header=qs("#libraryTopicHeader"); if(!el)return;
+  const topic=currentLibraryTopic(); const list=items||[];
+  if(header){
+    header.innerHTML=`<div class="library-topic-symbol">${topic.icon}</div><div class="library-topic-header-copy"><p class="eyebrow">${q?"RESULTADOS DA PESQUISA":"TÓPICO SELECIONADO"}</p><h2>${escapeHtml(q?`Resultados para “${q}”`:topic.label)}</h2><p>${escapeHtml(q?`Encontramos ${list.length} ${list.length===1?"material":"materiais"} relacionados à sua busca.`:topic.description)}</p></div>`;
+  }
+  if(!list.length){
+    el.innerHTML=`<div class="library-empty"><div class="library-empty-seal">§</div><h3>${q?"Nenhum resultado encontrado.":"Nenhum material nesta seção."}</h3><p>${q?"Tente outro termo, como “paralisia”, “mana”, “barreira” ou “cargo”.":"Escolha outro tópico acima para continuar explorando o arquivo."}</p></div>`;return;
+  }
+  el.innerHTML=list.map((x,i)=>`<button type="button" class="library-topic-card" data-library-read-index="${i}"><div class="library-topic-card-top"><span class="library-card-seal">${escapeHtml(x.icon||topic.icon)}</span><span class="tag">${escapeHtml(x.category||"GERAL")}</span></div><div class="library-topic-card-copy"><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.description||"Abra para consultar o conteúdo completo no Portal.")}</p></div><span class="library-open-label">Abrir material <b>→</b></span></button>`).join("");
+  qsa("[data-library-read-index]").forEach(b=>b.onclick=()=>{const x=list[Number(b.dataset.libraryReadIndex)];if(x)openLibraryReader(x);});
+}
+function openLibraryReader(x){
+  let modal=qs("#libraryReaderModal");
+  if(!modal){modal=document.createElement("div");modal.id="libraryReaderModal";modal.className="library-reader-modal";document.body.appendChild(modal);}
+  const reader=buildLibraryReader(x);
+  modal.innerHTML=`<div class="library-reader-shell" role="dialog" aria-modal="true" aria-labelledby="libraryReaderTitle"><div class="library-reader-top"><div><span class="tag">${escapeHtml(x.category||"BIBLIOTECA")}</span><h2 id="libraryReaderTitle">${escapeHtml(x.title)}</h2><p>${escapeHtml(x.description||"")}</p></div><button class="library-reader-close" type="button" id="libraryReaderClose" aria-label="Fechar leitura">×</button></div><div class="library-reader-body"><aside class="library-reader-toc"><div class="library-toc-title">NESTE MATERIAL</div>${reader.toc.length?reader.toc.map((t,i)=>`<a href="#${t.id}" data-library-toc="${t.id}">${String(i+1).padStart(2,"0")} ${escapeHtml(t.title)}</a>`).join(""): '<span class="library-toc-empty">Leitura contínua</span>'}</aside><div class="library-reader-scroll"><div class="library-reader-content">${reader.html}</div>${x.url?`<div class="library-reader-footer"><a class="gold small" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Abrir material original</a></div>`:""}</div></div></div>`;
+  modal.classList.add("open");document.body.classList.add("library-reader-open");
+  const close=()=>{modal.classList.remove("open");document.body.classList.remove("library-reader-open");};
+  qs("#libraryReaderClose")?.addEventListener("click",close);modal.onclick=e=>{if(e.target===modal)close();};
+  qsa("[data-library-toc]").forEach(a=>a.onclick=e=>{e.preventDefault();const t=qs("#"+a.dataset.libraryToc);t?.scrollIntoView({behavior:"smooth",block:"start"});});
+  setTimeout(()=>qs("#libraryReaderClose")?.focus(),0);
+}
+
 
 async function loadAnnouncements(){
   try{
@@ -2670,7 +2746,7 @@ async function deleteEdition(id){
 qs("#saveEventResultsBtn").addEventListener("click",saveAdminResults);
 qs("#publishEventResultsBtn").addEventListener("click",publishAdminResults);
 qs("#librarySearch")?.addEventListener("input",()=>loadLibrary());
-qs("#libraryCategory")?.addEventListener("change",()=>loadLibrary());
+qs("#librarySearchClear")?.addEventListener("click",()=>{const s=qs("#librarySearch");if(s){s.value="";s.focus();}loadLibrary();});
 qs("#adminLibraryClear")?.addEventListener("click",clearAdminLibraryForm);
 qs("#adminLibraryForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminLibraryId").value;const body={title:qs("#adminLibraryTitle").value,category:qs("#adminLibraryCategory").value,icon:qs("#adminLibraryIcon").value,sort_order:Number(qs("#adminLibraryOrder").value||0),url:qs("#adminLibraryUrl").value,description:qs("#adminLibraryDescription").value,content:qs("#adminLibraryContent").value,published:qs("#adminLibraryPublished").checked};try{await adminApi(id?`/api/admin/library/${id}`:"/api/admin/library",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminLibraryForm();await loadAdminLibrary();await loadLibrary();alert(id?"Material atualizado.":"Material cadastrado.")}catch(ex){qs("#adminLibraryError").textContent=ex.message}});
 qs('#scheduleSearch')?.addEventListener('input',()=>{renderSchedule(state.schedule);});
