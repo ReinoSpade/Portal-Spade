@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -1624,6 +1624,67 @@ async function deleteHouse(id){
   }catch(e){alert(e.message)}
 }
 
+
+
+async function downloadPlayersSheet(){
+  const btn=qs('#playerBulkSheetDownload')||qs('#exportPlayersBtn');
+  const old=btn?.textContent;
+  if(btn) {btn.disabled=true;btn.textContent='⏳ Gerando planilha...';}
+  try{
+    const options={credentials:'same-origin',headers:{}};
+    const key=state.adminKey||getStoredAdminKey(); if(key) options.headers['x-admin-key']=key;
+    const r=await fetch('/api/admin/players/export.xlsx',options);
+    if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar a planilha.');}
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='jogadores-spade-atualizacao.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){alert(e.message||'Não foi possível baixar a planilha.');}
+  finally{if(btn){btn.disabled=false;btn.textContent=old||'📤 Baixar planilha';}}
+}
+
+function openPlayerBulkSheet(){
+  const modal=qs('#playerBulkSheetModal'); if(!modal)return;
+  modal.hidden=false; modal.style.display='block';
+  state.playerBulkSheet={file:null,preview:null};
+  qs('#playerBulkSheetFile').value='';
+  qs('#playerBulkSheetFileName').textContent='Nenhum arquivo selecionado';
+  qs('#playerBulkSheetPreview').innerHTML='<p>Baixe a planilha atual, edite-a e depois escolha o arquivo aqui.</p>';
+  qs('#playerBulkSheetConfirm').disabled=true;
+  qs('#playerBulkSheetStatus').textContent='';
+}
+function closePlayerBulkSheet(){const m=qs('#playerBulkSheetModal');if(m){m.style.display='none';m.hidden=true}}
+function renderPlayerBulkSheetPreview(data){
+  const box=qs('#playerBulkSheetPreview'); if(!box)return;
+  const rows=data.rows||[], valid=Number(data.valid||0), invalid=Number(data.invalid||0);
+  const summary=`<div class="player-import-summary"><span>${data.total} linhas</span><span class="ok">✅ ${valid} prontas</span><span class="bad">⚠️ ${invalid} com erros</span></div>`;
+  const changed=rows.filter(r=>(r.changes||[]).length);
+  const cols=['ID','Jogador','Alterações','Problemas'];
+  const body=rows.map(r=>{
+    const problems=(r.errors||[]).map(e=>e.message).join(' • ');
+    const changes=(r.changes||[]).map(c=>`<div><b>${escapeHtml(c.label)}:</b> ${escapeHtml(String(c.before))} → ${escapeHtml(String(c.after))}</div>`).join('')||'<span style="color:#888">Sem alterações</span>';
+    return `<tr><td>${escapeHtml(String(r.id??''))}</td><td><b>${escapeHtml(r.nick||'')}</b><small>${escapeHtml(r.house||'')}</small></td><td class="bulk-sheet-changes">${changes}</td><td class="${r.errors?.length?'import-issue-cell':''}">${escapeHtml(problems||'')}</td></tr>`;
+  }).join('');
+  box.innerHTML=summary+`<div class="bulk-sheet-preview-note">${changed.length} jogador(es) com pelo menos uma alteração detectada.</div><div style="overflow:auto"><table><thead><tr>${cols.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  qs('#playerBulkSheetConfirm').disabled=invalid>0||valid===0;
+}
+async function previewPlayerBulkSheet(){
+  const file=qs('#playerBulkSheetFile')?.files?.[0]; if(!file)return;
+  state.playerBulkSheet={file,preview:null};
+  qs('#playerBulkSheetFileName').textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;
+  qs('#playerBulkSheetStatus').textContent='Lendo e comparando com o cadastro atual...';
+  qs('#playerBulkSheetConfirm').disabled=true;
+  const form=new FormData();form.append('file',file);
+  try{const data=await adminApi('/api/admin/players/bulk-sheet/preview',{method:'POST',body:form});state.playerBulkSheet.preview=data;renderPlayerBulkSheetPreview(data);qs('#playerBulkSheetStatus').textContent=data.invalid?'Corrija os dados indicados e envie novamente.':'Planilha pronta. Revise a prévia antes de aplicar.';}
+  catch(e){qs('#playerBulkSheetPreview').innerHTML='<p>Não foi possível processar a planilha.</p>';qs('#playerBulkSheetStatus').textContent=e.message;}
+}
+async function confirmPlayerBulkSheet(){
+  const file=state.playerBulkSheet?.file;if(!file)return;
+  if(!confirm(`Aplicar as alterações da planilha a ${Number(state.playerBulkSheet.preview?.total||0)} jogador(es)? Esta ação atualizará exatamente os campos editados.`))return;
+  qs('#playerBulkSheetConfirm').disabled=true;qs('#playerBulkSheetCancel').disabled=true;qs('#playerBulkSheetStatus').textContent='Aplicando alterações em transação única...';
+  const form=new FormData();form.append('file',file);
+  try{const d=await adminApi('/api/admin/players/bulk-sheet',{method:'POST',body:form});qs('#playerBulkSheetStatus').textContent=`✅ ${d.changedPlayers} jogador(es) atualizados • ${d.changedFields} campo(s) alterado(s).`;await initAdmin();setTimeout(closePlayerBulkSheet,900);}
+  catch(e){qs('#playerBulkSheetStatus').textContent=e.message;qs('#playerBulkSheetConfirm').disabled=false;qs('#playerBulkSheetCancel').disabled=false;}
+}
+
 function openPlayerImport(){
   const modal=qs("#playerImportModal");if(!modal)return;
   modal.hidden=false;modal.style.display="block";
@@ -2438,6 +2499,13 @@ qs("#patentForm").addEventListener("submit",async e=>{
 });
 qs("#patentCancelBtn").addEventListener("click",resetPatentForm);
 
+qs("#exportPlayersBtn")?.addEventListener("click",downloadPlayersSheet);
+qs("#bulkUpdatePlayersBtn")?.addEventListener("click",openPlayerBulkSheet);
+qs("#playerBulkSheetDownload")?.addEventListener("click",downloadPlayersSheet);
+qs("#closePlayerBulkSheet")?.addEventListener("click",closePlayerBulkSheet);
+qs("#playerBulkSheetCancel")?.addEventListener("click",closePlayerBulkSheet);
+qs("#playerBulkSheetFile")?.addEventListener("change",previewPlayerBulkSheet);
+qs("#playerBulkSheetConfirm")?.addEventListener("click",confirmPlayerBulkSheet);
 qs("#importPlayersBtn").addEventListener("click",openPlayerImport);
 qs("#closePlayerImport").addEventListener("click",closePlayerImport);
 qs("#playerImportCancel").addEventListener("click",closePlayerImport);
