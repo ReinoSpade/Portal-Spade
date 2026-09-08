@@ -1445,6 +1445,8 @@ function updateContextNav(){
   if(adminNav) adminNav.classList.toggle("is-visible",true);
   const login=qs("#loginNav");
   if(login) login.setAttribute("aria-label",logged?"Abrir meu painel":"Entrar no Reino");
+  // Keep the navigation anchored at the beginning after dynamic login/logout changes.
+  requestAnimationFrame(()=>{const nav=qs("#nav");if(nav)nav.scrollLeft=0;});
 }
 function setPlayerNav(){
   const b=qs("#loginNav");
