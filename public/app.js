@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -1522,7 +1522,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog","#cardBulkSheetModal"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
@@ -2506,6 +2506,13 @@ qs("#closePlayerBulkSheet")?.addEventListener("click",closePlayerBulkSheet);
 qs("#playerBulkSheetCancel")?.addEventListener("click",closePlayerBulkSheet);
 qs("#playerBulkSheetFile")?.addEventListener("change",previewPlayerBulkSheet);
 qs("#playerBulkSheetConfirm")?.addEventListener("click",confirmPlayerBulkSheet);
+qs("#downloadCardsSheetBtn")?.addEventListener("click",downloadCardsSheet);
+qs("#importCardsSheetBtn")?.addEventListener("click",openCardBulkSheet);
+qs("#cardBulkSheetDownload")?.addEventListener("click",downloadCardsSheet);
+qs("#closeCardBulkSheet")?.addEventListener("click",closeCardBulkSheet);
+qs("#cardBulkSheetCancel")?.addEventListener("click",closeCardBulkSheet);
+qs("#cardBulkSheetFile")?.addEventListener("change",previewCardBulkSheet);
+qs("#cardBulkSheetConfirm")?.addEventListener("click",confirmCardBulkSheet);
 qs("#importPlayersBtn").addEventListener("click",openPlayerImport);
 qs("#closePlayerImport").addEventListener("click",closePlayerImport);
 qs("#playerImportCancel").addEventListener("click",closePlayerImport);
@@ -2546,16 +2553,16 @@ function populateCardSelects(){
   if(damageType)damageType.innerHTML=(state.cardDamageTypes||["DANO_BRUTO","DANO_CONTINUO","DANO_DIRETO","SEM_DANO"]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x.replaceAll('_',' '))}</option>`).join("");
 }
 function resetCardForm(){
-  const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";populateCardSelects();
+  const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value="Automático";populateCardSelects();
   qs("#adminCardCategory").value="Outros";qs("#cardOrigin").value="Exclusivo";qs("#cardElementType").value="NAO_ELEMENTAL";qs("#cardCostType").value="SEM_CUSTO";qs("#cardDamageType").value="SEM_DANO";qs("#cardStatus").value="ATIVO";qs("#cardPower").value=0;qs("#cardDamage").value=0;qs("#cardSaveBtn").textContent="Criar card";qs("#cardError").textContent="";
 }
 function editCardForm(id){
   const c=state.adminCards.find(x=>Number(x.id)===id);if(!c)return;
-  qs("#cardId").value=c.id;qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardDamage").value=c.damage_value||0;qs("#cardDamageType").value=c.damage_type||"SEM_DANO";qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
+  qs("#cardId").value=c.id;if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value=String(c.id);qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardDamage").value=c.damage_value||0;qs("#cardDamageType").value=c.damage_type||"SEM_DANO";qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
 }
 function renderAdminCardCatalog(){
   const list=qs("#adminCardCatalogList");if(!list)return;populateCardSelects();
-  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item"><div><b>${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
+  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item"><div><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
   qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
 }
 async function deleteCard(id){const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;if(!confirm(`Excluir o card "${c.name_pt||c.name}"?`))return;try{await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});if(Number(qs("#cardId").value)===id)resetCardForm();await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);alert("Card excluído.");}catch(e){alert(e.message)}}
@@ -3149,6 +3156,55 @@ qs("#addCardCategoryBtn")?.addEventListener("click",async()=>{
   catch(e){alert(e.message)}
 });
 
+async function downloadCardsSheet(){
+  const buttons=[qs('#downloadCardsSheetBtn'),qs('#cardBulkSheetDownload')].filter(Boolean);
+  buttons.forEach(b=>{b.disabled=true;b.dataset.oldText=b.textContent;b.textContent='⏳ Gerando planilha...';});
+  try{
+    const options={credentials:'same-origin',headers:{}};const key=state.adminKey||getStoredAdminKey();if(key)options.headers['x-admin-key']=key;
+    const r=await fetch('/api/admin/cards/export.xlsx',options);
+    if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar a planilha de cards.');}
+    const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='cards-spade-gestao.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){alert(e.message||'Não foi possível baixar a planilha de cards.');}
+  finally{buttons.forEach(b=>{b.disabled=false;b.textContent=b.dataset.oldText||'📤 Baixar planilha';});}
+}
+function openCardBulkSheet(){
+  const modal=qs('#cardBulkSheetModal');if(!modal)return;modal.hidden=false;modal.style.display='block';
+  state.cardBulkSheet={file:null,preview:null};qs('#cardBulkSheetFile').value='';qs('#cardBulkSheetFileName').textContent='Nenhum arquivo selecionado';
+  qs('#cardBulkSheetPreview').innerHTML='<p>Escolha uma planilha para começar.</p>';qs('#cardBulkSheetConfirm').disabled=true;qs('#cardBulkSheetCancel').disabled=false;qs('#cardBulkSheetStatus').textContent='';
+}
+function closeCardBulkSheet(){const m=qs('#cardBulkSheetModal');if(m){m.style.display='none';m.hidden=true}}
+function cardBulkChangesHtml(rows,kind){
+  const changed=(rows||[]).filter(r=>!r.errors?.length&&!r.ignored&&((r.changes||[]).length||r.isNew));
+  if(!changed.length)return '<div class="card-bulk-sheet-status-line">Nenhuma alteração detectada nesta seção.</div>';
+  const head=kind==='cards'?['Nº','Operação','Card','Alterações / problemas']:['Linha','Ação','Jogador','Card'];
+  const body=changed.map(r=>{
+    if(kind==='cards'){const op=r.isNew?'CRIAR':((r.changes||[]).length?'ATUALIZAR':'—');const changes=(r.changes||[]).filter(x=>x.field!=='internal').slice(0,12).map(x=>`<div><b>${escapeHtml(x.label)}:</b> ${escapeHtml(String(x.before))} → ${escapeHtml(String(x.after))}</div>`).join('')||'<span class="muted">Sem alterações</span>';return `<tr><td>${escapeHtml(String(r.id??'novo'))}</td><td>${op}</td><td><b>${escapeHtml(r.name||'')}</b></td><td>${changes}</td></tr>`;}
+    return `<tr><td>${escapeHtml(String(r.row))}</td><td>${escapeHtml(r.action||'')}</td><td><b>${escapeHtml(r.player_name||String(r.player_id_num||''))}</b></td><td>${escapeHtml(r.card_name||String(r.card_id_num||''))}</td></tr>`;
+  }).join('');
+  return `<table class="card-bulk-sheet-preview-table"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+}
+function renderCardBulkSheetPreview(data){
+  const box=qs('#cardBulkSheetPreview');if(!box)return;
+  const c=data.cards||{total:0,valid:0,invalid:0,changes:0,rows:[]},l=data.links||{total:0,valid:0,invalid:0,changes:0,rows:[]};
+  const invalid=Number(c.invalid||0)+Number(l.invalid||0),actionable=Number(c.changes||0)+Number(l.changes||0);
+  box.innerHTML=`<div class="card-bulk-sheet-section"><h4>🃏 Catálogo de Cards</h4><div class="card-bulk-sheet-badges"><span>${c.total||0} linhas</span><span class="ok">✅ ${c.valid||0} válidas</span><span class="bad">⚠️ ${c.invalid||0} com erros</span><span>${c.changes||0} alterações</span></div>${cardBulkChangesHtml(c.rows,'cards')}</div><div class="card-bulk-sheet-section"><h4>🔗 Vínculos com jogadores</h4><div class="card-bulk-sheet-badges"><span>${l.total||0} linhas</span><span class="ok">✅ ${l.valid||0} ações válidas</span><span class="bad">⚠️ ${l.invalid||0} com erros</span><span>${l.changes||0} ações</span></div>${cardBulkChangesHtml(l.rows,'links')}</div>${invalid?`<div class="card-bulk-sheet-section"><h4>⚠️ Problemas encontrados</h4><div class="card-bulk-sheet-status-line">A planilha não será aplicada enquanto existir qualquer erro.</div><div style="overflow:auto"><table class="card-bulk-sheet-preview-table"><thead><tr><th>Aba</th><th>Linha</th><th>Campo</th><th>Problema</th></tr></thead><tbody>${(data.issues||[]).slice(0,200).map(x=>`<tr><td>${escapeHtml(x.section||'')}</td><td>${escapeHtml(String(x.row||''))}</td><td>${escapeHtml(String(x.field||''))}</td><td class="issue">${escapeHtml(x.message||'')}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
+  qs('#cardBulkSheetConfirm').disabled=invalid>0||actionable===0;
+}
+async function previewCardBulkSheet(){
+  const file=qs('#cardBulkSheetFile')?.files?.[0];if(!file)return;state.cardBulkSheet={file,preview:null};
+  qs('#cardBulkSheetFileName').textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;qs('#cardBulkSheetStatus').textContent='Lendo e conferindo o catálogo e os vínculos...';qs('#cardBulkSheetConfirm').disabled=true;
+  const form=new FormData();form.append('file',file);
+  try{const data=await adminApi('/api/admin/cards/bulk-sheet/preview',{method:'POST',body:form});state.cardBulkSheet.preview=data;renderCardBulkSheetPreview(data);qs('#cardBulkSheetStatus').textContent=(Number(data.cards?.invalid||0)+Number(data.links?.invalid||0))?'Corrija os dados indicados antes de aplicar.':'Planilha pronta. Revise a prévia antes de aplicar.';}
+  catch(e){qs('#cardBulkSheetPreview').innerHTML='<p>Não foi possível processar a planilha.</p>';qs('#cardBulkSheetStatus').textContent=e.message;}
+}
+async function confirmCardBulkSheet(){
+  const file=state.cardBulkSheet?.file;if(!file)return;const c=state.cardBulkSheet.preview?.cards||{},l=state.cardBulkSheet.preview?.links||{};
+  const changes=Number(c.changes||0)+Number(l.changes||0);if(!confirm(`Aplicar ${changes} alteração(ões) de Cards e vínculos? Esta operação é única e, se houver qualquer erro, nada será gravado.`))return;
+  qs('#cardBulkSheetConfirm').disabled=true;qs('#cardBulkSheetCancel').disabled=true;qs('#cardBulkSheetStatus').textContent='Aplicando em transação única...';
+  const form=new FormData();form.append('file',file);
+  try{const d=await adminApi('/api/admin/cards/bulk-sheet',{method:'POST',body:form});qs('#cardBulkSheetStatus').textContent=`✅ ${d.created||0} criado(s) • ${d.updated||0} atualizado(s) • ${d.added||0} vínculo(s) criado(s) • ${d.removed||0} vínculo(s) removido(s).`;await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);setTimeout(closeCardBulkSheet,1100);}
+  catch(e){qs('#cardBulkSheetStatus').textContent=e.message;qs('#cardBulkSheetConfirm').disabled=false;qs('#cardBulkSheetCancel').disabled=false;}
+}
 qs("#announcementCancelBtn").addEventListener("click",resetAnnouncementForm);
 
 async function tryAdminHash(){
