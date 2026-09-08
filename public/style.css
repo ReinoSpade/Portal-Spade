@@ -1625,3 +1625,55 @@ button.gold,button.outline{position:relative}.gold::before,.outline::before{cont
 @media(max-width:950px){.schedule-toolbar-premium{grid-template-columns:1fr}.schedule-toolbar-premium h2{text-align:left}.schedule-filter-bar{flex-wrap:wrap}.schedule-day-layout,.schedule-intro-grid{grid-template-columns:1fr}.schedule-day{min-height:112px}.schedule-day-items{max-height:68px}}
 @media(max-width:700px){.schedule-calendar-head span{font-size:7px;padding:8px 4px}.schedule-day{min-height:92px;padding:6px}.schedule-day-number{width:24px;height:24px;font-size:12px}.schedule-day-dot{font-size:7px;padding:3px}.schedule-day-dot b{display:none}.schedule-filter-bar .search{min-width:0;width:100%}.schedule-toolbar-premium{gap:8px}.schedule-month-controls{justify-content:space-between}}
 @media(prefers-reduced-motion:reduce){.schedule-day{transition:none}}
+
+
+/* ===== V53.3.4 — Navegação por contexto + Mobile ===== */
+.top{gap:14px}
+.top .logo{flex:0 0 auto}
+.top .global-search{flex:0 1 230px;min-width:180px}
+.top nav{flex:1 1 auto;justify-content:flex-end;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;white-space:nowrap;min-width:0}
+.top nav::-webkit-scrollbar{display:none}
+.top nav button{flex:0 0 auto}
+.player-only-nav{display:none!important}
+.player-only-nav.is-visible{display:inline-flex!important}
+.admin-session-nav{display:none!important}
+.admin-session-nav.is-visible{display:inline-flex!important}
+.mobile-quick-nav{display:none}
+
+@media(max-width:1100px) and (min-width:901px){
+  .top{padding:0 22px}
+  .top .global-search{flex-basis:190px;min-width:150px}
+  .top nav button{padding:9px 9px;font-size:10px}
+}
+
+@media(max-width:900px){
+  .top{position:sticky;top:0;z-index:50;display:grid;grid-template-columns:minmax(0,1fr) 48px;grid-template-rows:auto auto;gap:8px 10px;height:auto;min-height:70px;padding:10px 12px;background:#0d0e10}
+  .top .logo{grid-column:1;grid-row:1;font-size:14px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .top .hamb{grid-column:2;grid-row:1;justify-self:end;display:grid;place-items:center}
+  .top .global-search{grid-column:1/-1;grid-row:2;order:unset;width:100%;min-width:0;margin:0}
+  .top .global-search-input{width:100%;height:40px}
+  .top nav{position:fixed;left:10px;right:10px;top:124px;z-index:60;display:none!important;grid-template-columns:1fr;gap:7px;max-height:calc(100dvh - 145px);padding:12px;background:rgba(13,14,16,.98);border:1px solid #2b2c31;border-radius:14px;box-shadow:0 24px 55px rgba(0,0,0,.38);overflow:auto;overscroll-behavior:contain}
+  .top nav.open{display:grid!important}
+  .top nav button{width:100%;min-height:46px;padding:11px 13px;text-align:left;font-size:11px;border:1px solid rgba(255,255,255,.06);background:#15161a}
+  .top nav button:hover,.top nav button.active{background:#c6a45d;color:#111;border-color:#c6a45d}
+  .top nav button.player-only-nav.is-visible{display:flex!important}
+  .top nav button.admin-session-nav.is-visible{display:flex!important}
+  .mobile-quick-nav{position:fixed;left:10px;right:10px;bottom:10px;z-index:55;display:grid;grid-template-columns:repeat(5,1fr);gap:5px;padding:6px;background:rgba(13,14,16,.97);border:1px solid #2d2f34;border-radius:15px;box-shadow:0 18px 48px rgba(0,0,0,.32);backdrop-filter:blur(12px)}
+  .mobile-quick-nav button{border:1px solid rgba(255,255,255,.07);background:#15161a;color:#d8d3ca;border-radius:10px;min-height:50px;padding:5px 4px;display:grid;place-items:center;gap:1px;font:700 10px Inter;cursor:pointer}
+  .mobile-quick-nav button:hover,.mobile-quick-nav button.active{background:#c6a45d;color:#111}
+  .mobile-quick-nav button span{font-size:16px;line-height:1}
+  .mobile-quick-nav button small{font:700 8px Inter;letter-spacing:.04em}
+  body{padding-bottom:82px}
+  .global-search-results{top:124px}
+}
+
+@media(max-width:520px){
+  .top nav{top:122px}
+  .mobile-quick-nav{left:7px;right:7px;bottom:7px}
+  .mobile-quick-nav button{min-height:48px}
+  .mobile-quick-nav button small{font-size:7px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .mobile-quick-nav button,.top nav button{transition:none!important}
+}
