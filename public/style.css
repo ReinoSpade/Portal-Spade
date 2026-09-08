@@ -1678,6 +1678,23 @@ button.gold,button.outline{position:relative}.gold::before,.outline::before{cont
   .mobile-quick-nav button,.top nav button{transition:none!important}
 }
 
+
+/* V58 — Navegação protegida: o logo nunca cobre as abas e o menu mantém todos os itens acessíveis. */
+@media(min-width:901px){
+  .top{overflow:hidden;gap:18px;}
+  .top .logo{flex:0 0 auto;min-width:max-content;position:relative;z-index:3;white-space:nowrap;}
+  .top nav{flex:1 1 auto;min-width:0;max-width:calc(100% - 300px);justify-content:flex-start;overflow-x:auto;overflow-y:hidden;padding:0 2px;scrollbar-width:none;}
+  .top nav::-webkit-scrollbar{display:none}
+  .top nav button{flex:0 0 auto;}
+}
+@media(min-width:901px) and (max-width:1280px){
+  .top{padding-left:20px;padding-right:20px;gap:12px;}
+  .top .logo{font-size:13px;}
+  .top .logo span{font-size:20px;}
+  .top nav{max-width:calc(100% - 245px);gap:2px;}
+  .top nav button{padding:8px 8px;font-size:9px;}
+}
+
 /* V53.4 — Pesquisa flutuante: não ocupa espaço da navegação */
 .global-search{position:fixed!important;right:22px;top:88px;z-index:90;flex:none!important;width:auto!important;min-width:0!important}
 .global-search-toggle{width:44px;height:44px;border-radius:50%;border:1px solid #5f5136;background:rgba(17,18,22,.96);color:#ead8af;display:grid;place-items:center;font-size:17px;cursor:pointer;box-shadow:0 12px 32px rgba(0,0,0,.24);backdrop-filter:blur(12px);transition:transform .16s ease,background .16s ease,border-color .16s ease}
