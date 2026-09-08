@@ -1677,3 +1677,24 @@ button.gold,button.outline{position:relative}.gold::before,.outline::before{cont
 @media(prefers-reduced-motion:reduce){
   .mobile-quick-nav button,.top nav button{transition:none!important}
 }
+
+/* V53.4 — Pesquisa flutuante: não ocupa espaço da navegação */
+.global-search{position:fixed!important;right:22px;top:88px;z-index:90;flex:none!important;width:auto!important;min-width:0!important}
+.global-search-toggle{width:44px;height:44px;border-radius:50%;border:1px solid #5f5136;background:rgba(17,18,22,.96);color:#ead8af;display:grid;place-items:center;font-size:17px;cursor:pointer;box-shadow:0 12px 32px rgba(0,0,0,.24);backdrop-filter:blur(12px);transition:transform .16s ease,background .16s ease,border-color .16s ease}
+.global-search-toggle:hover,.global-search-toggle:focus-visible{background:#c6a45d;color:#111;border-color:#c6a45d;transform:translateY(-1px)}
+.global-search-panel{position:absolute;right:0;top:52px;width:min(390px,calc(100vw - 28px));padding:8px;background:rgba(13,14,16,.98);border:1px solid #3a3b40;border-radius:13px;box-shadow:0 22px 55px rgba(0,0,0,.38);backdrop-filter:blur(14px)}
+.global-search-panel[hidden]{display:none}
+.global-search-panel .global-search-input{padding-right:38px;background:#17181b}
+.global-search-close{position:absolute;right:15px;top:13px;width:28px;height:28px;border:0;background:transparent;color:#999;font-size:22px;line-height:1;cursor:pointer}
+.global-search-close:hover{color:#fff}
+.global-search-panel .global-search-results{position:relative;top:auto;left:auto;right:auto;margin-top:8px;min-width:0;max-height:min(60vh,460px);overflow:auto}
+@media(max-width:900px){
+  .global-search{right:12px;top:76px}
+  .global-search-toggle{width:42px;height:42px}
+  .global-search-panel{top:49px;width:min(360px,calc(100vw - 24px));}
+  .top .global-search{display:block!important;grid-column:auto!important;grid-row:auto!important;margin:0!important}
+}
+@media(max-width:520px){
+  .global-search{right:10px;top:74px}
+  .global-search-panel{right:-1px;width:calc(100vw - 20px)}
+}
