@@ -227,10 +227,21 @@
     <div id="journalNews" class="news-grid journal-news-grid"></div>
   </div>
 </section><section class="page" id="biblioteca">
-  <div class="subhero"><p class="eyebrow">ARQUIVO DO REINO</p><h1>Biblioteca de <em>Spade.</em></h1><p>Regras, manuais, Databook e materiais permanentes do Reino em um só lugar.</p></div>
-  <div class="content">
-    <div class="library-toolbar"><input id="librarySearch" class="search" placeholder="🔎 Buscar na Biblioteca..."><select id="libraryCategory" class="admin-filter"><option value="">Todas as categorias</option></select></div>
-    <div id="libraryGrid" class="library-grid"></div>
+  <div class="subhero"><p class="eyebrow">ARQUIVO DO REINO</p><h1>Biblioteca de <em>Spade.</em></h1><p>Explore o conhecimento do Reino por tópicos. Abra qualquer material para ler sem sair da página.</p></div>
+  <div class="content library-page-content">
+    <div class="library-toolbar library-toolbar-v2">
+      <div class="library-search-box"><span aria-hidden="true">⌕</span><input id="librarySearch" class="search" type="search" autocomplete="off" placeholder="Buscar uma regra, capítulo, card ou assunto..."><button id="librarySearchClear" class="library-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button></div>
+      <div class="library-toolbar-note"><span>ARQUIVO OFICIAL</span><small>Escolha um tópico e abra o material que deseja consultar.</small></div>
+    </div>
+    <div class="library-topics-head"><div><p class="eyebrow">NAVEGAÇÃO</p><h2>Escolha um tópico</h2></div><span id="libraryTopicHint">17 materiais disponíveis</span></div>
+    <div id="libraryTopics" class="library-topic-tabs" role="tablist" aria-label="Tópicos da Biblioteca"></div>
+    <div class="library-topic-stage">
+      <aside id="libraryTopicSidebar" class="library-topic-sidebar" aria-label="Tópicos da Biblioteca"></aside>
+      <main class="library-topic-main">
+        <div id="libraryTopicHeader" class="library-topic-header"></div>
+        <div id="libraryGrid" class="library-topic-grid"></div>
+      </main>
+    </div>
   </div>
 </section>
 <section class="page" id="comunicados">
