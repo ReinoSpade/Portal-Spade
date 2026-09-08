@@ -3,6 +3,7 @@ const cookieParser = require("cookie-parser");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const path = require("path");
+const fs = require("fs");
 const { Pool } = require("pg");
 const multer = require("multer");
 const XLSX = require("xlsx");
@@ -5584,6 +5585,36 @@ async function ensureScheduleSchema() {
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_source_key ON schedule_activities(source_key) WHERE source_key IS NOT NULL`);
 }
 
+
+async function seedOfficialLibrary() {
+  const seedPath = path.join(__dirname, "data", "library-seed.json");
+  if (!fs.existsSync(seedPath)) return;
+  let seeds = [];
+  try { seeds = JSON.parse(fs.readFileSync(seedPath, "utf8")); }
+  catch (e) { console.error("Falha ao ler a Biblioteca oficial:", e); return; }
+  if (!Array.isArray(seeds) || !seeds.length) return;
+  for (const item of seeds) {
+    const title = String(item.title || "").trim();
+    if (!title) continue;
+    const exists = await pool.query(`SELECT id FROM library_items WHERE title=$1 LIMIT 1`, [title]);
+    if (exists.rows.length) continue;
+    await pool.query(`
+      INSERT INTO library_items(title,category,description,content,url,icon,published,sort_order)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+    `, [
+      title,
+      String(item.category || "GERAL"),
+      String(item.description || ""),
+      String(item.content || ""),
+      String(item.url || ""),
+      String(item.icon || "📚"),
+      item.published === false ? 0 : 1,
+      Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0
+    ]);
+  }
+  console.log(`Biblioteca oficial verificada: ${seeds.length} materiais de referência.`);
+}
+
 async function seedOfficialCronograma() {
   const activities = [
     // AGOSTO 2026
@@ -5726,6 +5757,7 @@ async function seedOfficialCronograma() {
 
 initDatabase()
   .then(async () => {
+    await seedOfficialLibrary();
     await seedOfficialCronograma();
     app.listen(PORT, "0.0.0.0", () => console.log(`Portal Spade conectado ao PostgreSQL na porta ${PORT}`));
   })
