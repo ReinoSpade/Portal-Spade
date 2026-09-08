@@ -86,6 +86,7 @@ const pool = new Pool({
 
 app.use(express.json({ limit: "2mb" }));
 const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -466,6 +467,17 @@ async function initDatabase() {
       date DATE DEFAULT CURRENT_DATE,
       published INTEGER DEFAULT 1 CHECK (published IN (0,1))
     );
+
+
+    CREATE TABLE IF NOT EXISTS media_assets (
+      id BIGSERIAL PRIMARY KEY,
+      original_name TEXT DEFAULT '',
+      mime_type TEXT NOT NULL,
+      data BYTEA NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_assets_created ON media_assets(created_at DESC,id DESC);
 
 
     CREATE TABLE IF NOT EXISTS articles (
@@ -1075,6 +1087,25 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_schedule_event ON schedule_activities(event_id);
     ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS mission_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL;
     CREATE INDEX IF NOT EXISTS idx_schedule_mission ON schedule_activities(mission_id);
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS end_date DATE;
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS result_text TEXT DEFAULT '';
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS winner_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL;
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS cycle_label TEXT DEFAULT '';
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS source_key TEXT;
+    CREATE INDEX IF NOT EXISTS idx_schedule_end_date ON schedule_activities(end_date);
+    CREATE INDEX IF NOT EXISTS idx_schedule_winner ON schedule_activities(winner_player_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_source_key ON schedule_activities(source_key) WHERE source_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS schedule_champions (
+      id BIGSERIAL PRIMARY KEY,
+      period_key TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'DESTAQUE',
+      title TEXT NOT NULL,
+      winner_nick TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(period_key,category,title,winner_nick)
+    );
     CREATE INDEX IF NOT EXISTS idx_ally_accounts_username ON ally_accounts(lower(username));
     CREATE INDEX IF NOT EXISTS idx_ally_cards_ally ON ally_cards(ally_id,card_id);
 
@@ -2393,23 +2424,39 @@ app.post("/api/me/events/:id/redeem", async (req,res)=>{
 app.get("/api/schedule", async (req,res)=>{
   try{
     const r=await pool.query(`
-      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,
-             s.location,s.link,s.event_id,s.mission_id,s.status,s.featured,e.title AS event_title
+      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.end_date,s.start_time,s.end_time,
+             s.location,s.link,s.event_id,s.mission_id,s.status,s.featured,s.published,s.result_text,s.winner_player_id,s.cycle_label,
+             e.title AS event_title, p.nick AS winner_nick, p.house AS winner_house
       FROM schedule_activities s
       LEFT JOIN events e ON e.id=s.event_id
+      LEFT JOIN players p ON p.id=s.winner_player_id
       WHERE s.published=1
       ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC
-      LIMIT 200
+      LIMIT 500
     `);
     res.json({activities:r.rows.map(a=>({
-      id:Number(a.id),title:a.title,activity_type:a.activity_type||"ATIVIDADE",
-      description:a.description||"",activity_date:a.activity_date,
-      start_time:a.start_time,end_time:a.end_time,location:a.location||"",
-      link:a.link||"",event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null,event_title:a.event_title||"",
-      status:a.status||"AGENDADA",featured:Boolean(a.featured)
+      id:Number(a.id),title:a.title,activity_type:a.activity_type||"ATIVIDADE",description:a.description||"",
+      activity_date:a.activity_date,end_date:a.end_date||a.activity_date,start_time:a.start_time,end_time:a.end_time,
+      location:a.location||"",link:a.link||"",event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null,
+      event_title:a.event_title||"",status:a.status||"AGENDADA",featured:Boolean(a.featured),result_text:a.result_text||"",
+      winner_player_id:a.winner_player_id?Number(a.winner_player_id):null,winner_nick:a.winner_nick||"",winner_house:a.winner_house||"",cycle_label:a.cycle_label||""
     }))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar cronograma."});}
 });
+
+app.get("/api/schedule-champions", async (req,res)=>{
+  const period=String(req.query.period||'').trim();
+  try{
+    const r=await pool.query(`
+      SELECT sc.id,sc.period_key,sc.category,sc.title,sc.winner_nick,sc.note,p.id AS winner_player_id,p.house AS winner_house
+      FROM schedule_champions sc LEFT JOIN players p ON lower(p.nick)=lower(sc.winner_nick)
+      WHERE ($1='' OR sc.period_key=$1)
+      ORDER BY sc.category,sc.id
+    `,[period]);
+    res.json({champions:r.rows.map(x=>({...x,id:Number(x.id),winner_player_id:x.winner_player_id?Number(x.winner_player_id):null}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar campeões."});}
+});
+
 
 app.get("/api/active-activities", async (req,res)=>{
   try{
@@ -2866,6 +2913,32 @@ app.get("/api/players", async (req, res) => {
 });
 
 
+
+app.post("/api/admin/media", requireAdmin, imageUpload.single("file"), async (req,res)=>{
+  const file=req.file;
+  if(!file)return res.status(400).json({error:"Selecione uma imagem."});
+  const allowed=new Set(["image/jpeg","image/png","image/webp","image/gif"]);
+  if(!allowed.has(file.mimetype))return res.status(400).json({error:"Formato de imagem não suportado. Use JPG, PNG, WEBP ou GIF."});
+  try{
+    const r=await pool.query(
+      `INSERT INTO media_assets(original_name,mime_type,data,size_bytes) VALUES($1,$2,$3,$4) RETURNING id`,
+      [String(file.originalname||"imagem"),file.mimetype,file.buffer,file.size]
+    );
+    res.json({id:Number(r.rows[0].id),url:`/api/media/${Number(r.rows[0].id)}`,name:String(file.originalname||"imagem"),mime_type:file.mimetype,size_bytes:file.size});
+  }catch(e){console.error(e);res.status(500).json({error:"Não foi possível armazenar a imagem."});}
+});
+
+app.get("/api/media/:id", async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).end();
+  try{
+    const r=await pool.query(`SELECT mime_type,data FROM media_assets WHERE id=$1`,[id]);
+    if(!r.rows[0])return res.status(404).end();
+    res.setHeader("Content-Type",r.rows[0].mime_type);
+    res.setHeader("Cache-Control","public, max-age=31536000, immutable");
+    res.send(r.rows[0].data);
+  }catch(e){console.error(e);res.status(500).end();}
+});
 
 app.get("/api/admin/articles", requireAdmin, async (req,res)=>{
   try{
@@ -3715,12 +3788,15 @@ app.post("/api/admin/events/:id/results/publish", requireAdmin, async (req,res)=
 app.get("/api/admin/schedule", requireAdmin, async (req,res)=>{
   try{
     const r=await pool.query(`
-      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.start_time,s.end_time,
-             s.location,s.link,s.event_id,s.status,s.featured,s.published,e.title AS event_title
-      FROM schedule_activities s LEFT JOIN events e ON e.id=s.event_id
+      SELECT s.id,s.title,s.activity_type,s.description,s.activity_date,s.end_date,s.start_time,s.end_time,
+             s.location,s.link,s.event_id,s.mission_id,s.status,s.featured,s.published,s.result_text,s.winner_player_id,s.cycle_label,e.title AS event_title,
+             p.nick AS winner_nick,p.house AS winner_house
+      FROM schedule_activities s
+      LEFT JOIN events e ON e.id=s.event_id
+      LEFT JOIN players p ON p.id=s.winner_player_id
       ORDER BY s.activity_date ASC,s.start_time ASC NULLS LAST,s.id ASC
     `);
-    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null,featured:Number(a.featured),published:Number(a.published)}))});
+    res.json({activities:r.rows.map(a=>({...a,id:Number(a.id),event_id:a.event_id?Number(a.event_id):null,mission_id:a.mission_id?Number(a.mission_id):null,winner_player_id:a.winner_player_id?Number(a.winner_player_id):null,featured:Number(a.featured),published:Number(a.published)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar cronograma administrativo."});}
 });
 
@@ -3729,13 +3805,13 @@ app.post("/api/admin/schedule", requireAdmin, async (req,res)=>{
   const title=String(b.title||"").trim(),date=String(b.activity_date||"").trim();
   if(!title||!date)return res.status(400).json({error:"Título e data são obrigatórios."});
   try{
+    const winnerId=b.winner_player_id?Number(b.winner_player_id):null;
     const r=await pool.query(
-      `INSERT INTO schedule_activities(title,activity_type,description,activity_date,start_time,end_time,location,link,event_id,mission_id,status,featured,published)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,
-       b.start_time||null,b.end_time||null,String(b.location||"").trim(),String(b.link||"").trim(),
-       b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
-       Number(b.featured)?1:0,Number(b.published??1)?1:0]
+      `INSERT INTO schedule_activities(title,activity_type,description,activity_date,end_date,start_time,end_time,location,link,event_id,mission_id,status,featured,published,result_text,winner_player_id,cycle_label,source_key)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,String(b.end_date||date).trim(),b.start_time||null,b.end_time||null,
+       String(b.location||"").trim(),String(b.link||"").trim(),b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,
+       String(b.status||"AGENDADA").trim().toUpperCase(),Number(b.featured)?1:0,Number(b.published??1)?1:0,String(b.result_text||"").trim(),winnerId,String(b.cycle_label||"").trim(),null]
     );
     if(Number(b.featured))await pool.query("UPDATE schedule_activities SET featured=0 WHERE id<>$1",[r.rows[0].id]);
     res.json({activity:r.rows[0]});
@@ -3749,13 +3825,12 @@ app.put("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
   if(!title||!date)return res.status(400).json({error:"Título e data são obrigatórios."});
   try{
     const r=await pool.query(
-      `UPDATE schedule_activities SET title=$1,activity_type=$2,description=$3,activity_date=$4,start_time=$5,end_time=$6,
-       location=$7,link=$8,event_id=$9,mission_id=$10,status=$11,featured=$12,published=$13,updated_at=NOW()
-       WHERE id=$13 RETURNING *`,
-      [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,
-       b.start_time||null,b.end_time||null,String(b.location||"").trim(),String(b.link||"").trim(),
-       b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,String(b.status||"AGENDADA").trim().toUpperCase(),
-       Number(b.featured)?1:0,Number(b.published??1)?1:0,id]
+      `UPDATE schedule_activities SET title=$1,activity_type=$2,description=$3,activity_date=$4,end_date=$5,start_time=$6,end_time=$7,
+       location=$8,link=$9,event_id=$10,mission_id=$11,status=$12,featured=$13,published=$14,result_text=$15,winner_player_id=$16,cycle_label=$17,updated_at=NOW()
+       WHERE id=$18 RETURNING *`,
+      [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,String(b.end_date||date).trim(),b.start_time||null,b.end_time||null,
+       String(b.location||"").trim(),String(b.link||"").trim(),b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,
+       String(b.status||"AGENDADA").trim().toUpperCase(),Number(b.featured)?1:0,Number(b.published??1)?1:0,String(b.result_text||"").trim(),b.winner_player_id?Number(b.winner_player_id):null,String(b.cycle_label||"").trim(),id]
     );
     if(!r.rows[0])return res.status(404).json({error:"Atividade não encontrada."});
     if(Number(b.featured))await pool.query("UPDATE schedule_activities SET featured=0 WHERE id<>$1",[id]);
@@ -3767,6 +3842,38 @@ app.delete("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   try{const r=await pool.query("UPDATE schedule_activities SET status='CANCELADA',published=0,updated_at=NOW() WHERE id=$1 RETURNING id",[id]);if(!r.rowCount)return res.status(404).json({error:"Atividade não encontrada."});res.json({ok:true})}
   catch(e){console.error(e);res.status(500).json({error:"Erro ao arquivar atividade."});}
+});
+
+app.get("/api/admin/schedule-champions", requireAdmin, async (req,res)=>{
+  try{
+    const period=String(req.query.period||'').trim();
+    const r=await pool.query(`SELECT sc.id,sc.period_key,sc.category,sc.title,sc.winner_nick,sc.note,p.id AS winner_player_id,p.house AS winner_house FROM schedule_champions sc LEFT JOIN players p ON lower(p.nick)=lower(sc.winner_nick) WHERE ($1='' OR sc.period_key=$1) ORDER BY sc.category,sc.id`,[period]);
+    res.json({champions:r.rows.map(x=>({...x,id:Number(x.id),winner_player_id:x.winner_player_id?Number(x.winner_player_id):null}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar campeões administrativos."});}
+});
+
+app.post("/api/admin/schedule-champions", requireAdmin, async (req,res)=>{
+  const b=req.body||{};
+  const period=String(b.period_key||'').trim(),category=String(b.category||'DESTAQUE').trim(),title=String(b.title||'').trim(),winner=String(b.winner_nick||'').trim();
+  if(!period||!title||!winner)return res.status(400).json({error:'Período, título e vencedor são obrigatórios.'});
+  try{
+    const r=await pool.query(`INSERT INTO schedule_champions(period_key,category,title,winner_nick,note) VALUES($1,$2,$3,$4,$5) RETURNING *`,[period,category,title,winner,String(b.note||'').trim()]);
+    res.json({champion:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao cadastrar campeão.'});}
+});
+
+app.put("/api/admin/schedule-champions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id),b=req.body||{};
+  if(!id)return res.status(400).json({error:'Campeão inválido.'});
+  try{
+    const r=await pool.query(`UPDATE schedule_champions SET period_key=$1,category=$2,title=$3,winner_nick=$4,note=$5 WHERE id=$6 RETURNING *`,[String(b.period_key||'').trim(),String(b.category||'DESTAQUE').trim(),String(b.title||'').trim(),String(b.winner_nick||'').trim(),String(b.note||'').trim(),id]);
+    if(!r.rowCount)return res.status(404).json({error:'Campeão não encontrado.'});
+    res.json({champion:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao atualizar campeão.'});}
+});
+
+app.delete("/api/admin/schedule-champions/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);try{const r=await pool.query(`DELETE FROM schedule_champions WHERE id=$1`,[id]);if(!r.rowCount)return res.status(404).json({error:'Campeão não encontrado.'});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Erro ao excluir campeão.'});}
 });
 
 app.get("/api/admin/overview", requireAdmin, async (req, res) => {
@@ -5462,8 +5569,141 @@ app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+
+async function seedOfficialCronograma() {
+  const activities = [
+    // AGOSTO 2026
+    {k:'2026-08-10|MISSAO|Missão de Trívia',t:'Missão de Trívia',type:'MISSÃO',d:'2026-08-10',end:'2026-08-11',desc:'Início da Missão de Trívia.',result:'Resultado registrado: 24⏳ • 20☠️ • 15🌟'},
+    {k:'2026-08-10|EXAME_ADMISSAO|Exame de Admissão nas Legiões — ciclo 01',t:'Exame de Admissão nas Legiões — Ciclo 01',type:'EXAME_ADMISSAO',d:'2026-08-10',end:'2026-08-12',desc:'Início do exame de admissão nas Legiões.'},
+    {k:'2026-08-11|DIA_LIVRE|Dia Livre',t:'Dia Livre',type:'DIA_LIVRE',d:'2026-08-11',desc:'Dia livre no Reino.'},
+    {k:'2026-08-12|EVENTO|Discípulos das Trevas',t:'Discípulos das Trevas',type:'EVENTO',d:'2026-08-12',desc:'Evento do Reino.',result:'🏆 Manjiro Sano ☠️',winner:'Manjiro Sano'},
+    {k:'2026-08-13|RESULTADO_LEGIAO|Resultado do Exame — ciclo 01',t:'Resultado do Exame de Admissão nas Legiões — Ciclo 01',type:'EXAME_ADMISSAO',d:'2026-08-13',desc:'Resultado do exame de admissão nas Legiões.',result:'07 novos Legionários'},
+    {k:'2026-08-13|MISSAO|Missão de Luta',t:'Missão de Luta',type:'MISSÃO',d:'2026-08-13',end:'2026-08-14',desc:'Início da Missão de Luta.'},
+    {k:'2026-08-14|TORNEIO|1º Torneio Loja do Reino Spade',t:'1º Torneio Loja do Reino Spade',type:'TORNEIO',d:'2026-08-14',desc:'Torneio da Loja do Reino Spade.',result:'🏆 Mihawk ⏳',winner:'Mihawk'},
+    {k:'2026-08-15|EXAME_SENIOR|Upgrade Sênior — 01',t:'Exame para Upgrade: Patente Sênior',type:'EXAME_SENIOR',d:'2026-08-15',desc:'Exame para upgrade à patente Sênior.'},
+    {k:'2026-08-15|EVENTO|Caça aos Piratas',t:'Caça aos Piratas',type:'EVENTO',d:'2026-08-15',desc:'Evento do Reino.',result:'🏆 Kazutora ⏳',winner:'Kazutora'},
+    {k:'2026-08-16|EXAME_INTER|Upgrade Intermediário — 01',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-08-16',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-08-16|ATIVIDADE|Missão Rank S — término',t:'Missão Rank S — Término',type:'ATIVIDADE_ESPECIAL',d:'2026-08-16',desc:'Término da Missão Rank S.'},
+    {k:'2026-08-16|EVENTO|Leilão por Fichas — início',t:'Leilão por Fichas — Início',type:'EVENTO',d:'2026-08-16',desc:'Início do Evento de Leilão por Fichas.'},
+    {k:'2026-08-17|MISSAO|Missão de Treino',t:'Missão de Treino',type:'MISSÃO',d:'2026-08-17',end:'2026-08-18',desc:'Início da Missão de Treino.'},
+    {k:'2026-08-17|EXAME_ADMISSAO|Exame de Admissão nas Legiões — ciclo 02',t:'Exame de Admissão nas Legiões — Ciclo 02',type:'EXAME_ADMISSAO',d:'2026-08-17',end:'2026-08-19',desc:'Início do segundo ciclo do exame de admissão nas Legiões.'},
+    {k:'2026-08-18|EVENTO|Tema Livre — agosto 01',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-08-18',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-08-19|DIA_LIVRE|Dia Livre',t:'Dia Livre',type:'DIA_LIVRE',d:'2026-08-19',desc:'Dia livre no Reino.'},
+    {k:'2026-08-20|MISSAO|Missão de Recrutamento — ciclo 01',t:'Missão de Recrutamento — Ciclo 01',type:'MISSÃO',d:'2026-08-20',end:'2026-08-21',desc:'Início da Missão de Recrutamento.'},
+    {k:'2026-08-20|RESULTADO_LEGIAO|Resultado do Exame — ciclo 02',t:'Resultado do Exame de Admissão nas Legiões — Ciclo 02',type:'EXAME_ADMISSAO',d:'2026-08-20',desc:'Resultado do exame iniciado em 17/08.'},
+    {k:'2026-08-21|TORNEIO|1º Torneio de Reino de Spade',t:'1º Torneio de Reino de Spade',type:'TORNEIO',d:'2026-08-21',desc:'Primeiro grande torneio de Reino.',result:'🏆 Killer 🌟',winner:'Killer'},
+    {k:'2026-08-22|EVENTO|Tema Livre — agosto 02',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-08-22',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-08-23|EXAME_INTER|Upgrade Intermediário — 02',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-08-23',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-08-24|MISSAO|Missão de História',t:'Missão de História',type:'MISSÃO',d:'2026-08-24',end:'2026-08-25',desc:'Início da Missão de História.'},
+    {k:'2026-08-24|EXAME_ADMISSAO|Exame de Admissão nas Legiões — ciclo 03',t:'Exame de Admissão nas Legiões — Ciclo 03',type:'EXAME_ADMISSAO',d:'2026-08-24',end:'2026-08-26',desc:'Início do terceiro ciclo do exame de admissão nas Legiões.'},
+    {k:'2026-08-25|EVENTO|Tema Livre — agosto 03',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-08-25',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-08-25|TORRE|Torre de Grimórios de Spade',t:'Torre de Grimórios de Spade',type:'TORRE_GRIMORIOS',d:'2026-08-25',desc:'Abertura da Torre de Grimórios do Reino Spade.'},
+    {k:'2026-08-26|RESULTADO_LEGIAO|Resultado do Exame — ciclo 03',t:'Resultado do Exame de Admissão nas Legiões — Ciclo 03',type:'EXAME_ADMISSAO',d:'2026-08-27',desc:'Resultado do exame iniciado em 24/08.'},
+    {k:'2026-08-26|FORJA|1º Desafio de Forja',t:'1º Desafio de Forja do Reino Spade',type:'FORJA',d:'2026-08-26',desc:'Início do primeiro Desafio de Forja do Reino Spade.'},
+    {k:'2026-08-27|MISSAO|Missão de Recrutamento — ciclo 02',t:'Missão de Recrutamento — Ciclo 02',type:'MISSÃO',d:'2026-08-27',end:'2026-08-28',desc:'Início da Missão de Recrutamento.'},
+    {k:'2026-08-28|TORNEIO|2º Torneio Loja do Reino Spade',t:'2º Torneio Loja do Reino Spade',type:'TORNEIO',d:'2026-08-28',desc:'Segundo torneio da Loja do Reino Spade.',result:'🏆 Theuz ⏳',winner:'Theuz'},
+    {k:'2026-08-29|EXAME_SENIOR|Upgrade Sênior — 02',t:'Exame para Upgrade: Patente Sênior',type:'EXAME_SENIOR',d:'2026-08-29',desc:'Exame para upgrade à patente Sênior.'},
+    {k:'2026-08-29|EVENTO|Tema Livre — agosto 04',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-08-29',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-08-30|EXAME_INTER|Upgrade Intermediário — 03',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-08-30',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-08-31|MISSAO|Missão de Luta — ciclo 02',t:'Missão de Luta — Ciclo 02',type:'MISSÃO',d:'2026-08-31',desc:'Início da Missão de Luta.'},
+    {k:'2026-08-31|EXAME_ADMISSAO|Exame de Admissão nas Legiões — ciclo 04',t:'Exame de Admissão nas Legiões — Ciclo 04',type:'EXAME_ADMISSAO',d:'2026-08-31',end:'2026-09-02',desc:'Início do quarto ciclo do exame de admissão nas Legiões.'},
+    {k:'2026-08-31|RANKING|Fim dos Rankings da Arena',t:'Fim dos Rankings da Arena Mágica e Arena Superior',type:'RANKING',d:'2026-08-31',desc:'Encerramento do ciclo dos Rankings da Arena.'},
+    // SETEMBRO 2026
+    {k:'2026-09-01|DESTAQUE|Início da Legião do Mês',t:'Início da Legião do Mês',type:'ATIVIDADE_ESPECIAL',d:'2026-09-01',desc:'Marco administrativo do mês.'},
+    {k:'2026-09-01|RANKING|Início dos Rankings da Arena',t:'Início dos Rankings da Arena Mágica e Arena Superior',type:'RANKING',d:'2026-09-01',end:'2026-09-30',desc:'Início do novo ciclo dos Rankings da Arena.'},
+    {k:'2026-09-01|MISSAO|Missão de Organizações',t:'Missão de Organizações',type:'MISSÃO',d:'2026-09-01',end:'2026-09-06',desc:'Início da Missão de Organizações.'},
+    {k:'2026-09-02|EVENTO|Me Conhece pela Sombra',t:'Me Conhece pela Sombra',type:'EVENTO',d:'2026-09-02',desc:'Evento do Reino.',result:'🏆 Souei ☠️',winner:'Souei'},
+    {k:'2026-09-02|RESULTADO_LEGIAO|Resultado do Exame — ciclo 04',t:'Resultado do Exame de Admissão nas Legiões — Ciclo 04',type:'EXAME_ADMISSAO',d:'2026-09-03',desc:'Resultado do ciclo iniciado em 31/08.'},
+    {k:'2026-09-03|MISSAO|Missão de Luta — setembro 01',t:'Missão de Luta — Ciclo 03',type:'MISSÃO',d:'2026-09-03',end:'2026-09-04',desc:'Início da Missão de Luta.'},
+    {k:'2026-09-03|ATIVIDADE|Simulação de Invasão',t:'Simulação de Invasão',type:'ATIVIDADE_ESPECIAL',d:'2026-09-03',desc:'Atividade especial de Spade.'},
+    {k:'2026-09-04|TORNEIO|2º Torneio do Reino Spade',t:'2º Torneio do Reino Spade',type:'TORNEIO',d:'2026-09-04',desc:'Segundo torneio de Reino.',result:'🏆 Wesyx ☠️',winner:'Wesyx'},
+    {k:'2026-09-05|EVENTO|Quizz Temático — Animes',t:'Quizz Temático: Animes',type:'EVENTO',d:'2026-09-05',desc:'Evento temático.',result:'🏆 Souei ☠️',winner:'Souei'},
+    {k:'2026-09-06|EXAME_INTER|Upgrade Intermediário — 04',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-09-06',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-09-06|EVENTO|Desembaralhe!',t:'Desembaralhe!',type:'EVENTO',d:'2026-09-06',desc:'Evento do Reino.',result:'🏆 Souei ☠️',winner:'Souei'},
+    {k:'2026-09-07|MISSAO|Missão de Recrutamento — setembro 01',t:'Missão de Recrutamento — Ciclo 03',type:'MISSÃO',d:'2026-09-07',end:'2026-09-08',desc:'Início da Missão de Recrutamento.'},
+    {k:'2026-09-07|Purgatorio|3º Ciclo do Purgatório Obscuro',t:'3º Ciclo do Purgatório Obscuro',type:'RANKING',d:'2026-09-07',end:'2026-09-16',cycle:'3º Ciclo',desc:'Início do terceiro ciclo do Purgatório Obscuro.'},
+    {k:'2026-09-07|EXAME_ADMISSAO|Exame de Admissão nas Legiões — setembro 01',t:'Exame de Admissão nas Legiões — Setembro',type:'EXAME_ADMISSAO',d:'2026-09-07',end:'2026-09-09',desc:'Início do exame de admissão nas Legiões.'},
+    {k:'2026-09-07|TORNEIO|1º Torneio Novachrono',t:'1º Torneio Novachrono',type:'TORNEIO',d:'2026-09-07',desc:'Torneio da Casa Novachrono.'},
+    {k:'2026-09-08|EVENTO|Roleta Russa',t:'Roleta Russa',type:'EVENTO',d:'2026-09-08',desc:'Evento do Reino.'},
+    {k:'2026-09-08|ATIVIDADE|Indicações para Entrada nas Legiões',t:'Indicações para Entrada nas Legiões',type:'ATIVIDADE_ESPECIAL',d:'2026-09-08',desc:'Período de indicações após o exame.'},
+    {k:'2026-09-09|TORNEIO|1º Torneio Grinberryall',t:'1º Torneio Grinberryall',type:'TORNEIO',d:'2026-09-09',desc:'Torneio da Casa Grinberryall.'},
+    {k:'2026-09-09|EVENTO|Leilão',t:'Evento: Leilão',type:'EVENTO',d:'2026-09-09',desc:'Leilão programado no Reino.'},
+    {k:'2026-09-10|MISSAO|Missão — setembro 02',t:'Missão — Ciclo 04',type:'MISSÃO',d:'2026-09-10',end:'2026-09-11',desc:'Início da Missão.'},
+    {k:'2026-09-10|RESULTADO_LEGIAO|Resultado do Exame — setembro 01',t:'Resultado do Exame de Admissão nas Legiões — Setembro',type:'EXAME_ADMISSAO',d:'2026-09-10',desc:'Resultado do exame iniciado em 07/09.'},
+    {k:'2026-09-11|TORNEIO|3º Torneio Loja do Reino Spade',t:'3º Torneio Loja do Reino Spade',type:'TORNEIO',d:'2026-09-11',desc:'Terceiro torneio da Loja do Reino Spade.'},
+    {k:'2026-09-12|EXAME_SENIOR|Upgrade Sênior — setembro 01',t:'Exame para Upgrade: Patente Sênior',type:'EXAME_SENIOR',d:'2026-09-12',desc:'Exame para upgrade à patente Sênior.'},
+    {k:'2026-09-12|EVENTO|Batalha Naval',t:'Batalha Naval',type:'EVENTO',d:'2026-09-12',desc:'Evento do Reino.'},
+    {k:'2026-09-13|EXAME_INTER|Upgrade Intermediário — setembro 01',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-09-13',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-09-13|EVENTO|Quem é o Cantor?',t:'Quem é o Cantor?',type:'EVENTO',d:'2026-09-13',desc:'Evento do Reino.'},
+    {k:'2026-09-14|MISSAO|Missão — setembro 03',t:'Missão — Ciclo 05',type:'MISSÃO',d:'2026-09-14',end:'2026-09-15',desc:'Início da Missão.'},
+    {k:'2026-09-14|EXAME_ADMISSAO|Exame de Admissão nas Legiões — setembro 02',t:'Exame de Admissão nas Legiões — Setembro 02',type:'EXAME_ADMISSAO',d:'2026-09-14',end:'2026-09-16',desc:'Início do exame de admissão nas Legiões.'},
+    {k:'2026-09-15|EVENTO|Critical Ops',t:'Critical Ops',type:'EVENTO',d:'2026-09-15',desc:'Evento do Reino.'},
+    {k:'2026-09-16|RESULTADO_LEGIAO|Resultado do Exame — setembro 02',t:'Resultado do Exame de Admissão nas Legiões — Setembro 02',type:'EXAME_ADMISSAO',d:'2026-09-17',desc:'Resultado do exame iniciado em 14/09.'},
+    {k:'2026-09-16|EVENTO|Confinamento Mágico',t:'Confinamento Mágico',type:'EVENTO',d:'2026-09-16',desc:'Evento do Reino.'},
+    {k:'2026-09-16|Purgatorio|Fim do 3º Ciclo',t:'Fim do 3º Ciclo do Purgatório Obscuro',type:'RANKING',d:'2026-09-16',cycle:'3º Ciclo',desc:'Encerramento do terceiro ciclo do Purgatório Obscuro.'},
+    {k:'2026-09-17|MISSAO|Missão — setembro 04',t:'Missão — Ciclo 06',type:'MISSÃO',d:'2026-09-17',end:'2026-09-18',desc:'Início da Missão.'},
+    {k:'2026-09-17|Purgatorio|4º Ciclo do Purgatório Obscuro',t:'4º Ciclo do Purgatório Obscuro',type:'RANKING',d:'2026-09-17',end:'2026-09-30',cycle:'4º Ciclo',desc:'Início do quarto ciclo do Purgatório Obscuro.'},
+    {k:'2026-09-18|TORNEIO|1º Torneio Zogratis',t:'1º Torneio Zogratis',type:'TORNEIO',d:'2026-09-18',desc:'Torneio da Casa Zogratis.'},
+    {k:'2026-09-19|TORNEIO|3º Torneio do Reino Spade',t:'3º Torneio do Reino Spade',type:'TORNEIO',d:'2026-09-19',desc:'Terceiro torneio de Reino.'},
+    {k:'2026-09-20|EXAME_INTER|Upgrade Intermediário — setembro 02',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-09-20',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-09-20|EVENTO|Tema Livre — setembro 01',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-09-20',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-09-21|MISSAO|Missão — setembro 05',t:'Missão — Ciclo 07',type:'MISSÃO',d:'2026-09-21',end:'2026-09-22',desc:'Início da Missão.'},
+    {k:'2026-09-21|EXAME_ADMISSAO|Exame de Admissão nas Legiões — setembro 03',t:'Exame de Admissão nas Legiões — Setembro 03',type:'EXAME_ADMISSAO',d:'2026-09-21',end:'2026-09-23',desc:'Início do exame de admissão nas Legiões.'},
+    {k:'2026-09-22|EVENTO|Tema Livre — setembro 02',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-09-22',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-09-23|TORNEIO|Torneio Geral',t:'Torneio Geral — Spade',type:'TORNEIO',d:'2026-09-23',desc:'Torneio Geral do ciclo entre os Reinos, conforme o cronograma oficial.'},
+    {k:'2026-09-24|MISSAO|Missão — setembro 06',t:'Missão — Ciclo 08',type:'MISSÃO',d:'2026-09-24',end:'2026-09-25',desc:'Início da Missão.'},
+    {k:'2026-09-24|RESULTADO_LEGIAO|Resultado do Exame — setembro 03',t:'Resultado do Exame de Admissão nas Legiões — Setembro 03',type:'EXAME_ADMISSAO',d:'2026-09-24',desc:'Resultado do exame iniciado em 21/09.'},
+    {k:'2026-09-25|TORNEIO|4º Torneio Loja do Reino Spade',t:'4º Torneio Loja do Reino Spade',type:'TORNEIO',d:'2026-09-25',desc:'Quarto torneio da Loja do Reino Spade.'},
+    {k:'2026-09-26|EXAME_SENIOR|Upgrade Sênior — setembro 02',t:'Exame para Upgrade: Patente Sênior',type:'EXAME_SENIOR',d:'2026-09-26',desc:'Exame para upgrade à patente Sênior.'},
+    {k:'2026-09-26|EVENTO|Floresta de Spade',t:'Floresta de Spade',type:'EVENTO',d:'2026-09-26',desc:'Evento do Reino.'},
+    {k:'2026-09-27|EXAME_INTER|Upgrade Intermediário — setembro 03',t:'Exame para Upgrade: Patente Intermediário',type:'EXAME_INTERMEDIARIO',d:'2026-09-27',desc:'Exame para upgrade à patente Intermediária.'},
+    {k:'2026-09-27|EVENTO|Tema Livre — setembro 03',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-09-27',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-09-28|MISSAO|Missão — setembro 07',t:'Missão — Ciclo 09',type:'MISSÃO',d:'2026-09-28',end:'2026-09-29',desc:'Início da Missão.'},
+    {k:'2026-09-28|EXAME_ADMISSAO|Exame de Admissão nas Legiões — setembro 04',t:'Exame de Admissão nas Legiões — Setembro 04',type:'EXAME_ADMISSAO',d:'2026-09-28',end:'2026-09-30',desc:'Início do exame de admissão nas Legiões.'},
+    {k:'2026-09-29|EVENTO|Tema Livre — setembro 04',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-09-29',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-09-30|EVENTO|Tema Livre — setembro 05',t:'Evento — Tema Livre / A Definir',type:'EVENTO',d:'2026-09-30',desc:'Evento com tema livre, conforme o cronograma.'},
+    {k:'2026-09-30|Purgatorio|Fim do 4º Ciclo',t:'Fim do 4º Ciclo do Purgatório Obscuro',type:'RANKING',d:'2026-09-30',cycle:'4º Ciclo',desc:'Encerramento do quarto ciclo do Purgatório Obscuro.'},
+    {k:'2026-09-30|RANKING|Fim dos Rankings da Arena',t:'Fim dos Rankings da Arena Mágica e Arena Superior — Setembro',type:'RANKING',d:'2026-09-30',desc:'Encerramento do ciclo de setembro dos Rankings da Arena.'}
+  ];
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  for (const a of activities) {
+    const start = new Date(a.d + 'T00:00:00');
+    const end = new Date((a.end || a.d) + 'T23:59:59');
+    const historical = end < today;
+    const status = a.status || (historical ? 'CONCLUIDA' : 'AGENDADA');
+    let winnerId = null;
+    if (a.winner) {
+      const wr = await pool.query(`SELECT id FROM players WHERE lower(nick)=lower($1) ORDER BY id LIMIT 1`, [a.winner]);
+      winnerId = wr.rows[0]?.id || null;
+    }
+    await pool.query(`
+      INSERT INTO schedule_activities(title,activity_type,description,activity_date,end_date,start_time,end_time,location,link,event_id,mission_id,status,featured,published,result_text,winner_player_id,cycle_label,source_key)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'','',NULL,NULL,$9,0,1,$10,$11,$12,$13)
+      ON CONFLICT (source_key) DO NOTHING
+    `,[a.t,a.type,a.desc,a.d,a.end||a.d,null,null,status,a.result||'',winnerId,a.cycle||'',a.k]);
+  }
+
+  const champions = [
+    ['2026-08','EVENTO','Discípulos das Trevas','Manjiro Sano','Campeão de agosto'],
+    ['2026-08','EVENTO','Caça aos Piratas','Kazutora','Campeão de agosto'],
+    ['2026-08','EVENTO','Batalha de Grimórios','Suco Tang','Campeão de agosto; data não registrada no cronograma fornecido'],
+    ['2026-08','EVENTO','Impostor Entre Nós','Focsi','Campeão de agosto; data não registrada no cronograma fornecido'],
+    ['2026-08','TORNEIO','1º Torneio Loja','Mihawk','Campeão de agosto'],
+    ['2026-08','TORNEIO','1º Torneio do Reino','Killer','Campeão de agosto'],
+    ['2026-08','TORNEIO','1º Torneio Grimório / Torneio do Faminto','Kawamatsu','Campeão de agosto; data não registrada no cronograma fornecido'],
+    ['2026-08','TORNEIO','2º Torneio Loja','Theuz','Campeão de agosto'],
+    ['2026-08','RANKING','1º Ciclo de Spadianos','Killer','Campeão de agosto'],
+    ['2026-08','RANKING','2º Ciclo de Spadianos','Killer','Campeão de agosto']
+  ];
+  for(const c of champions){
+    await pool.query(`INSERT INTO schedule_champions(period_key,category,title,winner_nick,note) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,c);
+  }
+}
+
 initDatabase()
-  .then(() => {
+  .then(async () => {
+    await seedOfficialCronograma();
     app.listen(PORT, "0.0.0.0", () => console.log(`Portal Spade conectado ao PostgreSQL na porta ${PORT}`));
   })
   .catch(err => {
