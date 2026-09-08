@@ -107,7 +107,9 @@ function runPageTransition(){
 
 let globalSearchTimer=null;
 let globalSearchAbort=null;
-function closeGlobalSearch(){const box=qs("#globalSearchResults");if(box){box.hidden=true;box.innerHTML="";}}
+function closeGlobalSearch(){const box=qs("#globalSearchResults");if(box){box.hidden=true;box.innerHTML="";}const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle");if(panel){panel.hidden=true;}if(toggle){toggle.setAttribute("aria-expanded","false");}}
+function openGlobalSearch(){const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle"),input=qs("#globalSearchInput");if(!panel)return;panel.hidden=false;toggle?.setAttribute("aria-expanded","true");setTimeout(()=>input?.focus(),0);}
+
 function searchResultIcon(kind){return {player:'👤',house:'🏰',event:'🎪',mission:'⚔️',schedule:'📅',article:'📰',library:'📚',card:'🃏'}[kind]||'•';}
 function renderGlobalSearchResults(data){
   const box=qs("#globalSearchResults"); if(!box)return;
@@ -131,6 +133,8 @@ async function performGlobalSearch(q){
 }
 function initGlobalSearch(){
   const input=qs("#globalSearchInput"); if(!input)return;
+  qs("#globalSearchToggle")?.addEventListener("click",e=>{e.stopPropagation();const panel=qs("#globalSearchPanel");if(panel?.hidden)openGlobalSearch();else closeGlobalSearch();});
+  qs("#globalSearchClose")?.addEventListener("click",e=>{e.stopPropagation();input.blur();closeGlobalSearch();});
   input.addEventListener('input',()=>{clearTimeout(globalSearchTimer);globalSearchTimer=setTimeout(()=>performGlobalSearch(input.value),180);});
   input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.blur();closeGlobalSearch();}if(e.key==='Enter'){const first=qs('#globalSearchResults .global-search-result');if(first){e.preventDefault();first.click();}}});
   document.addEventListener('click',e=>{if(!e.target.closest('#globalSearchWrap'))closeGlobalSearch();});
@@ -183,8 +187,8 @@ function go(page){
 }
 
 qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
-qs("#hamb").addEventListener("click",()=>qs("#nav").classList.toggle("open"));
-qs("#mobileMenuBtn")?.addEventListener("click",()=>qs("#nav")?.classList.toggle("open"));
+qs("#hamb").addEventListener("click",()=>{closeGlobalSearch();qs("#nav").classList.toggle("open")});
+qs("#mobileMenuBtn")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();}});
 
 
