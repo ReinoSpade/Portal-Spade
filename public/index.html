@@ -227,21 +227,28 @@
     <div id="journalNews" class="news-grid journal-news-grid"></div>
   </div>
 </section><section class="page" id="biblioteca">
-  <div class="subhero"><p class="eyebrow">ARQUIVO DO REINO</p><h1>Biblioteca de <em>Spade.</em></h1><p>Explore o conhecimento do Reino por tópicos. Abra qualquer material para ler sem sair da página.</p></div>
-  <div class="content library-page-content">
-    <div class="library-toolbar library-toolbar-v2">
-      <div class="library-search-box"><span aria-hidden="true">⌕</span><input id="librarySearch" class="search" type="search" autocomplete="off" placeholder="Buscar uma regra, capítulo, card ou assunto..."><button id="librarySearchClear" class="library-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button></div>
-      <div class="library-toolbar-note"><span>ARQUIVO OFICIAL</span><small>Escolha um tópico e abra o material que deseja consultar.</small></div>
+  <div class="subhero library-subhero">
+    <p class="eyebrow">ARQUIVO DO REINO</p>
+    <h1>Biblioteca de <em>Spade.</em></h1>
+    <p>Uma biblioteca em camadas: área, coleção, material, seção, subtópico e item. Escolha um caminho e aprofunde a consulta sem sair da tela.</p>
+  </div>
+  <div class="content library-page-content library-v3">
+    <div class="library-v3-search-wrap">
+      <div class="library-v3-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="librarySearch" class="search" type="search" autocomplete="off" placeholder="Pesquisar qualquer regra, capítulo, card, artigo ou assunto...">
+        <button id="librarySearchClear" class="library-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button>
+      </div>
+      <div class="library-v3-search-note"><span>BUSCA GLOBAL</span><small>Encontre um termo e abra o material diretamente.</small></div>
     </div>
-    <div class="library-topics-head"><div><p class="eyebrow">NAVEGAÇÃO</p><h2>Escolha um tópico</h2></div><span id="libraryTopicHint">17 materiais disponíveis</span></div>
-    <div id="libraryTopics" class="library-topic-tabs" role="tablist" aria-label="Tópicos da Biblioteca"></div>
-    <div class="library-topic-stage">
-      <aside id="libraryTopicSidebar" class="library-topic-sidebar" aria-label="Tópicos da Biblioteca"></aside>
-      <main class="library-topic-main">
-        <div id="libraryTopicHeader" class="library-topic-header"></div>
-        <div id="libraryGrid" class="library-topic-grid"></div>
-      </main>
+
+    <div class="library-v3-heading">
+      <div><p class="eyebrow">EXPLORADOR</p><h2>Escolha por onde começar</h2></div>
+      <span id="libraryTopicHint">5 áreas do arquivo</span>
     </div>
+
+    <div id="libraryGrid" class="library-v3-root-grid" aria-live="polite"></div>
+    <div id="libraryTopicHeader" class="library-v3-status" hidden></div>
   </div>
 </section>
 <section class="page" id="comunicados">
