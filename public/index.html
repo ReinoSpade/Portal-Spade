@@ -540,7 +540,7 @@
       <option value="yuls">Mais Yuls</option><option value="power">Mais força</option>
       <option value="ranking">Melhor ranking</option><option value="updated">Mais recentes</option>
     </select>
-    <button class="gold" id="importPlayersBtn">📥 Importar jogadores</button><button class="gold" id="newPlayerBtn">＋ Novo jogador</button>
+    <button class="outline dark-outline" id="exportPlayersBtn" title="Baixar os dados atuais dos jogadores em Excel">📤 Baixar planilha</button><button class="gold" id="bulkUpdatePlayersBtn" title="Enviar uma planilha editada para atualizar jogadores">📥 Atualizar por planilha</button><button class="gold" id="importPlayersBtn">＋ Importar novos</button><button class="gold" id="newPlayerBtn">＋ Novo jogador</button>
     <button class="outline dark-outline" id="refreshAdminBtn">↻ Atualizar</button>
   </div>
   <div class="admin-mission-manager panel" id="adminMissionManager">
@@ -599,6 +599,30 @@
         <div id="playerImportStatus" class="error"></div>
         <button class="outline dark-outline" type="button" id="playerImportCancel">Cancelar</button>
         <button class="gold" type="button" id="playerImportConfirm" disabled>Importar jogadores</button>
+      </div>
+    </div>
+  </div>
+  <div class="player-import-modal" id="playerBulkSheetModal" hidden style="display:none">
+    <div class="player-import-window player-bulk-sheet-window">
+      <div class="player-import-head">
+        <div><p class="eyebrow">ATUALIZAÇÃO EM MASSA</p><h3>Editar jogadores por planilha</h3><p>Baixe os dados atuais, altere o que precisar e reenvie. O Portal compara tudo antes de gravar.</p></div>
+        <button type="button" class="journal-close" id="closePlayerBulkSheet">×</button>
+      </div>
+      <div class="player-import-actions">
+        <button class="outline small" type="button" id="playerBulkSheetDownload">📤 Baixar dados atuais</button>
+        <label class="gold small import-file-label" for="playerBulkSheetFile">📥 Escolher planilha editada</label>
+        <input id="playerBulkSheetFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <span id="playerBulkSheetFileName">Nenhum arquivo selecionado</span>
+      </div>
+      <div class="player-import-note">
+        <b>Como funciona:</b> a coluna <b>ID</b> identifica o jogador e não deve ser alterada. Você pode editar Nick, número, login, Casa, Patente, Cargos, Grimório, HP, Mana, Yuls, Dracmas, EXP, Missões, Conquistas, Ranking, Força, Skills, visibilidade e acesso.
+        <br><span>A prévia mostra exatamente o que mudará. Nada é aplicado antes da confirmação e uma planilha com qualquer erro é bloqueada por inteiro.</span>
+      </div>
+      <div id="playerBulkSheetPreview" class="player-import-preview"><p>Baixe a planilha atual, edite-a e depois escolha o arquivo aqui.</p></div>
+      <div class="player-import-footer">
+        <div id="playerBulkSheetStatus" class="error"></div>
+        <button class="outline dark-outline" type="button" id="playerBulkSheetCancel">Cancelar</button>
+        <button class="gold" type="button" id="playerBulkSheetConfirm" disabled>Aplicar alterações</button>
       </div>
     </div>
   </div>
