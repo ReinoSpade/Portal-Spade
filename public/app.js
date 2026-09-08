@@ -189,7 +189,7 @@ function go(page){
 qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 qs("#hamb").addEventListener("click",()=>{closeGlobalSearch();qs("#nav").classList.toggle("open")});
 qs("#mobileMenuBtn")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();const m=qs("#libraryReaderModal");if(m?.classList.contains("open")){m.classList.remove("open");document.body.classList.remove("library-reader-open");}}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();const m=qs("#libraryReaderModal");if(m?.classList.contains("open")){m.classList.remove("open");document.body.classList.remove("library-reader-open");}closeLibraryExplorer();}});
 
 
 function initGuideNavigation(){
@@ -215,88 +215,218 @@ async function loadHome(){
 }
 
 const LIBRARY_TOPICS={
-  all:{label:"Tudo",icon:"✦",category:"",description:"Todos os materiais oficiais disponíveis na Biblioteca de Spade."},
-  databook:{label:"Databook VT",icon:"⚔️",category:"DATABOOK • REGRAS",description:"Regras oficiais de combate, interações, cards e mecânicas do sistema Vale Tudo."},
-  admin:{label:"Administração",icon:"♛",category:"SISTEMA • ADMINISTRAÇÃO",description:"Cargos, hierarquia, requisitos e regras de remuneração do Reino."},
-  orgs:{label:"Organizações",icon:"🐾",category:"SISTEMA • ORGANIZAÇÕES",description:"Evolução dos Mascotes das Organizações, requisitos e benefícios de upgrade."},
-  arena:{label:"Arena",icon:"⚖️",category:"SISTEMA • ARENA",description:"Regulamento dos Juízes, procedimentos de luta e conduta dos participantes."},
-  cards:{label:"Cards & Batalha",icon:"🃏",category:"SISTEMA • CARDS",description:"Manual de Batalha e referência rápida para a utilização dos cards."}
+  all:{label:"Tudo",icon:"✦",category:"",description:"Todo o arquivo oficial de Spade."},
+  databook:{label:"Databook VT",icon:"⚔️",category:"DATABOOK • REGRAS",description:"Sistema de combate, mecânicas, interações e regras do Vale Tudo."},
+  admin:{label:"Administração",icon:"♛",category:"SISTEMA • ADMINISTRAÇÃO",description:"Cargos, hierarquia, requisitos e remuneração do Reino."},
+  orgs:{label:"Organizações",icon:"🐾",category:"SISTEMA • ORGANIZAÇÕES",description:"Mascotes, estágios, benefícios e requisitos de evolução."},
+  arena:{label:"Arena",icon:"⚖️",category:"SISTEMA • ARENA",description:"Regulamento dos Juízes, procedimentos e conduta nas competições."},
+  cards:{label:"Cards & Batalha",icon:"🃏",category:"SISTEMA • CARDS",description:"Manual de Batalha e referências de utilização dos cards."}
 };
+
 function currentLibraryTopic(){return LIBRARY_TOPICS[state.libraryTopic]||LIBRARY_TOPICS.all;}
-function libraryTopicItems(items){return (items||[]).filter(x=>{const t=currentLibraryTopic();return !t.category||x.category===t.category;});}
-async function loadLibrary(){
-  try{
-    const params=new URLSearchParams();
-    const q=qs("#librarySearch")?.value.trim()||"";
-    const topic=currentLibraryTopic();
-    if(q)params.set("q",q);
-    if(topic.category)params.set("category",topic.category);
-    const d=await api(`/api/library?${params.toString()}`);
-    state.libraryItems=d.items||[];
-    renderLibraryTopics(state.libraryItems);
-    renderLibrary(state.libraryItems,q);
-    const clear=qs("#librarySearchClear"); if(clear)clear.hidden=!q;
-  }catch(e){
-    const el=qs("#libraryGrid");
-    if(el)el.innerHTML=`<div class="library-empty"><div class="library-empty-seal">§</div><h3>Não foi possível carregar a Biblioteca.</h3><p>${escapeHtml(e.message)}</p></div>`;
-  }
+function libraryItemsForTopic(items,topicKey){const t=LIBRARY_TOPICS[topicKey]||LIBRARY_TOPICS.all;return (items||[]).filter(x=>!t.category||x.category===t.category);}
+function libraryTopicEntries(items){
+  const all=items||[];
+  return Object.entries(LIBRARY_TOPICS).filter(([k])=>k!=="all").map(([key,t])=>({key,t,count:all.filter(x=>x.category===t.category).length}));
 }
-function renderLibraryTopics(items){
-  const tabs=qs("#libraryTopics"),side=qs("#libraryTopicSidebar"); if(!tabs||!side)return;
-  const allItems=state.libraryItems||[];
-  const counts={all:allItems.length}; Object.keys(LIBRARY_TOPICS).forEach(k=>{if(k!=="all")counts[k]=allItems.filter(x=>x.category===LIBRARY_TOPICS[k].category).length;});
-  const entries=Object.entries(LIBRARY_TOPICS);
-  tabs.innerHTML=entries.map(([key,t])=>`<button type="button" role="tab" aria-selected="${state.libraryTopic===key}" class="library-topic-tab ${state.libraryTopic===key?"active":""}" data-library-topic="${key}"><span class="library-topic-tab-icon">${t.icon}</span><span><b>${escapeHtml(t.label)}</b><small>${counts[key]||0} ${counts[key]===1?"material":"materiais"}</small></span></button>`).join("");
-  side.innerHTML=entries.map(([key,t])=>`<button type="button" class="library-side-topic ${state.libraryTopic===key?"active":""}" data-library-topic="${key}"><span>${t.icon}</span><div><b>${escapeHtml(t.label)}</b><small>${counts[key]||0} materiais</small></div></button>`).join("");
-  qsa("[data-library-topic]").forEach(b=>b.onclick=()=>{state.libraryTopic=b.dataset.libraryTopic||"all";loadLibrary();qs("#libraryTopicStage")?.scrollIntoView?.({behavior:"smooth",block:"start"});});
-  const hint=qs("#libraryTopicHint");if(hint){const n=currentLibraryTopic().category?counts[state.libraryTopic]||0:allItems.length;hint.textContent=`${n} ${n===1?"material disponível":"materiais disponíveis"}`;}
+function libraryNormalizeTitle(s){return String(s||"").replace(/\s+/g," ").replace(/\s*:\s*$/u,"").trim();}
+function libraryIsPrimaryHeading(line){
+  return /^(?:\d+\.\d+(?:\.\d+)?|RANK\s+[IVX]+\b|NÍVEL\s+\d+\b|CAPÍTULO\s+(?:[IVX]+|\d+)\b|ART\.?\s*\d+º?\b|ARTIGO\s+\d+º?\b)/iu.test(line);
 }
-function buildLibraryReader(x){
-  const raw=String(x.content||"").replace(/\r/g,"");
-  const lines=raw.split("\n"); let html="", toc=[]; let para=[]; let bullet=[]; let hid=0;
-  const flushPara=()=>{if(!para.length)return;const text=para.join(" ").trim();if(text)html+=`<p>${escapeHtml(text)}</p>`;para=[];};
-  const flushBullets=()=>{if(!bullet.length)return;html+='<ul>'+bullet.map(v=>`<li>${escapeHtml(v)}</li>`).join('')+'</ul>';bullet=[];};
+function libraryIsSecondaryHeading(line){
+  if(!line || line.length>100) return false;
+  if(libraryIsPrimaryHeading(line)) return false;
+  return /^(?:Exemplos?|Prioridade|Observações?|Características|Tipos?|Elementos?|Confronto|Funcionamento|Definição|Regras|Requisitos|Benefícios|Melhoria|Efeitos?|Interações?|Forma|Estágio|Objetivo|Quando|Caso|Enquanto)\b.*:\s*$/iu.test(line);
+}
+function parseLibraryHierarchy(x){
+  const raw=String(x?.content||"").replace(/\r/g,"");
+  const lines=raw.split("\n");
+  const sections=[]; let current=null; let child=null; let intro=[]; let seq=0;
+  const addSection=(title)=>{current={id:`ls-${x.id}-${++seq}`,title:libraryNormalizeTitle(title),paragraphs:[],children:[]};sections.push(current);child=null;return current;};
+  const addChild=(title,kind="subtopic")=>{if(!current)return null;child={id:`lc-${x.id}-${++seq}`,title:libraryNormalizeTitle(title),kind,paragraphs:[],children:[]};current.children.push(child);return child;};
+  const addText=(target,text)=>{if(!text)return;(target||current||{paragraphs:intro}).paragraphs.push(text);};
   for(const rawLine of lines){
     const line=rawLine.trim();
-    if(!line){flushBullets();flushPara();continue;}
-    if(/^(?:\d+\.\d+|\d+\.\d+\.\d+)\s+.+:$/u.test(line)){
-      flushBullets();flushPara();const id=`library-section-${++hid}`;const title=line.replace(/:$/,'');toc.push({id,title});html+=`<h3 id="${id}">${escapeHtml(title)}</h3>`;continue;
+    if(!line) continue;
+    if(libraryIsPrimaryHeading(line)){addSection(line);continue;}
+    if(libraryIsSecondaryHeading(line)){addChild(line);continue;}
+    if(/^(?:•|[-–—])\s*/u.test(line)){
+      const text=line.replace(/^(?:•|[-–—])\s*/u,"").trim();
+      if(!current){intro.push(text);continue;}
+      const target=child||current;
+      target.children.push({id:`li-${x.id}-${++seq}`,title:text.length>78?`${text.slice(0,75)}…`:text,kind:"item",body:text,paragraphs:[]});
+      continue;
     }
-    if(/^•\s*/.test(line)||/^[-–—]\s*/.test(line)){
-      flushPara();bullet.push(line.replace(/^•\s*|^[-–—]\s*/,'').trim());continue;
-    }
-    if(/^(CAPÍTULO|NÍVEL|ART\.|ARTIGO|RANK\s+[IVX]+)/i.test(line) && line.length<150){
-      flushBullets();flushPara();const id=`library-section-${++hid}`;toc.push({id,title:line});html+=`<h3 id="${id}">${escapeHtml(line)}</h3>`;continue;
-    }
-    para.push(line);
+    addText(child||current,line);
   }
-  flushBullets();flushPara();
-  return {html:html||'<p>Este material ainda não possui conteúdo para leitura.</p>',toc};
+  return {sections,intro};
+}
+function libraryNodeStats(node){
+  const children=node?.children||[];
+  return {
+    total:children.length,
+    leaf:children.filter(c=>c.kind==="item").length,
+    nested:children.filter(c=>c.kind!=="item").length
+  };
+}
+function libraryBreadcrumbLabel(node){
+  if(node?.level==='root')return 'Biblioteca';
+  if(node?.level==='topic')return node.topic.label;
+  if(node?.level==='material')return node.item.title;
+  if(node?.level==='section')return node.section.title;
+  return node?.item?.title||node?.section?.title||'Consulta';
+}
+function closeLibraryExplorer(){
+  const modal=qs('#libraryExplorerModal');
+  modal?.classList.remove('open');
+  document.body.classList.remove('library-explorer-open');
+}
+function ensureLibraryExplorer(){
+  let modal=qs('#libraryExplorerModal');
+  if(modal)return modal;
+  modal=document.createElement('div');
+  modal.id='libraryExplorerModal';
+  modal.className='library-explorer-modal';
+  document.body.appendChild(modal);
+  return modal;
+}
+function openLibraryExplorer(node){
+  const modal=ensureLibraryExplorer();
+  state.libraryExplorer=node;
+  renderLibraryExplorer();
+  modal.classList.add('open');
+  document.body.classList.add('library-explorer-open');
+}
+function libraryTopicCard(entry){
+  const {key,t,count}=entry;
+  return `<button type="button" class="library-v3-area-card" data-library-open-topic="${key}">
+    <div class="library-v3-card-icon">${t.icon}</div>
+    <div class="library-v3-card-copy"><span class="eyebrow">ÁREA ${String(count).padStart(2,'0')}</span><h3>${escapeHtml(t.label)}</h3><p>${escapeHtml(t.description)}</p></div>
+    <div class="library-v3-card-meta"><span>${count} ${count===1?'material':'materiais'}</span><b>Explorar →</b></div>
+  </button>`;
+}
+function libraryMaterialCard(item,index){
+  const outline=parseLibraryHierarchy(item);
+  const sectionCount=outline.sections.length;
+  return `<button type="button" class="library-explorer-card" data-library-material-index="${index}">
+    <div class="library-explorer-card-icon">${escapeHtml(item.icon||'📚')}</div>
+    <div class="library-explorer-card-main"><span class="tag">${escapeHtml(item.category||'BIBLIOTECA')}</span><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description||'Abra para explorar o conteúdo por seções e subtópicos.')}</p></div>
+    <div class="library-explorer-card-side"><strong>${sectionCount||'—'}</strong><small>${sectionCount===1?'seção':'seções'}</small><span>→</span></div>
+  </button>`;
+}
+function librarySectionCard(section,index){
+  const st=libraryNodeStats(section);
+  const summary=section.paragraphs?.[0]||'';
+  return `<button type="button" class="library-explorer-card library-section-card" data-library-section-index="${index}">
+    <div class="library-section-number">${String(index+1).padStart(2,'0')}</div>
+    <div class="library-explorer-card-main"><span class="tag">SEÇÃO</span><h3>${escapeHtml(section.title)}</h3><p>${escapeHtml(summary||'Explore os subtópicos desta seção.')}</p></div>
+    <div class="library-explorer-card-side"><strong>${st.total||'—'}</strong><small>${st.total===1?'item':'itens'}</small><span>→</span></div>
+  </button>`;
+}
+function libraryChildCard(child,index){
+  const body=child.body||(child.paragraphs||[]).join(' ');
+  return `<button type="button" class="library-explorer-child" data-library-child-index="${index}">
+    <span class="library-child-bullet">${child.kind==='item'?'•':'§'}</span>
+    <span><b>${escapeHtml(child.title)}</b><small>${escapeHtml(body||'Abrir subtópico')}</small></span>
+    <i>→</i>
+  </button>`;
+}
+function libraryRenderDetail(node){
+  const body=[];
+  if(node.item?.description) body.push(`<p class="library-detail-lead">${escapeHtml(node.item.description)}</p>`);
+  if(node.node?.paragraphs?.length) body.push(node.node.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join(''));
+  if(node.node?.children?.length) body.push(`<div class="library-detail-children">${node.node.children.map((c,i)=>libraryChildCard(c,i)).join('')}</div>`);
+  const full=(node.node?.kind==='item'&&node.node.body)?`<div class="library-detail-quote">${escapeHtml(node.node.body)}</div>`:'';
+  return body.join('')+full;
+}
+function renderLibraryExplorer(){
+  const modal=ensureLibraryExplorer();
+  const node=state.libraryExplorer||{level:'root'};
+  const items=state.libraryAllItems||state.libraryItems||[];
+  let title='Biblioteca de Spade',desc='Navegue por camadas até encontrar a regra exata que procura.',content='',crumbs=[{level:'root',label:'Biblioteca'}];
+  if(node.level==='root'){
+    const entries=libraryTopicEntries(items);
+    content=`<div class="library-explorer-grid">${entries.map(libraryTopicCard).join('')}</div>`;
+  }else if(node.level==='topic'){
+    const t=node.topic; const list=libraryItemsForTopic(items,node.topicKey);
+    title=t.label; desc=t.description; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label});
+    content=list.length?`<div class="library-explorer-grid materials">${list.map((item,i)=>libraryMaterialCard(item,i)).join('')}</div>`:`<div class="library-explorer-empty">Nenhum material disponível nesta área.</div>`;
+  }else if(node.level==='material'){
+    const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const list=libraryItemsForTopic(items,node.topicKey); const item=list[node.itemIndex];
+    if(!item)return openLibraryExplorer({level:'root'});
+    node.item=item; node.outline=parseLibraryHierarchy(item);
+    title=item.title; desc=item.description||'Explore o material seção por seção.'; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title});
+    const sections=node.outline.sections||[];
+    content=`<div class="library-explorer-intro"><div class="library-explorer-intro-icon">${escapeHtml(item.icon||'📚')}</div><div><span class="tag">${escapeHtml(item.category||'BIBLIOTECA')}</span><h3>Mapa do material</h3><p>${escapeHtml(item.description||'Use as seções abaixo para aprofundar a leitura.')}</p></div></div>`+
+      (sections.length?`<div class="library-explorer-list">${sections.map(librarySectionCard).join('')}</div>`:`<div class="library-detail-full">${buildLibraryReader(item).html}</div>`);
+    if(node.outline.intro?.length) content+=`<div class="library-material-intro-copy">${node.outline.intro.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</div>`;
+  }else if(node.level==='section'){
+    const item=node.item; const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex];
+    if(!section)return openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex});
+    node.section=section; title=section.title; desc=item.title; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title},{level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,label:section.title});
+    const st=libraryNodeStats(section);
+    content=`<div class="library-section-detail-head"><span class="library-section-number large">${String(node.sectionIndex+1).padStart(2,'0')}</span><div><span class="tag">SEÇÃO • ${st.total} ${st.total===1?'ITEM':'ITENS'}</span><h3>${escapeHtml(section.title)}</h3></div></div>`;
+    if(section.paragraphs?.length)content+=section.paragraphs.map(p=>`<p class="library-section-paragraph">${escapeHtml(p)}</p>`).join('');
+    if(section.children?.length)content+=`<div class="library-detail-children">${section.children.map((c,i)=>libraryChildCard(c,i)).join('')}</div>`;
+  }else if(node.level==='child'){
+    const item=node.item; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex]; const child=section?.children?.[node.childIndex];
+    if(!section||!child)return openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex});
+    title=child.title; desc=`${item.title} • ${section.title}`; crumbs.push({level:'topic',topicKey:node.topicKey,label:(LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all).label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title},{level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,label:section.title},{level:'child',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,childIndex:node.childIndex,label:child.title});
+    content=`<div class="library-leaf-card"><span class="tag">${child.kind==='item'?'ITEM':'SUBTÓPICO'}</span><h3>${escapeHtml(child.title)}</h3>${child.body?`<div class="library-leaf-body">${escapeHtml(child.body)}</div>`:''}${child.paragraphs?.map(p=>`<p>${escapeHtml(p)}</p>`).join('')||''}</div>`;
+  }
+  const trail=crumbs.map((c,i)=>`<button type="button" class="library-breadcrumb ${i===crumbs.length-1?'current':''}" data-library-crumb='${escapeHtml(JSON.stringify(c))}'>${escapeHtml(c.label)}</button>`).join('<span>›</span>');
+  modal.innerHTML=`<div class="library-explorer-shell" role="dialog" aria-modal="true" aria-labelledby="libraryExplorerTitle">
+    <header class="library-explorer-top"><div><p class="eyebrow">EXPLORADOR DA BIBLIOTECA</p><h2 id="libraryExplorerTitle">${escapeHtml(title)}</h2><p>${escapeHtml(desc)}</p></div><button type="button" class="library-explorer-close" id="libraryExplorerClose" aria-label="Fechar biblioteca">×</button></header>
+    <div class="library-breadcrumbs">${trail}</div>
+    <main class="library-explorer-main">${content}</main>
+    <footer class="library-explorer-footer"><span>Biblioteca de Spade • consulta em camadas</span><button type="button" class="outline small" id="libraryExplorerBack">← Voltar</button></footer>
+  </div>`;
+  qs('#libraryExplorerClose')?.addEventListener('click',closeLibraryExplorer);
+  qsa('[data-library-crumb]').forEach(btn=>btn.addEventListener('click',()=>{const data=JSON.parse(btn.dataset.libraryCrumb||'{}');openLibraryExplorer(data.level==='root'?{level:'root'}:data.level==='topic'?{level:'topic',topicKey:data.topicKey}:data.level==='material'?{level:'material',topicKey:data.topicKey,itemIndex:data.itemIndex}:data.level==='section'?{level:'section',topicKey:data.topicKey,itemIndex:data.itemIndex,sectionIndex:data.sectionIndex}:data); }));
+  qs('#libraryExplorerBack')?.addEventListener('click',()=>{const n=state.libraryExplorer||{level:'root'};if(n.level==='root')return closeLibraryExplorer();if(n.level==='topic')return openLibraryExplorer({level:'root'});if(n.level==='material')return openLibraryExplorer({level:'topic',topicKey:n.topicKey});if(n.level==='section')return openLibraryExplorer({level:'material',topicKey:n.topicKey,itemIndex:n.itemIndex});if(n.level==='child')return openLibraryExplorer({level:'section',topicKey:n.topicKey,itemIndex:n.itemIndex,sectionIndex:n.sectionIndex});});
+  qsa('[data-library-open-topic]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'topic',topicKey:b.dataset.libraryOpenTopic}));
+  qsa('[data-library-material-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:Number(b.dataset.libraryMaterialIndex)}));
+  qsa('[data-library-section-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:Number(b.dataset.librarySectionIndex),item:node.item,outline:node.outline}));
+  qsa('[data-library-child-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'child',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,childIndex:Number(b.dataset.libraryChildIndex),item:node.item,outline:node.outline}));
 }
 function renderLibrary(items,q=""){
-  const el=qs("#libraryGrid"),header=qs("#libraryTopicHeader"); if(!el)return;
-  const topic=currentLibraryTopic(); const list=items||[];
-  if(header){
-    header.innerHTML=`<div class="library-topic-symbol">${topic.icon}</div><div class="library-topic-header-copy"><p class="eyebrow">${q?"RESULTADOS DA PESQUISA":"TÓPICO SELECIONADO"}</p><h2>${escapeHtml(q?`Resultados para “${q}”`:topic.label)}</h2><p>${escapeHtml(q?`Encontramos ${list.length} ${list.length===1?"material":"materiais"} relacionados à sua busca.`:topic.description)}</p></div>`;
+  const el=qs('#libraryGrid'); if(!el)return;
+  const all=items||[]; state.libraryAllItems=all;
+  const query=String(q||'').trim();
+  if(query){
+    const lower=query.toLocaleLowerCase();
+    const results=[];
+    all.forEach((item,idx)=>{
+      const hay=[item.title,item.category,item.description,item.content].join(' ').toLocaleLowerCase();
+      if(hay.includes(lower))results.push({item,idx});
+    });
+    qs('#libraryTopicHint')?.replaceChildren(document.createTextNode(`${results.length} ${results.length===1?'resultado':'resultados'}`));
+    if(!results.length){el.innerHTML=`<div class="library-v3-empty"><span>⌕</span><h3>Nenhum resultado encontrado.</h3><p>Tente termos como “falha”, “paralisia”, “mana”, “barreira”, “cargo” ou “mascote”.</p></div>`;return;}
+    el.innerHTML=`<div class="library-v3-search-results">${results.map((r,i)=>`<button type="button" class="library-v3-result" data-library-search-index="${i}"><span class="library-result-icon">${escapeHtml(r.item.icon||'📚')}</span><span><small>${escapeHtml(r.item.category||'BIBLIOTECA')}</small><b>${escapeHtml(r.item.title)}</b><em>${escapeHtml(r.item.description||'')}</em></span><strong>→</strong></button>`).join('')}</div>`;
+    qsa('[data-library-search-index]').forEach((b,i)=>{const r=results[i];b.onclick=()=>{const key=Object.entries(LIBRARY_TOPICS).find(([_,t])=>t.category===r.item.category)?.[0]||'all';const topicItems=libraryItemsForTopic(state.libraryAllItems,key);const itemIndex=topicItems.findIndex(x=>x.id===r.item.id);openLibraryExplorer({level:key==='all'?'root':'material',topicKey:key,itemIndex:Math.max(itemIndex,0)});};});
+    return;
   }
-  if(!list.length){
-    el.innerHTML=`<div class="library-empty"><div class="library-empty-seal">§</div><h3>${q?"Nenhum resultado encontrado.":"Nenhum material nesta seção."}</h3><p>${q?"Tente outro termo, como “paralisia”, “mana”, “barreira” ou “cargo”.":"Escolha outro tópico acima para continuar explorando o arquivo."}</p></div>`;return;
+  const entries=libraryTopicEntries(all);
+  qs('#libraryTopicHint')?.replaceChildren(document.createTextNode(`${entries.length} áreas do arquivo`));
+  el.innerHTML=`<div class="library-v3-area-grid">${entries.map(libraryTopicCard).join('')}</div>`;
+  qsa('[data-library-open-topic]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'topic',topicKey:b.dataset.libraryOpenTopic}));
+}
+async function loadLibrary(){
+  try{
+    // A Biblioteca é pequena o bastante para carregar o catálogo completo uma vez e
+    // fazer a busca localmente. Assim, ao abrir um resultado, o jogador nunca perde
+    // os irmãos do mesmo tópico ao voltar pela trilha de navegação.
+    const q=qs('#librarySearch')?.value.trim()||'';
+    const d=await api('/api/library');
+    state.libraryItems=d.items||[];
+    state.libraryAllItems=d.items||[];
+    renderLibrary(state.libraryAllItems,q);
+    const clear=qs('#librarySearchClear'); if(clear)clear.hidden=!q;
+  }catch(e){
+    const el=qs('#libraryGrid');
+    if(el)el.innerHTML=`<div class="library-v3-empty"><span>§</span><h3>Não foi possível carregar a Biblioteca.</h3><p>${escapeHtml(e.message)}</p></div>`;
   }
-  el.innerHTML=list.map((x,i)=>`<button type="button" class="library-topic-card" data-library-read-index="${i}"><div class="library-topic-card-top"><span class="library-card-seal">${escapeHtml(x.icon||topic.icon)}</span><span class="tag">${escapeHtml(x.category||"GERAL")}</span></div><div class="library-topic-card-copy"><h3>${escapeHtml(x.title)}</h3><p>${escapeHtml(x.description||"Abra para consultar o conteúdo completo no Portal.")}</p></div><span class="library-open-label">Abrir material <b>→</b></span></button>`).join("");
-  qsa("[data-library-read-index]").forEach(b=>b.onclick=()=>{const x=list[Number(b.dataset.libraryReadIndex)];if(x)openLibraryReader(x);});
 }
-function openLibraryReader(x){
-  let modal=qs("#libraryReaderModal");
-  if(!modal){modal=document.createElement("div");modal.id="libraryReaderModal";modal.className="library-reader-modal";document.body.appendChild(modal);}
-  const reader=buildLibraryReader(x);
-  modal.innerHTML=`<div class="library-reader-shell" role="dialog" aria-modal="true" aria-labelledby="libraryReaderTitle"><div class="library-reader-top"><div><span class="tag">${escapeHtml(x.category||"BIBLIOTECA")}</span><h2 id="libraryReaderTitle">${escapeHtml(x.title)}</h2><p>${escapeHtml(x.description||"")}</p></div><button class="library-reader-close" type="button" id="libraryReaderClose" aria-label="Fechar leitura">×</button></div><div class="library-reader-body"><aside class="library-reader-toc"><div class="library-toc-title">NESTE MATERIAL</div>${reader.toc.length?reader.toc.map((t,i)=>`<a href="#${t.id}" data-library-toc="${t.id}">${String(i+1).padStart(2,"0")} ${escapeHtml(t.title)}</a>`).join(""): '<span class="library-toc-empty">Leitura contínua</span>'}</aside><div class="library-reader-scroll"><div class="library-reader-content">${reader.html}</div>${x.url?`<div class="library-reader-footer"><a class="gold small" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">Abrir material original</a></div>`:""}</div></div></div>`;
-  modal.classList.add("open");document.body.classList.add("library-reader-open");
-  const close=()=>{modal.classList.remove("open");document.body.classList.remove("library-reader-open");};
-  qs("#libraryReaderClose")?.addEventListener("click",close);modal.onclick=e=>{if(e.target===modal)close();};
-  qsa("[data-library-toc]").forEach(a=>a.onclick=e=>{e.preventDefault();const t=qs("#"+a.dataset.libraryToc);t?.scrollIntoView({behavior:"smooth",block:"start"});});
-  setTimeout(()=>qs("#libraryReaderClose")?.focus(),0);
-}
-
 
 async function loadAnnouncements(){
   try{
