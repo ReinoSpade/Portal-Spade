@@ -2933,12 +2933,19 @@ app.delete("/api/admin/articles/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Matéria inválida."});
   try{
-    const r=await pool.query("UPDATE articles SET published=0,updated_at=NOW() WHERE id=$1 RETURNING id",[id]);
-    if(!r.rowCount)return res.status(404).json({error:"Matéria não encontrada."});
-    res.json({ok:true});
+    const exists=await pool.query("SELECT id,title FROM articles WHERE id=$1",[id]);
+    if(!exists.rows[0])return res.status(404).json({error:"Matéria não encontrada."});
+    const client=await pool.connect();
+    try{
+      await client.query("BEGIN");
+      await client.query("DELETE FROM edition_articles WHERE article_id=$1",[id]);
+      await client.query("DELETE FROM articles WHERE id=$1",[id]);
+      await client.query("COMMIT");
+      res.json({ok:true,deleted:true});
+    }catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}
   }catch(e){
     console.error(e);
-    res.status(500).json({error:"Erro ao excluir matéria."});
+    res.status(500).json({error:"Erro ao excluir matéria definitivamente."});
   }
 });
 
