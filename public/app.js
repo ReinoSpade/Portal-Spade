@@ -205,7 +205,7 @@ async function loadHome(){
   try{
     const d=await api("/api/home");let active={activities:[]};try{active=await api("/api/active-activities")}catch(_){/* feed ao vivo indisponível não bloqueia a Home */}state.data=d;state.activeActivities=active.activities||[];renderHomeAnnouncements(d.announcements||[]);renderHomeActiveActivities(state.activeActivities);
     qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
-    const e=d.editions[0];qs("#editionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
+    const e=d.editions[0];qs("#homeEditionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
   }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
 }
 
@@ -1600,7 +1600,7 @@ async function initAdmin(){
     if(hasAdminPermission("admin_users")) await loadAdminUsers();
     if(hasAdminPermission("houses")) await loadAdminHouses();
     if(hasAdminPermission("hierarchy")) await loadAdminHierarchy();
-    if(hasAdminPermission("journal")) await loadAdminEditorial();
+    if(hasAdminPermission("journal")) await loadAdminArticles();
     if(hasAdminPermission("library")) await loadAdminLibrary();
     if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
     if(hasAdminPermission("allies")) await loadAdminAllies();
@@ -2347,6 +2347,15 @@ async function publishAdminResults(){
   try{await adminApi(`/api/admin/events/${id}/results/publish`,{method:"POST"});await loadAdminResults(id);alert("Resultado publicado e premiações aplicadas aos vencedores.")}catch(e){qs("#eventResultError").textContent=e.message}
 }
 
+function activateEditionEditor(){
+  const tab=qsa(".journal-editor-tab").find(x=>x.dataset.editorTab==="edition");
+  if(!tab)return;
+  qsa(".journal-editor-tab").forEach(x=>x.classList.toggle("active",x===tab));
+  qsa("[data-editor-panel]").forEach(x=>x.classList.toggle("active",x.dataset.editorPanel==="edition"));
+  const id=Number(qs("#editorEditionSelect")?.value||state.editorEditionId||0);
+  if(id) loadEditionComposition(id);
+}
+
 async function loadAdminArticles(){
   try{
     const [a,e]=await Promise.all([
@@ -2359,6 +2368,7 @@ async function loadAdminArticles(){
     renderAdminEditions();
     populateEditorEditionSelect();
     if(state.editorEditionId)await loadEditionComposition(state.editorEditionId);
+    if(!qs("#articleId")?.value) activateEditionEditor();
   }catch(e){console.error(e)}
 }
 
@@ -2395,8 +2405,13 @@ function renderAdminArticles(){
 }
 async function deleteArticle(id){
   const a=(state.adminArticles||[]).find(x=>Number(x.id)===id);if(!a)return;
-  if(!confirm(`Excluir a matéria "${a.title}"?`))return;
-  try{await adminApi(`/api/admin/articles/${id}`,{method:"DELETE"});await loadAdminArticles();alert("Matéria excluída.")}catch(e){alert(e.message)}
+  if(!confirm(`Excluir definitivamente a matéria "${a.title}"?\n\nEla será removida do banco de matérias e, se estiver em alguma edição, também será retirada dessas composições.`))return;
+  try{
+    await adminApi(`/api/admin/articles/${id}`,{method:"DELETE"});
+    if(Number(qs("#articleId")?.value||0)===id) resetArticleForm();
+    await loadAdminArticles();
+    alert("Matéria excluída definitivamente.");
+  }catch(e){alert(e.message)}
 }
 
 function populateEditorEditionSelect(){
