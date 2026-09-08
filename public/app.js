@@ -154,7 +154,7 @@ function go(page){
   state.page=page;
   setAmbientTheme(page);
   qsa(".page").forEach(x=>x.classList.toggle("active",x.id===page));
-  qsa("nav button[data-page]").forEach(x=>{
+  qsa("nav button[data-page], .mobile-quick-nav button[data-page]").forEach(x=>{
     const active=x.dataset.page===page;
     x.classList.toggle("active",active);
     if(active) x.setAttribute("aria-current","page"); else x.removeAttribute("aria-current");
@@ -184,6 +184,7 @@ function go(page){
 
 qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
 qs("#hamb").addEventListener("click",()=>qs("#nav").classList.toggle("open"));
+qs("#mobileMenuBtn")?.addEventListener("click",()=>qs("#nav")?.classList.toggle("open"));
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();}});
 
 
@@ -1219,8 +1220,34 @@ function setViewerModeUI(){
   const statusDesc=qs("#status .subhero p:last-child");
   if(statusDesc)statusDesc.textContent=ally?"Acompanhe os Status do Reino. Aliados Ocultos possuem acesso somente para leitura.":state.me?"Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.":"Acompanhe os Status publicados pelos Magos de Spade. Entre no Reino para publicar, reagir e comentar.";
 }
-function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";const g=qs("#grimoireNav");if(g)g.style.display=(state.me?.account_type!=="ALLY"&&String(state.me?.grimoire||"").trim())?"inline-flex":"none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";setViewerModeUI();}
-function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";const g=qs("#grimoireNav");if(g)g.style.display="none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;setViewerModeUI();}
+function updateContextNav(){
+  const logged=!!state.me;
+  const canSeeCards=logged;
+  const canSeeNotifications=logged;
+  const canSeeGrimoire=logged&&state.me?.account_type!=="ALLY"&&String(state.me?.grimoire||"").trim();
+  qsa(".player-only-nav").forEach(el=>{
+    const id=el.id;
+    const visible=id==="cardsNav"?canSeeCards:id==="notificationsNav"?canSeeNotifications:id==="grimoireNav"?canSeeGrimoire:logged;
+    el.classList.toggle("is-visible",!!visible);
+    el.setAttribute("aria-hidden",String(!visible));
+  });
+  const adminNav=qs("#adminNav");
+  if(adminNav) adminNav.classList.toggle("is-visible",true);
+  const login=qs("#loginNav");
+  if(login) login.setAttribute("aria-label",logged?"Abrir meu painel":"Entrar no Reino");
+}
+function setPlayerNav(){
+  const b=qs("#loginNav");
+  b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");
+  const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";
+  updateContextNav();setViewerModeUI();
+}
+function setLoginNav(){
+  const b=qs("#loginNav");
+  b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");
+  const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;
+  updateContextNav();setViewerModeUI();
+}
 
 qs("#loginForm").addEventListener("submit",async e=>{
   e.preventDefault();const err=qs("#loginError");err.textContent="";
@@ -2851,7 +2878,7 @@ async function tryAdminHash(){
   if(state.admin) go("admin"); else go("admin-login");
 }
 
-loadPortalPublicSettings();initGlobalSearch();initGuideNavigation();loadHome();tryMe();setAdminNav();tryAdminHash();
+loadPortalPublicSettings();initGlobalSearch();initGuideNavigation();loadHome();setLoginNav();updateContextNav();tryMe();setAdminNav();tryAdminHash();
 
 
 function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
