@@ -5570,6 +5570,20 @@ app.get(/.*/, (req, res) => {
 });
 
 
+async function ensureScheduleSchema() {
+  // Compatibility migration for all versions that may have created schedule_activities
+  // with a reduced column set. Each ALTER is executed as an individual query before seed.
+  await pool.query(`ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS mission_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS end_date DATE`);
+  await pool.query(`ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS result_text TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS winner_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS cycle_label TEXT DEFAULT ''`);
+  await pool.query(`ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS source_key TEXT`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_schedule_end_date ON schedule_activities(end_date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_schedule_winner ON schedule_activities(winner_player_id)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_source_key ON schedule_activities(source_key) WHERE source_key IS NOT NULL`);
+}
+
 async function seedOfficialCronograma() {
   const activities = [
     // AGOSTO 2026
@@ -5666,22 +5680,31 @@ async function seedOfficialCronograma() {
     {k:'2026-09-30|RANKING|Fim dos Rankings da Arena',t:'Fim dos Rankings da Arena Mágica e Arena Superior — Setembro',type:'RANKING',d:'2026-09-30',desc:'Encerramento do ciclo de setembro dos Rankings da Arena.'}
   ];
 
+  // Reconfirm the schedule schema immediately before seeding. This is intentionally
+  // separate from the large bootstrap query above so existing production tables
+  // from earlier portal versions are migrated before any seed INSERT executes.
+  await ensureScheduleSchema();
+
   const today = new Date(); today.setHours(0,0,0,0);
   for (const a of activities) {
-    const start = new Date(a.d + 'T00:00:00');
-    const end = new Date((a.end || a.d) + 'T23:59:59');
-    const historical = end < today;
+    const endDate = a.end || a.d;
+    const historical = new Date(endDate + 'T23:59:59') < today;
     const status = a.status || (historical ? 'CONCLUIDA' : 'AGENDADA');
     let winnerId = null;
     if (a.winner) {
       const wr = await pool.query(`SELECT id FROM players WHERE lower(nick)=lower($1) ORDER BY id LIMIT 1`, [a.winner]);
       winnerId = wr.rows[0]?.id || null;
     }
+    const params = [a.t,a.type,a.desc,a.d,endDate,null,null,'','',null,null,status,0,1,a.result||'',winnerId,a.cycle||'',a.k];
     await pool.query(`
-      INSERT INTO schedule_activities(title,activity_type,description,activity_date,end_date,start_time,end_time,location,link,event_id,mission_id,status,featured,published,result_text,winner_player_id,cycle_label,source_key)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'','',NULL,NULL,$9,0,1,$10,$11,$12,$13)
+      INSERT INTO schedule_activities(
+        title,activity_type,description,activity_date,end_date,start_time,end_time,
+        location,link,event_id,mission_id,status,featured,published,result_text,
+        winner_player_id,cycle_label,source_key
+      )
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
       ON CONFLICT (source_key) DO NOTHING
-    `,[a.t,a.type,a.desc,a.d,a.end||a.d,null,null,status,a.result||'',winnerId,a.cycle||'',a.k]);
+    `, params);
   }
 
   const champions = [
