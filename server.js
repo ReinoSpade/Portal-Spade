@@ -2074,14 +2074,41 @@ app.get("/api/library", async (req,res)=>{
     const params=[]; const where=['published=1'];
     if(q){params.push(`%${q}%`); where.push(`(title ILIKE $${params.length} OR category ILIKE $${params.length} OR description ILIKE $${params.length} OR content ILIKE $${params.length})`);}
     if(category){params.push(category); where.push(`category=$${params.length}`);}
-    const r=await pool.query(`SELECT id,title,category,description,content,url,icon,sort_order,created_at,updated_at FROM library_items WHERE ${where.join(' AND ')} ORDER BY sort_order ASC,title ASC,id DESC`,params);
+
+    // Guarantee that the official library is available even on an already-existing
+    // PostgreSQL database where the startup seed was skipped during deployment.
+    // The seed function is idempotent and only inserts missing official materials.
+    try{ await seedOfficialLibrary(); }catch(seedErr){ console.warn('Não foi possível sincronizar a Biblioteca oficial:', seedErr.message); }
+
+    let r=await pool.query(`SELECT id,title,category,description,content,url,icon,sort_order,created_at,updated_at FROM library_items WHERE ${where.join(' AND ')} ORDER BY sort_order ASC,title ASC,id DESC`,params);
+
+    // Extra safety net: if the database is reachable but still has no public items,
+    // return the official seed in memory so the public Library never appears empty.
+    if(!r.rows.length){
+      try{
+        const seedPath=path.join(__dirname,'data','library-seed.json');
+        const seeds=JSON.parse(fs.readFileSync(seedPath,'utf8'));
+        const needle=q.toLocaleLowerCase('pt-BR');
+        const items=seeds.filter(x=>{
+          if(x.published===false)return false;
+          if(category && String(x.category||'')!==category)return false;
+          if(!needle)return true;
+          return [x.title,x.category,x.description,x.content].some(v=>String(v||'').toLocaleLowerCase('pt-BR').includes(needle));
+        }).sort((a,b)=>(Number(a.sort_order||0)-Number(b.sort_order||0))||String(a.title).localeCompare(String(b.title),'pt-BR'));
+        return res.json({items:items.map((x,i)=>({...x,id:-1-i,sort_order:Number(x.sort_order||0)}))});
+      }catch(fallbackErr){ console.warn('Fallback da Biblioteca indisponível:', fallbackErr.message); }
+    }
+
     res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0)}))});
   }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca.'});}
 });
 
 app.get("/api/admin/library", requireAdmin, async (req,res)=>{
-  try{const r=await pool.query(`SELECT * FROM library_items ORDER BY sort_order ASC,title ASC,id DESC`);res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0),published:Number(x.published||0)}))});}
-  catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca administrativa.'});}
+  try{
+    try{ await seedOfficialLibrary(); }catch(seedErr){ console.warn('Não foi possível sincronizar a Biblioteca oficial no painel:', seedErr.message); }
+    const r=await pool.query(`SELECT * FROM library_items ORDER BY sort_order ASC,title ASC,id DESC`);
+    res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0),published:Number(x.published||0)}))});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca administrativa.'});}
 });
 app.post("/api/admin/library", requireAdmin, async (req,res)=>{
   const b=req.body||{}; if(!String(b.title||'').trim())return res.status(400).json({error:'Título obrigatório.'});
