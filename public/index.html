@@ -301,16 +301,38 @@
 <section class="page" id="cronograma">
   <div class="subhero">
     <p class="eyebrow">AGENDA OFICIAL</p>
-    <h1>Cronograma do <em>Reino.</em></h1>
-    <p>Acompanhe as atividades, eventos e compromissos oficiais de Spade.</p>
+    <h1>O tempo de <em>Spade.</em></h1>
+    <p>Exames, torneios, missões, eventos, rankings e marcos que formam a agenda do Reino.</p>
   </div>
   <div class="content">
-    <div class="schedule-filter-bar">
-      <input class="search" id="scheduleSearch" placeholder="Pesquisar atividade...">
-      <input class="admin-filter" id="scheduleDateFilter" type="date">
-      <select class="admin-filter" id="scheduleTypeFilter"><option value="">Todos os tipos</option></select>
+    <div class="schedule-intro-grid">
+      <div class="panel schedule-intro-card">
+        <span class="schedule-seal">♠</span>
+        <div><p class="eyebrow">CRONOGRAMA OFICIAL</p><h2>Passado, presente e próximos passos.</h2><p>O calendário reúne os registros históricos de agosto e a programação de setembro de 2026 em uma única linha do tempo.</p></div>
+      </div>
+      <div class="panel schedule-now-card" id="scheduleNowSummary"></div>
     </div>
-    <div id="scheduleGrid" class="schedule-grid"></div>
+    <div class="schedule-toolbar-premium">
+      <div class="schedule-month-controls">
+        <button class="outline dark-outline small" type="button" id="schedulePrevMonth">← Mês anterior</button>
+        <button class="gold small" type="button" id="scheduleTodayBtn">Hoje</button>
+        <button class="outline dark-outline small" type="button" id="scheduleNextMonth">Próximo mês →</button>
+      </div>
+      <h2 id="scheduleMonthLabel">Calendário</h2>
+      <div class="schedule-filter-bar">
+        <input class="search" id="scheduleSearch" placeholder="Pesquisar atividade...">
+        <select class="admin-filter" id="scheduleTypeFilter"><option value="">Todos os tipos</option></select>
+      </div>
+    </div>
+    <div class="schedule-legend" id="scheduleLegend">
+      <span>♍ Missão</span><span>⚜️ Exame Intermediário</span><span>🏵️ Admissão</span><span>🔱 Exame Sênior</span><span>🏆 Torneio</span><span>🕊️ Dia Livre</span><span>🏯 Grimório</span><span>🎉 Evento</span><span>🅾️ Ranking</span><span>⚒️ Forja</span>
+    </div>
+    <div id="scheduleCalendar" class="schedule-calendar"></div>
+    <div class="schedule-day-layout">
+      <div class="panel schedule-day-panel"><div class="panel-head"><div><p class="eyebrow">AGENDA DO DIA</p><h3 id="scheduleSelectedDateLabel">Selecione um dia</h3></div><span id="scheduleSelectedDateCount"></span></div><div id="scheduleDayAgenda"></div></div>
+      <div id="scheduleChampionsPanel" class="panel schedule-champions-panel"></div>
+    </div>
+    <div id="scheduleGrid" hidden></div>
   </div>
 </section><section class="page" id="jogadores"><div class="subhero"><p class="eyebrow">COMUNIDADE</p><h1>Jogadores do <em>Reino.</em></h1><p>Consulte os perfis públicos cadastrados no portal.</p></div><div class="content"><input class="search" id="playerSearch" placeholder="Pesquisar jogador ou Casa"><div id="playerGrid" class="player-grid"></div></div></section>
 <div id="publicPlayerDetail" class="public-player-detail-wrap"></div><section class="page" id="casas">
@@ -706,20 +728,26 @@
     <div id="adminAnnouncementList" class="editorial-list"></div>
   </div>
   <div class="panel admin-schedule-manager">
-    <div class="panel-head"><div><p class="eyebrow">CRONOGRAMA</p><h3>Agenda do Reino</h3></div><span>Cadastre as atividades oficiais</span></div>
+    <div class="panel-head"><div><p class="eyebrow">CRONOGRAMA</p><h3>Agenda do Reino</h3></div><span>Cadastre atividades, períodos, resultados e referências</span></div>
     <form id="scheduleForm" class="admin-form" onsubmit="return false;">
       <input type="hidden" name="id" id="scheduleId">
       <div class="article-form-grid">
         <input name="title" id="scheduleTitle" class="full" placeholder="Nome da atividade" required>
-        <input name="activity_type" id="scheduleType" value="ATIVIDADE" placeholder="Tipo">
+        <select name="activity_type" id="scheduleType">
+          <option value="MISSÃO">♍ Missão</option><option value="EXAME_INTERMEDIARIO">⚜️ Exame Intermediário</option><option value="EXAME_ADMISSAO">🏵️ Exame de Admissão</option><option value="EXAME_SENIOR">🔱 Exame Sênior</option><option value="TORNEIO">🏆 Torneio</option><option value="DIA_LIVRE">🕊️ Dia Livre</option><option value="TORRE_GRIMORIOS">🏯 Torre de Grimórios</option><option value="EVENTO">🎉 Evento</option><option value="RANKING">🅾️ Ranking</option><option value="FORJA">⚒️ Forja</option><option value="ATIVIDADE_ESPECIAL" selected>✦ Atividade Especial</option>
+        </select>
         <select name="status" id="scheduleStatus"><option value="AGENDADA">Agendada</option><option value="EM_ANDAMENTO">Em andamento</option><option value="CONCLUIDA">Concluída</option><option value="CANCELADA">Cancelada</option></select>
-        <input name="activity_date" id="scheduleDate" type="date" required>
-        <input name="start_time" id="scheduleStart" type="time">
-        <input name="end_time" id="scheduleEnd" type="time">
+        <label class="field-label">Data de início<input name="activity_date" id="scheduleDate" type="date" required></label>
+        <label class="field-label">Data de término<input name="end_date" id="scheduleEndDate" type="date"></label>
+        <label class="field-label">Horário de início<input name="start_time" id="scheduleStart" type="time"></label>
+        <label class="field-label">Horário de encerramento<input name="end_time" id="scheduleEnd" type="time"></label>
+        <input name="cycle_label" id="scheduleCycle" placeholder="Ciclo / edição / etapa (opcional)">
         <input name="location" id="scheduleLocation" placeholder="Local / canal">
         <input name="link" id="scheduleLink" class="full" placeholder="Link (opcional)">
         <select name="event_id" id="scheduleEvent"><option value="">Sem evento vinculado</option></select>
         <select name="mission_id" id="scheduleMission"><option value="">Sem missão vinculada</option></select>
+        <select name="winner_player_id" id="scheduleWinner"><option value="">Sem vencedor cadastrado</option></select>
+        <input name="result_text" id="scheduleResult" class="full" placeholder="Resultado / vencedor / marco (opcional)">
         <textarea name="description" id="scheduleDescription" class="full" placeholder="Descrição"></textarea>
       </div>
       <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="scheduleFeatured"> Destacar</label><label><input type="checkbox" id="schedulePublished" checked> Publicar</label></div>
@@ -727,6 +755,16 @@
       <div class="error" id="scheduleError"></div>
     </form>
     <div id="adminScheduleList" class="editorial-list"></div>
+    <div class="schedule-champion-admin">
+      <div class="panel-head"><div><p class="eyebrow">CAMPEÕES DO PERÍODO</p><h3>Registro de conquistas de agenda</h3></div><span>Base para futuros emblemas</span></div>
+      <form id="scheduleChampionForm" class="admin-form" onsubmit="return false;">
+        <input type="hidden" id="scheduleChampionId">
+        <div class="article-form-grid"><input id="scheduleChampionPeriod" type="month" required><select id="scheduleChampionCategory"><option>EVENTO</option><option>TORNEIO</option><option>RANKING</option><option>EXAME</option></select><input id="scheduleChampionTitle" placeholder="Conquista / competição" required><input id="scheduleChampionWinner" placeholder="Vencedor" required><input id="scheduleChampionNote" class="full" placeholder="Observação (opcional)"></div>
+        <div class="editor-actions"><button class="gold" type="submit" id="scheduleChampionSaveBtn">Adicionar campeão</button><button class="outline dark-outline" type="button" id="scheduleChampionCancelBtn">Limpar</button></div>
+        <div class="error" id="scheduleChampionError"></div>
+      </form>
+      <div id="adminScheduleChampionsList" class="editorial-list"></div>
+    </div>
   </div>
 <div class="panel admin-event-manager">
     <div class="panel-head"><div><p class="eyebrow">EVENTOS</p><h3>Gestor de Eventos</h3></div><span>Crie eventos, ações e recompensas</span></div>
@@ -812,7 +850,11 @@
             <input name="author" id="articleAuthor" placeholder="Autor">
             <input name="category" id="articleCategory" value="RPG" placeholder="Categoria">
             <input name="date" id="articleDate" type="date">
-            <input name="image_url" id="articleImage" class="full" placeholder="URL da imagem (opcional)">
+            <div class="media-upload full">
+              <div class="media-upload-line"><input name="image_url" id="articleImage" placeholder="URL da imagem (opcional)"><input id="articleImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><button class="outline dark-outline small" type="button" id="articleImageUploadBtn">⬆ Enviar imagem</button></div>
+              <small>Envie a imagem para o Portal ou cole uma URL. A imagem enviada fica salva no banco.</small>
+              <div id="articleImagePreview" class="media-preview" hidden></div>
+            </div>
             <input name="excerpt" id="articleExcerpt" class="full" placeholder="Resumo / chamada">
             <textarea name="body" id="articleBody" class="full" placeholder="Texto completo da matéria"></textarea>
           </div>
@@ -848,7 +890,11 @@
           <input id="editionTitle" class="full" placeholder="Título da edição" required>
           <input id="editionNumber" placeholder="Identificação (ex.: Edição 01)">
           <input id="editionDate" type="date">
-          <input id="editionCover" class="full" placeholder="URL da capa (opcional)">
+          <div class="media-upload full">
+            <div class="media-upload-line"><input id="editionCover" placeholder="URL da capa (opcional)"><input id="editionCoverFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><button class="outline dark-outline small" type="button" id="editionCoverUploadBtn">⬆ Enviar capa</button></div>
+            <small>Envie a capa para o Portal ou cole uma URL. A imagem enviada fica salva no banco.</small>
+            <div id="editionCoverPreview" class="media-preview" hidden></div>
+          </div>
           <input id="editionPdf" class="full" placeholder="URL do PDF (opcional)">
           <textarea id="editionDescription" class="full" placeholder="Descrição da edição"></textarea>
         </div>
@@ -1013,6 +1059,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=53.2.7"></script>
+<script src="/app.js?v=53.2.9"></script>
 </body>
 </html>
