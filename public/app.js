@@ -271,7 +271,7 @@ function libraryNodeStats(node){
 }
 function libraryBreadcrumbLabel(node){
   if(node?.level==='root')return 'Biblioteca';
-  if(node?.level==='topic')return node.topic.label;
+  if(node?.level==='topic')return (LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all).label;
   if(node?.level==='material')return node.item.title;
   if(node?.level==='section')return node.section.title;
   return node?.item?.title||node?.section?.title||'Consulta';
@@ -348,7 +348,7 @@ function renderLibraryExplorer(){
     const entries=libraryTopicEntries(items);
     content=`<div class="library-explorer-grid">${entries.map(libraryTopicCard).join('')}</div>`;
   }else if(node.level==='topic'){
-    const t=node.topic; const list=libraryItemsForTopic(items,node.topicKey);
+    const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const list=libraryItemsForTopic(items,node.topicKey);
     title=t.label; desc=t.description; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label});
     content=list.length?`<div class="library-explorer-grid materials">${list.map((item,i)=>libraryMaterialCard(item,i)).join('')}</div>`:`<div class="library-explorer-empty">Nenhum material disponível nesta área.</div>`;
   }else if(node.level==='material'){
