@@ -4443,6 +4443,234 @@ async function validateImportRows(rows){
 }
 
 
+
+const BULK_PLAYER_FIELDS = [
+  "id","number","nick","login","house","patent","roles","grimoire","grimoire_level",
+  "hp","mana","yuls","dracmas","exp","missions","achievements","ranking","power",
+  "skill_sc","skill_vt","public_profile","active","card_count","grimoire_pages","created_at","updated_at"
+];
+
+function boolImportValue(v, fallback=1){
+  const n=normalizeImportHeader(v);
+  if(n==="") return fallback;
+  if(["0","nao","não","false","oculto","oculta","inativo","inativa","suspenso","suspensa"].includes(n)) return 0;
+  if(["1","sim","true","publico","publica","ativo","ativa"].includes(n)) return 1;
+  return fallback;
+}
+
+function parsePlayerBulkSheetRows(buffer, filename){
+  const lower=String(filename||"").toLowerCase();
+  const wb=lower.endsWith('.csv')
+    ? XLSX.read(buffer.toString('utf8'),{type:'string',raw:true})
+    : XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true});
+  const first=wb.SheetNames[0];
+  if(!first) throw new Error('A planilha não possui nenhuma aba.');
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[first],{defval:'',raw:false});
+  if(!rows.length) throw new Error('A planilha não possui jogadores.');
+  return rows.map((row,index)=>{
+    const normalized={};
+    for(const [k,v] of Object.entries(row)) normalized[normalizeImportHeader(k)]=v;
+    const get=(...keys)=>{
+      for(const key of keys){
+        const v=normalized[normalizeImportHeader(key)];
+        if(v!==undefined) return String(v).trim();
+      }
+      return '';
+    };
+    return {
+      row:index+2,
+      id:get('id','player id','id jogador'),
+      number:get('number','numero','número','numero interno','número interno'),
+      nick:get('nick','nome','jogador','player'),
+      login:get('login','usuario','usuário','username','identificador','identifier'),
+      house:get('house','casa'),
+      patent:get('patent','patente'),
+      roles:get('roles','cargos','cargo'),
+      grimoire:get('grimoire','grimorio','grimório'),
+      grimoire_level:get('grimoire_level','nivel grimorio','nível grimório','nivel de grimorio','nível de grimório'),
+      hp:get('hp','vida'),mana:get('mana'),yuls:get('yuls','saldo'),dracmas:get('dracmas'),
+      exp:get('exp','experiencia','experiência'),missions:get('missions','missoes','missões'),achievements:get('achievements','conquistas'),
+      ranking:get('ranking','classificacao','classificação'),power:get('power','forca','força'),
+      skill_sc:get('skill_sc','skill sc'),skill_vt:get('skill_vt','skill vt'),
+      public_profile:get('public_profile','perfil publico','perfil público','publico','público'),
+      active:get('active','ativo','acesso ativo','status'),
+      card_count:get('card_count','qtd cards','quantidade de cards'),grimoire_pages:get('grimoire_pages','paginas grimorio','páginas grimório'),
+      created_at:get('created_at','criado em'),updated_at:get('updated_at','atualizado em')
+    };
+  });
+}
+
+function parseRequiredInt(v, field, row){
+  const raw=String(v??'').trim();
+  if(raw==='') throw Object.assign(new Error(`Linha ${row}: ${field} é obrigatório.`),{statusCode:400});
+  const n=Number(raw.replace(/\./g,'').replace(',','.'));
+  if(!Number.isFinite(n)||!Number.isInteger(n)||n<0) throw Object.assign(new Error(`Linha ${row}: ${field} deve ser um número inteiro maior ou igual a zero.`),{statusCode:400});
+  return n;
+}
+
+async function validatePlayerBulkSheetRows(rows){
+  const [houses,patents,roles,existing]=await Promise.all([
+    pool.query(`SELECT name FROM houses ORDER BY name`),
+    pool.query(`SELECT name FROM patents ORDER BY sort_order,name COLLATE "C"`),
+    pool.query(`SELECT id,name,rank_code FROM roles WHERE active=1 ORDER BY sort_order,name COLLATE "C"`),
+    pool.query(`SELECT id,nick,identifier,number,house,patent,role,grimoire,grimoire_level,hp,mana,yuls,dracmas,exp,missions,achievements,ranking,power,skill_sc,skill_vt,public_profile,active FROM players`)
+  ]);
+  const houseMap=new Map(houses.rows.map(x=>[normalizeImportHeader(x.name),x.name]));
+  const patentMap=new Map(patents.rows.map(x=>[normalizeImportHeader(x.name),x.name]));
+  const roleMap=new Map(roles.rows.map(x=>[normalizeImportHeader(x.name),x]));
+  const byId=new Map(existing.rows.map(x=>[String(x.id),x]));
+  const nickMap=new Map(existing.rows.map(x=>[String(x.nick||'').trim().toLowerCase(),Number(x.id)]));
+  const loginMap=new Map(existing.rows.map(x=>[String(x.identifier||'').trim().toLowerCase(),Number(x.id)]));
+  const numberMap=new Map(existing.rows.map(x=>[String(x.number||'').trim(),Number(x.id)]));
+  const clean=[],issues=[];
+  const seenIds=new Set(),seenNick=new Set(),seenLogin=new Set(),seenNumber=new Set();
+
+  for(const r of rows){
+    const out={row:r.row,id:null,number:'',nick:'',login:'',house:'',patent:'',roles:[],role_ids:[],grimoire:'',grimoire_level:1,hp:200,mana:400,yuls:0,dracmas:0,exp:0,missions:0,achievements:0,ranking:0,power:0,skill_sc:0,skill_vt:0,public_profile:1,active:1,errors:[],changes:[]};
+    const add=(field,message)=>{out.errors.push({field,message});issues.push({row:r.row,field,message})};
+    if(!r.id || !/^\d+$/.test(String(r.id))) add('id','ID do jogador é obrigatório e deve ser numérico.');
+    const current=r.id && byId.get(String(r.id));
+    if(!current){add('id',`Jogador com ID ${r.id||'(vazio)'} não foi encontrado.`);} else if(seenIds.has(Number(current.id))) add('id','O mesmo ID aparece mais de uma vez na planilha.');
+    if(current) seenIds.add(Number(current.id));
+    out.id=current?Number(current.id):null;
+
+    if(!r.nick) add('nick','Nick é obrigatório.');
+    if(r.nick){const k=r.nick.toLowerCase();const owner=nickMap.get(k);if((owner && owner!==out.id)||seenNick.has(k))add('nick','Este nick já pertence a outro jogador ou aparece duplicado na planilha.');seenNick.add(k);out.nick=r.nick;}
+    if(!r.login) add('login','Login é obrigatório.');
+    if(r.login){const k=r.login.toLowerCase();const owner=loginMap.get(k);if((owner && owner!==out.id)||seenLogin.has(k))add('login','Este login já pertence a outro jogador ou aparece duplicado na planilha.');if(numberMap.has(k)) { /* no-op: identifiers and nicks may legitimately differ by format */ } seenLogin.add(k);out.login=r.login;}
+    if(!r.number) add('number','Número interno é obrigatório nesta planilha de atualização.');
+    else if(!/^\d+$/.test(String(r.number))) add('number','Número interno deve conter apenas dígitos.');
+    else { const owner=numberMap.get(String(r.number)); if((owner&&owner!==out.id)||seenNumber.has(String(r.number))) add('number','Número interno já pertence a outro jogador ou está duplicado na planilha.'); seenNumber.add(String(r.number)); out.number=String(r.number); }
+
+    if(r.house){const h=houseMap.get(normalizeImportHeader(r.house));if(!h)add('house',`Casa não encontrada: ${r.house}`);else out.house=h;}else out.house='';
+    if(r.patent){const pt=patentMap.get(normalizeImportHeader(r.patent));if(!pt)add('patent',`Patente não encontrada: ${r.patent}`);else out.patent=pt;}else out.patent='Cavaleiro Mágico Junior';
+
+    const roleNames=r.roles?String(r.roles).split(/[|;,]/).map(x=>x.trim()).filter(Boolean):[];
+    const rankSeen=new Set();
+    for(const rn of roleNames){
+      const role=roleMap.get(normalizeImportHeader(rn));
+      if(!role){add('roles',`Cargo não encontrado: ${rn}`);continue;}
+      const rank=String(role.rank_code||'').toUpperCase();
+      if(rank&&rankSeen.has(rank)) add('roles',`Dois cargos do mesmo Rank: ${rank}`);
+      if(rank)rankSeen.add(rank); out.role_ids.push(Number(role.id)); out.roles.push(role.name);
+    }
+
+    const numericFields=[['grimoire_level',1,999],['hp',0,Number.MAX_SAFE_INTEGER],['mana',0,Number.MAX_SAFE_INTEGER],['yuls',0,Number.MAX_SAFE_INTEGER],['dracmas',0,Number.MAX_SAFE_INTEGER],['exp',0,Number.MAX_SAFE_INTEGER],['missions',0,Number.MAX_SAFE_INTEGER],['achievements',0,Number.MAX_SAFE_INTEGER],['ranking',0,Number.MAX_SAFE_INTEGER],['power',0,Number.MAX_SAFE_INTEGER],['skill_sc',0,Number.MAX_SAFE_INTEGER],['skill_vt',0,Number.MAX_SAFE_INTEGER]];
+    for(const [field,min,max] of numericFields){
+      try{out[field]=parseRequiredInt(r[field],field.toUpperCase(),r.row);if(out[field]<min||out[field]>max)throw new Error();}
+      catch(e){add(field,e.message||`Valor inválido em ${field}.`);}
+    }
+    out.grimoire=r.grimoire||'';
+    out.public_profile=boolImportValue(r.public_profile,1);
+    out.active=boolImportValue(r.active,1);
+
+    if(current){
+      const ref={nick:current.nick,number:String(current.number||''),login:current.identifier,house:current.house||'',patent:current.patent||'',roles:[],grimoire:current.grimoire||'',grimoire_level:Number(current.grimoire_level||1),hp:Number(current.hp||0),mana:Number(current.mana||0),yuls:Number(current.yuls||0),dracmas:Number(current.dracmas||0),exp:Number(current.exp||0),missions:Number(current.missions||0),achievements:Number(current.achievements||0),ranking:Number(current.ranking||0),power:Number(current.power||0),skill_sc:Number(current.skill_sc||0),skill_vt:Number(current.skill_vt||0),public_profile:Number(current.public_profile??1),active:Number(current.active??1)};
+      const currentRoles=await pool.query(`SELECT r.name FROM player_roles pr JOIN roles r ON r.id=pr.role_id WHERE pr.player_id=$1 ORDER BY r.sort_order,r.name COLLATE "C"`,[current.id]);
+      ref.roles=currentRoles.rows.map(x=>x.name);
+      const fields=[['nick','Nick'],['number','Número'],['login','Login'],['house','Casa'],['patent','Patente'],['roles','Cargos'],['grimoire','Grimório'],['grimoire_level','Nível Grimório'],['hp','HP'],['mana','Mana'],['yuls','Yuls'],['dracmas','Dracmas'],['exp','EXP'],['missions','Missões'],['achievements','Conquistas'],['ranking','Ranking'],['power','Força'],['skill_sc','Skill SC'],['skill_vt','Skill VT'],['public_profile','Perfil público'],['active','Acesso ativo']];
+      for(const [field,label] of fields){
+        const a=Array.isArray(out[field])?out[field].join(' | '):String(out[field]??'');
+        const b=Array.isArray(ref[field])?ref[field].join(' | '):String(ref[field]??'');
+        if(a!==b)out.changes.push({field,label,before:b,after:a});
+      }
+    }
+    clean.push(out);
+  }
+  return {rows:clean,issues};
+}
+
+app.get("/api/admin/players/export.xlsx", requireAdmin, async (req,res)=>{
+  try{
+    const result=await pool.query(`
+      SELECT p.*, COALESCE(pc.card_count,0)::int AS card_count,
+             COALESCE(gp.grimoire_pages,0)::int AS grimoire_pages,
+             COALESCE(rj.roles,'[]'::json) AS roles
+      FROM players p
+      LEFT JOIN (SELECT player_id,COUNT(*)::int AS card_count FROM player_cards GROUP BY player_id) pc ON pc.player_id=p.id
+      LEFT JOIN (SELECT player_id,COUNT(*)::int AS grimoire_pages FROM grimoire_pages GROUP BY player_id) gp ON gp.player_id=p.id
+      LEFT JOIN (
+        SELECT pr.player_id,json_agg(r.name ORDER BY r.sort_order,r.name COLLATE "C") AS roles
+        FROM player_roles pr JOIN roles r ON r.id=pr.role_id GROUP BY pr.player_id
+      ) rj ON rj.player_id=p.id
+      ORDER BY p.nick COLLATE "C" ASC
+    `);
+    const data=result.rows.map(p=>({
+      ID:Number(p.id),"Número interno":String(p.number||''),Nick:p.nick||'',Login:p.identifier||'',Casa:p.house||'',Patente:p.patent||'',Cargos:(p.roles||[]).join(' | '),
+      Grimório:p.grimoire||'',"Nível Grimório":Number(p.grimoire_level||1),HP:Number(p.hp||0),Mana:Number(p.mana||0),Yuls:Number(p.yuls||0),Dracmas:Number(p.dracmas||0),EXP:Number(p.exp||0),Missões:Number(p.missions||0),Conquistas:Number(p.achievements||0),Ranking:Number(p.ranking||0),Força:Number(p.power||0),"Skill SC":Number(p.skill_sc||0),"Skill VT":Number(p.skill_vt||0),"Perfil público":Number(p.public_profile??1),"Acesso ativo":Number(p.active??1),"Qtd. Cards":Number(p.card_count||0),"Páginas do Grimório":Number(p.grimoire_pages||0),"Criado em":p.created_at?new Date(p.created_at).toISOString():'',"Atualizado em":p.updated_at?new Date(p.updated_at).toISOString():''
+    }));
+    const wb=XLSX.utils.book_new();
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws['!cols']=[{wch:8},{wch:15},{wch:24},{wch:22},{wch:22},{wch:24},{wch:48},{wch:32},{wch:16},{wch:10},{wch:10},{wch:14},{wch:14},{wch:12},{wch:12},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:15},{wch:13},{wch:18},{wch:22},{wch:28}];
+    XLSX.utils.book_append_sheet(wb,ws,'Jogadores');
+    const instructions=XLSX.utils.aoa_to_sheet([
+      ['PORTAL SPADE — ATUALIZAÇÃO EM MASSA DE JOGADORES'],
+      ['Use esta planilha para baixar os dados atuais, fazer alterações e reenviar ao Portal.'],
+      ['ATENÇÃO','Não altere a coluna ID. Ela identifica definitivamente o jogador que será atualizado.'],
+      ['ATENÇÃO','Qtd. Cards, Páginas do Grimório, Criado em e Atualizado em são apenas informativos e serão ignorados na importação.'],
+      ['Cargos','Para vários cargos, use o separador |. O sistema continua respeitando a regra de não acumular dois cargos do mesmo Rank.'],
+      ['Perfil público / Acesso ativo','Use 1 para sim e 0 para não.'],
+      ['Senha','A senha atual nunca é exportada. Para trocar senha em massa, será necessário um campo separado em uma versão específica por segurança.'],
+      ['Aplicação','A importação mostra uma prévia das alterações e só grava depois da confirmação. Nenhuma linha é aplicada parcialmente.'],
+      ['Formato','Aceitos: .xlsx, .xls e .csv. O arquivo deve manter a primeira linha como cabeçalho.']
+    ]);
+    instructions['!cols']=[{wch:28},{wch:105}];
+    XLSX.utils.book_append_sheet(wb,instructions,'Instruções');
+    const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+    res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition','attachment; filename="jogadores-spade-atualizacao.xlsx"');
+    res.send(out);
+  }catch(e){console.error('Export players xlsx error:',e);res.status(500).json({error:'Não foi possível gerar a planilha de jogadores.'});}
+});
+
+app.post("/api/admin/players/bulk-sheet/preview", requireAdmin, importUpload.single("file"), async (req,res)=>{
+  try{
+    if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});
+    const rows=parsePlayerBulkSheetRows(req.file.buffer,req.file.originalname);
+    const checked=await validatePlayerBulkSheetRows(rows);
+    const valid=checked.rows.filter(r=>!r.errors.length).length;
+    res.json({filename:req.file.originalname,total:checked.rows.length,valid,invalid:checked.rows.length-valid,issues:checked.issues,rows:checked.rows});
+  }catch(e){console.error('Bulk sheet preview error:',e);res.status(e.statusCode||400).json({error:e.message||'Não foi possível processar a planilha.'});}
+});
+
+app.post("/api/admin/players/bulk-sheet", requireAdmin, importUpload.single("file"), async (req,res)=>{
+  try{
+    if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});
+    const rows=parsePlayerBulkSheetRows(req.file.buffer,req.file.originalname);
+    const checked=await validatePlayerBulkSheetRows(rows);
+    if(checked.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:checked.issues});
+    const client=await pool.connect();
+    let changedPlayers=0,changedFields=0;
+    try{
+      await client.query('BEGIN');
+      for(const r of checked.rows){
+        const old=(await client.query(`SELECT * FROM players WHERE id=$1 FOR UPDATE`,[r.id])).rows[0];
+        if(!old)throw Object.assign(new Error(`Jogador ${r.id} não foi encontrado durante a gravação.`),{statusCode:400});
+        const deltaYuls=Number(r.yuls)-Number(old.yuls||0);
+        const deltaDracmas=Number(r.dracmas)-Number(old.dracmas||0);
+        await client.query(`UPDATE players SET nick=$1,number=$2,identifier=$3,house=$4,patent=$5,role=$6,grimoire=$7,grimoire_level=$8,hp=$9,mana=$10,yuls=$11,dracmas=$12,exp=$13,missions=$14,achievements=$15,ranking=$16,power=$17,skill_sc=$18,skill_vt=$19,public_profile=$20,active=$21,updated_at=NOW() WHERE id=$22`,[
+          r.nick,r.number,r.login,r.house,r.patent,r.roles[0]||'',r.grimoire,r.grimoire_level,r.hp,r.mana,r.yuls,r.dracmas,r.exp,r.missions,r.achievements,r.ranking,r.power,r.skill_sc,r.skill_vt,r.public_profile,r.active,r.id
+        ]);
+        await client.query('DELETE FROM player_roles WHERE player_id=$1',[r.id]);
+        for(const roleId of r.role_ids) await client.query('INSERT INTO player_roles(player_id,role_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[r.id,roleId]);
+        if(deltaYuls!==0){
+          await client.query(`INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES($1,$2,$3,$4)`,[r.id,deltaYuls,'Atualização em massa por planilha',r.yuls]);
+        }
+        if(Number(r.exp)>Number(old.exp||0)){
+          await client.query(`INSERT INTO exp_history(player_id,amount,source_code,source_detail,reason,exp_before,exp_after,level_before,level_after,upgraded,created_by_admin_id) VALUES($1,$2,'AJUSTE','PLANILHA_EM_MASSA','Atualização em massa por planilha',$3,$4,$5,$6,0,$7)`,[r.id,Number(r.exp)-Number(old.exp||0),Number(old.exp||0),Number(r.exp),Number(old.grimoire_level||1),Number(r.grimoire_level||1),req.admin?.id||null]);
+        }
+        const changed=r.changes.length;
+        if(changed) changedPlayers++; changedFields+=changed;
+        const summary=r.changes.map(x=>`${x.label}: ${x.before} → ${x.after}`).join(' | ');
+        await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'PLANILHA EM MASSA',$2)`,[r.id,changed?`Alterações: ${summary}`:'Linha processada sem alterações.']);
+      }
+      await client.query('COMMIT');
+      res.json({ok:true,changedPlayers,changedFields,total:checked.rows.length});
+    }catch(e){await client.query('ROLLBACK');console.error('Bulk sheet commit error:',e);res.status(e.statusCode||500).json({error:e.message||'Erro ao atualizar os jogadores. Nenhuma alteração foi aplicada.'});}
+    finally{client.release();}
+  }catch(e){console.error('Bulk sheet error:',e);res.status(e.statusCode||400).json({error:e.message||'Não foi possível atualizar os jogadores.'});}
+});
+
 app.post("/api/admin/players/import/preview", requireAdmin, importUpload.single("file"), async (req,res)=>{
   try{
     if(!req.file)return res.status(400).json({error:"Selecione um arquivo."});
