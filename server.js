@@ -3682,7 +3682,7 @@ app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'
           const dup=await client.query(`SELECT id FROM cards WHERE lower(name)=lower($1) LIMIT 1`,[r.name]);
           if(dup.rows[0])throw Object.assign(new Error(`O card "${r.name}" já existe.`),{statusCode:400});
           const ins=await client.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,damage_value,damage_type,origin,status,description,sort_order,active)
-            VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id,name`,[r.name,r.name_jp,r.category,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0]);
+            VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id,name`,[r.name,r.name_jp,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0]);
           created++;
         }else{
           const current=await client.query(`SELECT id,name FROM cards WHERE id=$1 FOR UPDATE`,[r.id]);
