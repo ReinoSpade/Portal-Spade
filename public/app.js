@@ -166,7 +166,7 @@ function go(page){
   if(page==="jornal") loadEditions();
   if(page==="notificacoes") loadNotifications();
   if(page==="comunicados") loadAnnouncements();
-  if(page==="status") { if(state.me) loadStatusBoard(); else { state.page="login"; return go("login"); } }
+  if(page==="status") { loadStatusBoard(); }
   if(page==="eventos") loadEvents();
   if(page==="missoes") loadMissions();
   if(page==="cronograma") loadSchedule();
@@ -368,9 +368,11 @@ function renderStatusBoard(items){
       <div class="status-post-head"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")}${x.patent?` • ${escapeHtml(x.patent)}`:""}</small></div><time>${escapeHtml(statusDateHuman(x.status_date))}</time></div>
       <p>${escapeHtml(x.message)}</p>
       <div class="status-actions">
-        ${state.me?.account_type==="ALLY"
-          ? `<span class="status-readonly">👁️ Somente leitura</span><span>❤️ ${x.reaction_count||0}</span><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 ${x.comment_count||0}</button>`
-          : `<button type="button" class="status-react ${x.reacted?"active":""}" data-status-react="${x.id}">❤️ <span>${x.reaction_count||0}</span></button><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 <span>${x.comment_count||0}</span></button>${x.mine?`<span class="status-own">Seu status</span>`:""}` }
+        ${!state.me
+          ? `<span class="status-readonly">🔒 Entre no Reino para interagir</span><span>❤️ ${x.reaction_count||0}</span><span>💬 ${x.comment_count||0}</span>`
+          : state.me?.account_type==="ALLY"
+            ? `<span class="status-readonly">👁️ Somente leitura</span><span>❤️ ${x.reaction_count||0}</span><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 ${x.comment_count||0}</button>`
+            : `<button type="button" class="status-react ${x.reacted?"active":""}" data-status-react="${x.id}">❤️ <span>${x.reaction_count||0}</span></button><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 <span>${x.comment_count||0}</span></button>${x.mine?`<span class="status-own">Seu status</span>`:""}` }
       </div>
       <div class="status-comments" id="status-comments-${x.id}" hidden></div>
     </div>
@@ -386,44 +388,118 @@ async function toggleStatusComments(id){
   try{const d=await api(`/api/status/${id}/comments`);const comments=(d.comments||[]).map(c=>`<div class="status-comment"><b>${escapeHtml(c.nick)}</b><span>${escapeHtml(c.message)}</span></div>`).join("");const form=state.me?.account_type==="ALLY"?`<div class="status-readonly-note">👁️ Você está acompanhando este mural em modo observador.</div>`:`<form class="status-comment-form" data-comment-form="${id}"><input maxlength="280" placeholder="Comente neste status..."><button class="gold small" type="submit">Enviar</button></form>`;box.innerHTML=comments+form;
   }catch(e){box.innerHTML=`<div class="comments-loading">${escapeHtml(e.message)}</div>`}
 }
+let scheduleMonth = new Date().toISOString().slice(0,7);
+let scheduleSelectedDate = new Date().toISOString().slice(0,10);
+
 async function loadSchedule(){
   try{
     const d=await api("/api/schedule");
     state.schedule=d.activities||[];
     populateScheduleTypeFilter(state.schedule);
+    const nowKey=new Date().toISOString().slice(0,10),nowMonth=nowKey.slice(0,7);
+    const availableMonths=[...new Set(state.schedule.map(x=>String(x.activity_date||'').slice(0,7)).filter(Boolean))];
+    if(!availableMonths.includes(scheduleMonth)) scheduleMonth=availableMonths.includes(nowMonth)?nowMonth:(availableMonths[availableMonths.length-1]||scheduleMonth);
+    scheduleSelectedDate = scheduleMonth===nowMonth?nowKey:scheduleMonth+'-01';
     renderSchedule(state.schedule);
+    await loadScheduleChampions(scheduleMonth);
   }catch(e){
-    const g=qs("#scheduleGrid");if(g)g.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
+    const g=qs("#scheduleCalendar");if(g)g.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
   }
 }
 function scheduleDateLabel(value){
   if(!value)return "";
-  const str=String(value).slice(0,10);
-  const [y,m,d]=str.split("-");
+  const str=String(value).slice(0,10),[y,m,d]=str.split("-");
   return [d,m,y].join("/");
 }
-function renderSchedule(items){
-  const g=qs("#scheduleGrid");if(!g)return;
-  const term=String(qs("#scheduleSearch")?.value||"").toLowerCase().trim();
-  const date=qs("#scheduleDateFilter")?.value||"",type=qs("#scheduleTypeFilter")?.value||"";
-  const filtered=(items||[]).filter(a=>{
-    if(date&&String(a.activity_date).slice(0,10)!==date)return false;
+function scheduleTypeIcon(type){
+  return {"MISSÃO":"♍","EXAME_INTERMEDIARIO":"⚜️","EXAME_ADMISSAO":"🏵️","EXAME_SENIOR":"🔱","TORNEIO":"🏆","DIA_LIVRE":"🕊️","TORRE_GRIMORIOS":"🏯","EVENTO":"🎉","RANKING":"🅾️","FORJA":"⚒️","ATIVIDADE_ESPECIAL":"✦"}[type]||"✦";
+}
+function scheduleTypeLabel(type){
+  return {"MISSÃO":"Missão","EXAME_INTERMEDIARIO":"Exame Intermediário","EXAME_ADMISSAO":"Exame de Admissão","EXAME_SENIOR":"Exame Sênior","TORNEIO":"Torneio","DIA_LIVRE":"Dia Livre","TORRE_GRIMORIOS":"Torre de Grimórios","EVENTO":"Evento","RANKING":"Ranking","FORJA":"Forja","ATIVIDADE_ESPECIAL":"Atividade Especial"}[type]||type||"Atividade";
+}
+function scheduleStatusLabel(a, dayKey=null){
+  const s=String(a.status||'').toUpperCase();
+  const todayKey=new Date().toISOString().slice(0,10);
+  const end=String(a.end_date||a.activity_date||'').slice(0,10),start=String(a.activity_date||'').slice(0,10);
+  if(s==='CANCELADA') return 'Cancelada';
+  if(todayKey<start) return 'Agendada';
+  if(todayKey>end) return 'Concluída';
+  if(s==='EM_ANDAMENTO') return 'Em andamento';
+  if(s==='CONCLUIDA') return 'Concluída';
+  return 'Hoje';
+}
+function scheduleMonthDateKeys(year,monthIndex){
+  const first=new Date(year,monthIndex,1),last=new Date(year,monthIndex+1,0);
+  const mondayStart=(first.getDay()+6)%7, total=last.getDate();
+  const cells=[];
+  for(let i=0;i<mondayStart;i++)cells.push(null);
+  for(let d=1;d<=total;d++)cells.push(new Date(year,monthIndex,d));
+  while(cells.length%7)cells.push(null);
+  return cells;
+}
+function activityTouchesDay(a,key){
+  const start=String(a.activity_date||'').slice(0,10),end=String(a.end_date||a.activity_date||'').slice(0,10);
+  return key>=start&&key<=end;
+}
+function filteredScheduleItems(){
+  const term=String(qs('#scheduleSearch')?.value||'').toLowerCase().trim(),type=qs('#scheduleTypeFilter')?.value||'';
+  return (state.schedule||[]).filter(a=>{
     if(type&&a.activity_type!==type)return false;
-    return !term||`${a.title} ${a.description} ${a.activity_type} ${a.location}`.toLowerCase().includes(term);
+    return !term||`${a.title} ${a.description} ${a.activity_type} ${a.location} ${a.result_text} ${a.cycle_label}`.toLowerCase().includes(term);
   });
-  g.innerHTML=filtered.length?filtered.map(a=>`<article class="schedule-card ${a.featured?"featured":""}">
-    <div class="schedule-date"><b>${escapeHtml(scheduleDateLabel(a.activity_date))}</b><small>${escapeHtml(a.start_time?String(a.start_time).slice(0,5):"")}${a.end_time?` — ${escapeHtml(String(a.end_time).slice(0,5))}`:""}</small></div>
-    <div class="schedule-main"><div class="schedule-card-meta"><span>${escapeHtml(a.activity_type||"ATIVIDADE")}</span><span>${escapeHtml(a.status||"AGENDADA")}</span></div><h3>${escapeHtml(a.title)}</h3><p>${escapeHtml(a.description||"")}</p><small>${escapeHtml(a.location||"")}${a.event_title?` • Evento: ${escapeHtml(a.event_title)}`:""}</small>${a.link?`<a class="schedule-link" href="${escapeHtml(a.link)}" target="_blank" rel="noopener">Abrir link</a>`:""}</div>
-  </article>`).join(""):`<div class="panel"><p>Nenhuma atividade encontrada.</p></div>`;
+}
+function renderSchedule(items){
+  const calendar=qs('#scheduleCalendar'); if(!calendar)return;
+  const [year,month]=scheduleMonth.split('-').map(Number),monthIndex=month-1;
+  const monthName=new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric'}).format(new Date(year,monthIndex,1));
+  qs('#scheduleMonthLabel').textContent=monthName.charAt(0).toUpperCase()+monthName.slice(1);
+  const visible=filteredScheduleItems();
+  const cells=scheduleMonthDateKeys(year,monthIndex);
+  const dayNames=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
+  const todayKey=new Date().toISOString().slice(0,10);
+  const counts={};
+  visible.forEach(a=>{
+    const start=new Date(String(a.activity_date).slice(0,10)+'T00:00:00'),end=new Date(String(a.end_date||a.activity_date).slice(0,10)+'T00:00:00');
+    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){const k=d.toISOString().slice(0,10);counts[k]=(counts[k]||0)+1;}
+  });
+  calendar.innerHTML=`<div class="schedule-calendar-head">${dayNames.map(x=>`<span>${x}</span>`).join('')}</div><div class="schedule-calendar-grid">${cells.map(d=>{
+    if(!d)return `<div class="schedule-day empty"></div>`;
+    const key=d.toISOString().slice(0,10),inMonth=key.slice(0,7)===scheduleMonth,dayItems=visible.filter(a=>activityTouchesDay(a,key));
+    return `<button class="schedule-day ${key===todayKey?'today':''} ${key===scheduleSelectedDate?'selected':''}" type="button" data-schedule-day="${key}">
+      <span class="schedule-day-number">${d.getDate()}</span>
+      <div class="schedule-day-items">${dayItems.slice(0,4).map(a=>`<span class="schedule-day-dot type-${String(a.activity_type||'').replace(/[^A-Za-z0-9]/g,'')}">${scheduleTypeIcon(a.activity_type)} <b>${escapeHtml(a.title)}</b></span>`).join('')}${dayItems.length>4?`<small>+${dayItems.length-4} atividades</small>`:''}</div>
+      ${counts[key]?`<em>${counts[key]}</em>`:''}
+    </button>`;
+  }).join('')}</div>`;
+  qsa('[data-schedule-day]').forEach(b=>b.onclick=()=>{scheduleSelectedDate=b.dataset.scheduleDay;renderSchedule(state.schedule);renderScheduleDay(state.schedule);});
+  renderScheduleDay(items);
+  renderScheduleNow(items);
+}
+function renderScheduleDay(items){
+  const panel=qs('#scheduleDayAgenda'),label=qs('#scheduleSelectedDateLabel'),count=qs('#scheduleSelectedDateCount');if(!panel||!label)return;
+  const list=filteredScheduleItems().filter(a=>activityTouchesDay(a,scheduleSelectedDate));
+  label.textContent=new Intl.DateTimeFormat('pt-BR',{dateStyle:'full'}).format(new Date(scheduleSelectedDate+'T12:00:00'));
+  if(count)count.textContent=`${list.length} ${list.length===1?'atividade':'atividades'}`;
+  panel.innerHTML=list.length?list.map(a=>`<article class="schedule-agenda-card ${scheduleStatusLabel(a)==='Em andamento'?'live':''}">
+    <div class="schedule-agenda-icon">${scheduleTypeIcon(a.activity_type)}</div>
+    <div class="schedule-agenda-main"><div class="schedule-card-meta"><span>${escapeHtml(scheduleTypeLabel(a.activity_type))}</span><span>${escapeHtml(scheduleStatusLabel(a))}</span>${a.cycle_label?`<span>${escapeHtml(a.cycle_label)}</span>`:''}</div><h4>${escapeHtml(a.title)}</h4><p>${escapeHtml(a.description||'')}</p><small>${scheduleDateLabel(a.activity_date)}${a.end_date&&String(a.end_date).slice(0,10)!==String(a.activity_date).slice(0,10)?` → ${scheduleDateLabel(a.end_date)}`:''}${a.location?` • ${escapeHtml(a.location)}`:''}</small>${a.result_text?`<div class="schedule-result"><b>Resultado</b><span>${escapeHtml(a.result_text)}</span></div>`:''}</div>
+  </article>`).join(''):`<div class="schedule-empty"><span>♠</span><div><b>Nenhuma atividade registrada neste dia.</b><p>Escolha outro dia ou altere os filtros.</p></div></div>`;
+}
+function renderScheduleNow(items){
+  const box=qs('#scheduleNowSummary');if(!box)return;
+  const today=new Date().toISOString().slice(0,10),active=(items||[]).filter(a=>activityTouchesDay(a,today)&&['Hoje','Em andamento'].includes(scheduleStatusLabel(a)));
+  const monthTotal=(items||[]).filter(a=>String(a.activity_date).slice(0,7)===scheduleMonth||String(a.end_date||a.activity_date).slice(0,7)===scheduleMonth).length;
+  box.innerHTML=`<p class="eyebrow">VISÃO DO MÊS</p><h3>${monthTotal} atividades registradas</h3><p>${active.length?`Hoje o Reino tem <b>${active.length}</b> atividade(s) em sua agenda.`:'A agenda de hoje não possui atividades marcadas em andamento.'}</p>`;
+}
+async function loadScheduleChampions(period){
+  const el=qs('#scheduleChampionsPanel');if(!el)return;
+  try{const d=await api(`/api/schedule-champions?period=${encodeURIComponent(period)}`);const arr=d.champions||[];el.innerHTML=`<div class="panel-head"><div><p class="eyebrow">🏆 CAMPEÕES DO PERÍODO</p><h3>${period==='2026-08'?'Agosto de 2026':'Destaques registrados'}</h3></div><span>${arr.length} conquistas</span></div>${arr.length?`<div class="champion-collection-grid">${arr.map(c=>`<article class="champion-collectible"><span class="champion-seal">♠</span><div><small>${escapeHtml(c.category)}</small><h4>${escapeHtml(c.title)}</h4><b>🏆 ${escapeHtml(c.winner_nick)}</b><p>${escapeHtml(c.note||'')}</p></div></article>`).join('')}</div>`:`<div class="schedule-empty"><span>🏆</span><div><b>Nenhum campeão registrado neste período.</b><p>Os resultados podem ser adicionados pela Administração.</p></div></div>`}`;}catch(e){el.innerHTML=`<p>${escapeHtml(e.message)}</p>`;}
 }
 function populateScheduleTypeFilter(items){
-  const el=qs("#scheduleTypeFilter");if(!el)return;
-  const types=[...new Set((items||[]).map(x=>x.activity_type).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"pt-BR"));
-  const current=el.value;
-  el.innerHTML=`<option value="">Todos os tipos</option>`+types.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
-  if(types.includes(current))el.value=current;
+  const el=qs('#scheduleTypeFilter');if(!el)return;
+  const types=[...new Set((items||[]).map(x=>x.activity_type).filter(Boolean))].sort((a,b)=>scheduleTypeLabel(a).localeCompare(scheduleTypeLabel(b),'pt-BR'));
+  const current=el.value;el.innerHTML=`<option value="">Todos os tipos</option>`+types.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(scheduleTypeLabel(x))}</option>`).join('');if(types.includes(current))el.value=current;
 }
-
 async function loadMissions(){
   const grid=qs("#missionGrid"),feature=qs("#missionActiveFeature"); if(!grid)return;
   try{
@@ -1141,7 +1217,7 @@ function setViewerModeUI(){
   const eyebrow=qs("#dashboardEyebrow"),desc=qs("#dashboardDescription");
   if(ally){if(eyebrow)eyebrow.textContent="PAINEL DO ALIADO";if(desc)desc.textContent="Acompanhe Spade em modo observador: conteúdo liberado, sem interações.";}
   const statusDesc=qs("#status .subhero p:last-child");
-  if(statusDesc)statusDesc.textContent=ally?"Acompanhe os Status do Reino. Aliados Ocultos possuem acesso somente para leitura.":"Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.";
+  if(statusDesc)statusDesc.textContent=ally?"Acompanhe os Status do Reino. Aliados Ocultos possuem acesso somente para leitura.":state.me?"Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.":"Acompanhe os Status publicados pelos Magos de Spade. Entre no Reino para publicar, reagir e comentar.";
 }
 function setPlayerNav(){const b=qs("#loginNav");b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");const c=qs("#cardsNav");if(c)c.style.display="inline-flex";const g=qs("#grimoireNav");if(g)g.style.display=(state.me?.account_type!=="ALLY"&&String(state.me?.grimoire||"").trim())?"inline-flex":"none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";setViewerModeUI();}
 function setLoginNav(){const b=qs("#loginNav");b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");const c=qs("#cardsNav");if(c)c.style.display="none";const g=qs("#grimoireNav");if(g)g.style.display="none";const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;setViewerModeUI();}
@@ -1367,74 +1443,27 @@ async function confirmPlayerImport(){
 async function loadAdminSchedule(){
   if(!state.admin)return;
   try{
-    const d=await adminApi("/api/admin/schedule");
+    const d=await adminApi('/api/admin/schedule');
     state.adminSchedule=d.activities||[];
-    populateScheduleEventSelect();
-    populateScheduleMissionSelect();
-    renderAdminSchedule();
-  }catch(e){
-    const er=qs("#scheduleError");if(er)er.textContent=e.message;
-  }
+    populateScheduleEventSelect();populateScheduleMissionSelect();populateScheduleWinnerSelect();renderAdminSchedule();
+    await loadAdminScheduleChampions('2026-08');
+  }catch(e){const er=qs('#scheduleError');if(er)er.textContent=e.message;}
 }
-function populateScheduleEventSelect(){
-  const el=qs("#scheduleEvent");if(!el)return;
-  const current=el.value;
-  el.innerHTML=`<option value="">Sem evento vinculado</option>`+(state.adminEvents||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.title)}</option>`).join("");
-  if(current)el.value=current;
+function populateScheduleEventSelect(){const el=qs('#scheduleEvent');if(!el)return;const current=el.value;el.innerHTML=`<option value="">Sem evento vinculado</option>`+(state.adminEvents||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.title)}</option>`).join('');if(current)el.value=current;}
+function populateScheduleMissionSelect(){const el=qs('#scheduleMission');if(!el)return;const current=el.value;el.innerHTML=`<option value="">Sem missão vinculada</option>`+(state.adminMissions||[]).map(m=>`<option value="${m.id}">Missão de ${escapeHtml(m.mission_type||'Missão')} — ${escapeHtml(m.start_at?new Date(m.start_at).toLocaleDateString('pt-BR'):'')}</option>`).join('');if(current)el.value=current;}
+function populateScheduleWinnerSelect(){const el=qs('#scheduleWinner');if(!el)return;const current=el.value;el.innerHTML=`<option value="">Sem vencedor cadastrado</option>`+(state.players||[]).map(p=>`<option value="${p.id}">${escapeHtml(p.nick)}${p.house?` • ${escapeHtml(p.house)}`:''}</option>`).join('');if(current)el.value=current;}
+function resetScheduleForm(){const f=qs('#scheduleForm');if(!f)return;f.reset();qs('#scheduleId').value='';qs('#scheduleType').value='ATIVIDADE_ESPECIAL';qs('#scheduleStatus').value='AGENDADA';qs('#scheduleEndDate').value='';qs('#scheduleFeatured').checked=false;qs('#schedulePublished').checked=true;qs('#scheduleSaveBtn').textContent='Criar atividade';qs('#scheduleError').textContent='';}
+function editAdminSchedule(id){const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;qs('#scheduleId').value=a.id;qs('#scheduleTitle').value=a.title||'';qs('#scheduleType').value=a.activity_type||'ATIVIDADE_ESPECIAL';qs('#scheduleStatus').value=a.status||'AGENDADA';qs('#scheduleDate').value=String(a.activity_date||'').slice(0,10);qs('#scheduleEndDate').value=String(a.end_date||a.activity_date||'').slice(0,10);qs('#scheduleStart').value=a.start_time?String(a.start_time).slice(0,5):'';qs('#scheduleEnd').value=a.end_time?String(a.end_time).slice(0,5):'';qs('#scheduleLocation').value=a.location||'';qs('#scheduleLink').value=a.link||'';qs('#scheduleEvent').value=a.event_id?String(a.event_id):'';qs('#scheduleMission').value=a.mission_id?String(a.mission_id):'';qs('#scheduleWinner').value=a.winner_player_id?String(a.winner_player_id):'';qs('#scheduleResult').value=a.result_text||'';qs('#scheduleCycle').value=a.cycle_label||'';qs('#scheduleDescription').value=a.description||'';qs('#scheduleFeatured').checked=Number(a.featured)===1;qs('#schedulePublished').checked=Number(a.published)===1;qs('#scheduleSaveBtn').textContent='Salvar atividade';qs('#scheduleError').textContent='';qs('#scheduleForm').scrollIntoView({behavior:'smooth',block:'center'});}
+function renderAdminSchedule(){const el=qs('#adminScheduleList');if(!el)return;el.innerHTML=(state.adminSchedule||[]).map(a=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(scheduleTypeLabel(a.activity_type))} • ${escapeHtml(scheduleDateLabel(a.activity_date))}${a.end_date&&String(a.end_date).slice(0,10)!==String(a.activity_date).slice(0,10)?` → ${escapeHtml(scheduleDateLabel(a.end_date))}`:''} • ${escapeHtml(a.status||'AGENDADA')}${Number(a.published)?'':' • Não publicado'}${a.result_text?` • ${escapeHtml(a.result_text)}`:''}</small></div><div class="editorial-actions"><button type="button" data-schedule-edit="${a.id}">✎</button><button type="button" class="delete" data-schedule-delete="${a.id}">×</button></div></div></div>`).join('')||`<div style="font-size:10px;color:#888">Nenhuma atividade cadastrada.</div>`;qsa('[data-schedule-edit]').forEach(b=>b.onclick=()=>editAdminSchedule(Number(b.dataset.scheduleEdit)));qsa('[data-schedule-delete]').forEach(b=>b.onclick=()=>deleteAdminSchedule(Number(b.dataset.scheduleDelete)));}
+async function deleteAdminSchedule(id){const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;if(!confirm(`Excluir "${a.title}" do cronograma?`))return;try{await adminApi(`/api/admin/schedule/${id}`,{method:'DELETE'});await loadAdminSchedule();await loadSchedule();alert('Atividade excluída.');}catch(e){qs('#scheduleError').textContent=e.message;}}
+async function loadAdminScheduleChampions(period){
+  const list=qs('#adminScheduleChampionsList');if(!list)return;
+  try{const d=await adminApi(`/api/admin/schedule-champions?period=${encodeURIComponent(period)}`);state.adminScheduleChampions=d.champions||[];renderAdminScheduleChampions();}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}
 }
-function populateScheduleMissionSelect(){
-  const el=qs("#scheduleMission");if(!el)return;
-  const current=el.value;
-  el.innerHTML=`<option value="">Sem missão vinculada</option>`+(state.adminMissions||[]).map(m=>`<option value="${m.id}">Missão de ${escapeHtml(m.mission_type||"Missão")} — ${escapeHtml(m.start_at?new Date(m.start_at).toLocaleDateString("pt-BR"):"")}</option>`).join("");
-  if(current)el.value=current;
-}
-function resetScheduleForm(){
-  const f=qs("#scheduleForm");if(!f)return;
-  f.reset();
-  qs("#scheduleId").value="";
-  qs("#scheduleType").value="ATIVIDADE";
-  qs("#scheduleStatus").value="AGENDADA";
-  qs("#scheduleFeatured").checked=false;
-  qs("#schedulePublished").checked=true;
-  qs("#scheduleSaveBtn").textContent="Criar atividade";
-  qs("#scheduleError").textContent="";
-}
-function editAdminSchedule(id){
-  const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;
-  qs("#scheduleId").value=a.id;qs("#scheduleTitle").value=a.title||"";
-  qs("#scheduleType").value=a.activity_type||"ATIVIDADE";qs("#scheduleStatus").value=a.status||"AGENDADA";
-  qs("#scheduleDate").value=String(a.activity_date||"").slice(0,10);
-  qs("#scheduleStart").value=a.start_time?String(a.start_time).slice(0,5):"";
-  qs("#scheduleEnd").value=a.end_time?String(a.end_time).slice(0,5):"";
-  qs("#scheduleLocation").value=a.location||"";qs("#scheduleLink").value=a.link||"";
-  qs("#scheduleEvent").value=a.event_id?String(a.event_id):"";qs("#scheduleMission").value=a.mission_id?String(a.mission_id):"";
-  qs("#scheduleDescription").value=a.description||"";
-  qs("#scheduleFeatured").checked=Number(a.featured)===1;
-  qs("#schedulePublished").checked=Number(a.published)===1;
-  qs("#scheduleSaveBtn").textContent="Salvar atividade";
-  qs("#scheduleError").textContent="";
-  qs("#scheduleForm").scrollIntoView({behavior:"smooth",block:"center"});
-}
-function renderAdminSchedule(){
-  const el=qs("#adminScheduleList");if(!el)return;
-  el.innerHTML=(state.adminSchedule||[]).map(a=>`<div class="editorial-item">
-    <div class="editorial-item-head">
-      <div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.activity_type||"ATIVIDADE")} • ${escapeHtml(scheduleDateLabel(a.activity_date))}${a.start_time?` • ${escapeHtml(String(a.start_time).slice(0,5))}`:""} • ${escapeHtml(a.status||"AGENDADA")}${Number(a.published)?"" :" • Não publicado"}</small></div>
-      <div class="editorial-actions"><button type="button" data-schedule-edit="${a.id}">✎</button><button type="button" class="delete" data-schedule-delete="${a.id}">×</button></div>
-    </div>
-  </div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma atividade cadastrada.</div>`;
-  qsa("[data-schedule-edit]").forEach(b=>b.onclick=()=>editAdminSchedule(Number(b.dataset.scheduleEdit)));
-  qsa("[data-schedule-delete]").forEach(b=>b.onclick=()=>deleteAdminSchedule(Number(b.dataset.scheduleDelete)));
-}
-async function deleteAdminSchedule(id){
-  const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;
-  if(!confirm(`Excluir "${a.title}" do cronograma?`))return;
-  try{
-    await adminApi(`/api/admin/schedule/${id}`,{method:"DELETE"});
-    await loadAdminSchedule();await loadSchedule();alert("Atividade excluída.");
-  }catch(e){qs("#scheduleError").textContent=e.message}
-}
-
+function renderAdminScheduleChampions(){const list=qs('#adminScheduleChampionsList');if(!list)return;list.innerHTML=(state.adminScheduleChampions||[]).map(c=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>🏆 ${escapeHtml(c.winner_nick)} — ${escapeHtml(c.title)}</b><small>${escapeHtml(c.period_key)} • ${escapeHtml(c.category)}${c.note?` • ${escapeHtml(c.note)}`:''}</small></div><div class="editorial-actions"><button type="button" data-schedule-champion-edit="${c.id}">✎</button><button type="button" class="delete" data-schedule-champion-delete="${c.id}">×</button></div></div></div>`).join('')||`<div style="font-size:10px;color:#888">Nenhum campeão cadastrado.</div>`;qsa('[data-schedule-champion-edit]').forEach(b=>b.onclick=()=>editScheduleChampion(Number(b.dataset.scheduleChampionEdit)));qsa('[data-schedule-champion-delete]').forEach(b=>b.onclick=()=>deleteScheduleChampion(Number(b.dataset.scheduleChampionDelete)));}
+function resetScheduleChampionForm(){qs('#scheduleChampionForm')?.reset();qs('#scheduleChampionId').value='';qs('#scheduleChampionSaveBtn').textContent='Adicionar campeão';qs('#scheduleChampionError').textContent='';}
+function editScheduleChampion(id){const c=(state.adminScheduleChampions||[]).find(x=>Number(x.id)===id);if(!c)return;qs('#scheduleChampionId').value=c.id;qs('#scheduleChampionPeriod').value=c.period_key;qs('#scheduleChampionCategory').value=c.category;qs('#scheduleChampionTitle').value=c.title;qs('#scheduleChampionWinner').value=c.winner_nick;qs('#scheduleChampionNote').value=c.note||'';qs('#scheduleChampionSaveBtn').textContent='Salvar campeão';qs('#scheduleChampionError').textContent='Editando registro.';}
+async function deleteScheduleChampion(id){if(!confirm('Excluir este registro de campeão?'))return;try{await adminApi(`/api/admin/schedule-champions/${id}`,{method:'DELETE'});await loadAdminScheduleChampions(qs('#scheduleChampionPeriod')?.value||'2026-08');await loadScheduleChampions(scheduleMonth);}catch(e){qs('#scheduleChampionError').textContent=e.message;}}
 async function loadAdminMissions(){
   const list=qs("#adminMissionList");if(!list)return;
   try{const d=await adminApi("/api/admin/missions");state.adminMissions=d.missions||[];renderAdminMissions();}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
@@ -1595,6 +1624,7 @@ async function initAdmin(){
     if(hasAdminPermission("cards")) await loadAdminCards();
     if(hasAdminPermission("economy")){ populateEconomyPlayers(); await loadAdminEconomy(); }
     if(hasAdminPermission("notifications")){ populateNotificationPlayers(); await loadAdminNotifications(); }
+    if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
     if(hasAdminPermission("schedule")) await loadAdminSchedule();
     if(hasAdminPermission("missions")) await loadAdminMissions();
     if(hasAdminPermission("admin_users")) await loadAdminUsers();
@@ -1602,7 +1632,6 @@ async function initAdmin(){
     if(hasAdminPermission("hierarchy")) await loadAdminHierarchy();
     if(hasAdminPermission("journal")) await loadAdminArticles();
     if(hasAdminPermission("library")) await loadAdminLibrary();
-    if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
     if(hasAdminPermission("allies")) await loadAdminAllies();
     if(hasAdminPermission("audit")) await loadAdminAudit();
   }catch(e){console.error(e)}
@@ -2378,6 +2407,7 @@ function resetArticleForm(){
   qs("#articleId").value="";
   qs("#articleCategory").value="RPG";
   qs("#articleDate").value=new Date().toISOString().slice(0,10);
+  if(qs("#articleImageFile"))qs("#articleImageFile").value="";refreshMediaPreview("articleImage","articleImagePreview");
   qs("#articlePublished").checked=true;
   qs("#articleSaveBtn").textContent="Criar matéria";
   qs("#articleError").textContent="";
@@ -2386,7 +2416,7 @@ function editArticle(id){
   const a=(state.adminArticles||[]).find(x=>Number(x.id)===id);if(!a)return;
   qs("#articleId").value=a.id;qs("#articleTitle").value=a.title;qs("#articleSubtitle").value=a.subtitle||"";
   qs("#articleAuthor").value=a.author||"";qs("#articleCategory").value=a.category||"RPG";
-  qs("#articleDate").value=String(a.date||"").slice(0,10);qs("#articleImage").value=a.image_url||"";
+  qs("#articleDate").value=String(a.date||"").slice(0,10);qs("#articleImage").value=a.image_url||"";if(qs("#articleImageFile"))qs("#articleImageFile").value="";refreshMediaPreview("articleImage","articleImagePreview");
   qs("#articleExcerpt").value=a.excerpt||"";qs("#articleBody").value=a.body||"";
   qs("#articlePublished").checked=!!a.published;
   qs("#articleSaveBtn").textContent="Salvar matéria";qs("#articleError").textContent="";
@@ -2558,6 +2588,28 @@ function renderAdminLibrary(){const el=qs("#adminLibraryList");if(!el)return;el.
 function editAdminLibrary(id){const x=state.adminLibrary.find(i=>Number(i.id)===id);if(!x)return;qs("#adminLibraryId").value=x.id;qs("#adminLibraryTitle").value=x.title||"";qs("#adminLibraryCategory").value=x.category||"";qs("#adminLibraryIcon").value=x.icon||"📚";qs("#adminLibraryOrder").value=x.sort_order||0;qs("#adminLibraryUrl").value=x.url||"";qs("#adminLibraryDescription").value=x.description||"";qs("#adminLibraryContent").value=x.content||"";qs("#adminLibraryPublished").checked=Number(x.published)===1;}
 async function deleteAdminLibrary(id){if(!confirm("Arquivar este material?"))return;try{await adminApi(`/api/admin/library/${id}`,{method:"DELETE"});await loadAdminLibrary();await loadLibrary();}catch(e){alert(e.message)}}
 
+async function uploadMediaFromInput(inputId,targetId,previewId,buttonId){
+  const input=qs("#"+inputId),target=qs("#"+targetId),preview=qs("#"+previewId),button=qs("#"+buttonId);
+  if(!input||!target||!button)return;
+  const file=input.files?.[0];
+  if(!file){alert("Selecione uma imagem primeiro.");return;}
+  button.disabled=true;const old=button.textContent;button.textContent="Enviando...";
+  try{
+    const fd=new FormData();fd.append("file",file);
+    const d=await adminApi("/api/admin/media",{method:"POST",body:fd});
+    target.value=d.url||"";
+    if(preview){preview.innerHTML=`<img src="${escapeHtml(d.url)}" alt="Prévia da imagem">`;preview.hidden=false;}
+    input.value="";
+  }catch(e){alert(e.message)}
+  finally{button.disabled=false;button.textContent=old;}
+}
+function refreshMediaPreview(targetId,previewId){
+  const target=qs("#"+targetId),preview=qs("#"+previewId);if(!target||!preview)return;
+  const v=target.value.trim();
+  if(v){preview.innerHTML=`<img src="${escapeHtml(v)}" alt="Prévia da imagem" onerror="this.closest('.media-preview').hidden=true">`;preview.hidden=false;}
+  else {preview.innerHTML="";preview.hidden=true;}
+}
+
 async function loadAdminEditorial(){
   try{
     const [n,e]=await Promise.all([adminApi("/api/admin/news"),adminApi("/api/admin/editions")]);
@@ -2590,25 +2642,17 @@ qs("#librarySearch")?.addEventListener("input",()=>loadLibrary());
 qs("#libraryCategory")?.addEventListener("change",()=>loadLibrary());
 qs("#adminLibraryClear")?.addEventListener("click",clearAdminLibraryForm);
 qs("#adminLibraryForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminLibraryId").value;const body={title:qs("#adminLibraryTitle").value,category:qs("#adminLibraryCategory").value,icon:qs("#adminLibraryIcon").value,sort_order:Number(qs("#adminLibraryOrder").value||0),url:qs("#adminLibraryUrl").value,description:qs("#adminLibraryDescription").value,content:qs("#adminLibraryContent").value,published:qs("#adminLibraryPublished").checked};try{await adminApi(id?`/api/admin/library/${id}`:"/api/admin/library",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminLibraryForm();await loadAdminLibrary();await loadLibrary();alert(id?"Material atualizado.":"Material cadastrado.")}catch(ex){qs("#adminLibraryError").textContent=ex.message}});
-qs("#scheduleSearch")?.addEventListener("input",()=>renderSchedule(state.schedule));
-qs("#scheduleDateFilter")?.addEventListener("change",()=>renderSchedule(state.schedule));
-qs("#scheduleTypeFilter")?.addEventListener("change",()=>renderSchedule(state.schedule));
-qs("#scheduleForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  b.featured=qs("#scheduleFeatured").checked?1:0;
-  b.published=qs("#schedulePublished").checked?1:0;
-  b.event_id=qs("#scheduleEvent").value||null;b.mission_id=qs("#scheduleMission").value||null;
-  try{
-    if(b.id)await adminApi(`/api/admin/schedule/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    else await adminApi("/api/admin/schedule",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    resetScheduleForm();
-    await loadAdminSchedule();
-    await loadSchedule();
-    alert("Cronograma salvo com sucesso.");
-  }catch(ex){qs("#scheduleError").textContent=ex.message}
-});
-qs("#scheduleCancelBtn").addEventListener("click",resetScheduleForm);
+qs('#scheduleSearch')?.addEventListener('input',()=>{renderSchedule(state.schedule);});
+qs('#scheduleTypeFilter')?.addEventListener('change',()=>{renderSchedule(state.schedule);});
+qs('#schedulePrevMonth')?.addEventListener('click',()=>{const d=new Date(scheduleMonth+'-01T12:00:00');d.setMonth(d.getMonth()-1);scheduleMonth=d.toISOString().slice(0,7);scheduleSelectedDate=scheduleMonth+'-01';renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
+qs('#scheduleNextMonth')?.addEventListener('click',()=>{const d=new Date(scheduleMonth+'-01T12:00:00');d.setMonth(d.getMonth()+1);scheduleMonth=d.toISOString().slice(0,7);scheduleSelectedDate=scheduleMonth+'-01';renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
+qs('#scheduleTodayBtn')?.addEventListener('click',()=>{scheduleMonth=new Date().toISOString().slice(0,7);scheduleSelectedDate=new Date().toISOString().slice(0,10);renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
+qs('#scheduleForm')?.addEventListener('submit',async e=>{e.preventDefault();const err=qs('#scheduleError');err.textContent='';const body={title:qs('#scheduleTitle').value,activity_type:qs('#scheduleType').value,status:qs('#scheduleStatus').value,activity_date:qs('#scheduleDate').value,end_date:qs('#scheduleEndDate').value||qs('#scheduleDate').value,start_time:qs('#scheduleStart').value,end_time:qs('#scheduleEnd').value,cycle_label:qs('#scheduleCycle').value,location:qs('#scheduleLocation').value,link:qs('#scheduleLink').value,event_id:qs('#scheduleEvent').value||null,mission_id:qs('#scheduleMission').value||null,winner_player_id:qs('#scheduleWinner').value||null,result_text:qs('#scheduleResult').value,description:qs('#scheduleDescription').value,featured:qs('#scheduleFeatured').checked?1:0,published:qs('#schedulePublished').checked?1:0};const id=qs('#scheduleId').value;try{await adminApi(id?`/api/admin/schedule/${id}`:'/api/admin/schedule',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetScheduleForm();await loadAdminSchedule();await loadSchedule();alert(id?'Atividade atualizada.':'Atividade criada.');}catch(ex){err.textContent=ex.message}});
+qs('#scheduleCancelBtn')?.addEventListener('click',resetScheduleForm);
+qs('#scheduleChampionForm')?.addEventListener('submit',async e=>{e.preventDefault();const err=qs('#scheduleChampionError');err.textContent='';const body={period_key:qs('#scheduleChampionPeriod').value,category:qs('#scheduleChampionCategory').value,title:qs('#scheduleChampionTitle').value,winner_nick:qs('#scheduleChampionWinner').value,note:qs('#scheduleChampionNote').value};const id=qs('#scheduleChampionId').value;try{await adminApi(id?`/api/admin/schedule-champions/${id}`:'/api/admin/schedule-champions',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const period=body.period_key;resetScheduleChampionForm();await loadAdminScheduleChampions(period);await loadScheduleChampions(period);alert(id?'Campeão atualizado.':'Campeão adicionado.');}catch(ex){err.textContent=ex.message}});
+qs('#scheduleChampionCancelBtn')?.addEventListener('click',resetScheduleChampionForm);
+qs('#scheduleChampionPeriod')?.addEventListener('change',()=>loadAdminScheduleChampions(qs('#scheduleChampionPeriod').value||'2026-08'));
+
 qs("#eventAdminForm").addEventListener("submit",async e=>{
   e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
   b.featured=qs("#eventFeatured").checked?1:0;b.published=qs("#eventPublished").checked?1:0;
@@ -2677,7 +2721,7 @@ function updateEditionEditorHeader(editing=false){
 }
 function resetEditionForm(){
   const f=qs("#editionForm");if(!f)return;f.reset();
-  qs("#editionId").value="";qs("#editionDate").value=new Date().toISOString().slice(0,10);
+  qs("#editionId").value="";qs("#editionDate").value=new Date().toISOString().slice(0,10);if(qs("#editionCoverFile"))qs("#editionCoverFile").value="";refreshMediaPreview("editionCover","editionCoverPreview");
   qs("#editionPublished").checked=false;qs("#editionError").textContent="";
   const sel=qs("#editorEditionSelect");if(sel&&state.adminEditions?.[0])sel.value=String(state.adminEditions[0].id);
   updateEditionEditorHeader(false);
@@ -2686,7 +2730,7 @@ function resetEditionForm(){
 async function editEdition(id){
   const e=(state.adminEditions||[]).find(x=>Number(x.id)===id);if(!e)return;
   qs("#editionId").value=e.id;qs("#editionTitle").value=e.title||"";qs("#editionNumber").value=e.edition||"";
-  qs("#editionDate").value=String(e.date||"").slice(0,10);qs("#editionCover").value=e.cover_url||"";qs("#editionPdf").value=e.pdf_url||"";
+  qs("#editionDate").value=String(e.date||"").slice(0,10);qs("#editionCover").value=e.cover_url||"";if(qs("#editionCoverFile"))qs("#editionCoverFile").value="";refreshMediaPreview("editionCover","editionCoverPreview");qs("#editionPdf").value=e.pdf_url||"";
   qs("#editionDescription").value=e.description||"";qs("#editionPublished").checked=!!e.published;qs("#editionError").textContent="";
   const sel=qs("#editorEditionSelect");if(sel)sel.value=String(e.id);
   state.editorEditionId=Number(e.id);
@@ -2710,6 +2754,11 @@ function renderAdminEditions(){
   qsa("[data-edition-compose]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionCompose)));
   qsa("[data-edition-delete]").forEach(b=>b.onclick=async()=>{if(!confirm("Arquivar esta edição? O histórico será preservado."))return;try{await adminApi(`/api/admin/editions/${b.dataset.editionDelete}`,{method:"DELETE"});await loadAdminArticles();alert("Edição arquivada.")}catch(e){alert(e.message)}});
 }
+
+qs("#articleImageUploadBtn")?.addEventListener("click",()=>uploadMediaFromInput("articleImageFile","articleImage","articleImagePreview","articleImageUploadBtn"));
+qs("#editionCoverUploadBtn")?.addEventListener("click",()=>uploadMediaFromInput("editionCoverFile","editionCover","editionCoverPreview","editionCoverUploadBtn"));
+qs("#articleImage")?.addEventListener("input",()=>refreshMediaPreview("articleImage","articleImagePreview"));
+qs("#editionCover")?.addEventListener("input",()=>refreshMediaPreview("editionCover","editionCoverPreview"));
 
 qs("#articleForm").addEventListener("submit",async e=>{
   e.preventDefault();
