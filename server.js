@@ -104,6 +104,7 @@ function adminActionPermissionForRequest(req) {
   const path = rawPath.startsWith("/api/admin") ? (rawPath.slice("/api/admin".length) || "/") : rawPath;
   const method = String(req.method || "GET").toUpperCase();
 
+  if (path === "/cards/distribution-targets") return "cards_assign";
   // Leitura não exige permissão de ação adicional.
   if (method === "GET" || path === "/me") return null;
 
@@ -3664,6 +3665,45 @@ app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   }finally{client.release();}
 });
 
+app.post("/api/admin/cards/bulk-action", requireAdmin, async (req,res)=>{
+  const body=req.body||{};
+  const cardIds=[...new Set((Array.isArray(body.card_ids)?body.card_ids:[]).map(Number).filter(x=>Number.isInteger(x)&&x>0))];
+  const action=String(body.action||'').trim().toUpperCase();
+  if(!cardIds.length)return res.status(400).json({error:'Selecione pelo menos um Card.'});
+  if(!['ATIVAR','INATIVAR','CATEGORIA'].includes(action))return res.status(400).json({error:'Ação em massa inválida.'});
+  let category=String(body.category||'').trim();
+  if(action==='CATEGORIA'&&!category)return res.status(400).json({error:'Informe a nova categoria.'});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const cards=await client.query('SELECT id,name,COALESCE(category,type) AS category,active FROM cards WHERE id=ANY($1::bigint[]) FOR UPDATE',[cardIds]);
+    if(cards.rows.length!==cardIds.length){
+      const found=new Set(cards.rows.map(x=>Number(x.id)));
+      const missing=cardIds.filter(id=>!found.has(id));
+      await client.query('ROLLBACK');
+      return res.status(404).json({error:`Card(s) não encontrado(s): ${missing.join(', ')}`});
+    }
+    if(action==='CATEGORIA'){
+      const ok=await client.query('SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1',[category]);
+      if(!ok.rowCount){await client.query('ROLLBACK');return res.status(400).json({error:'Categoria inválida ou inativa.'});}
+      const r=await client.query('UPDATE cards SET category=$1,type=$1,updated_at=NOW() WHERE id=ANY($2::bigint[]) RETURNING id,name',[category,cardIds]);
+      await client.query('COMMIT');
+      return res.json({ok:true,action,updated:r.rows.length,cards:r.rows.map(x=>({id:Number(x.id),name:x.name}))});
+    }
+    const active=action==='ATIVAR'?1:0,status=active?'ATIVO':'INATIVO';
+    const r=await client.query('UPDATE cards SET active=$1,status=$2,updated_at=NOW() WHERE id=ANY($3::bigint[]) RETURNING id,name',[active,status,cardIds]);
+    await client.query('COMMIT');
+    res.json({ok:true,action,updated:r.rows.length,cards:r.rows.map(x=>({id:Number(x.id),name:x.name}))});
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(500).json({error:'Erro ao executar ação em massa nos Cards.'});}finally{client.release();}
+});
+
+app.get("/api/admin/cards/distribution-targets", requireAdmin, async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT id,nick,number,house,patent,active FROM players WHERE active=1 ORDER BY house COLLATE "C",nick COLLATE "C",id`);
+    res.json({players:r.rows.map(p=>({id:Number(p.id),nick:p.nick||'',number:String(p.number||''),house:p.house||'',patent:p.patent||'',active:Number(p.active??1)}))});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar os jogadores para distribuição.'});}
+});
+
 app.delete("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
@@ -3917,14 +3957,22 @@ async function validateCardLibraryLinksSheet(rows){
 
 app.get('/api/admin/cards/export.xlsx', requireAdmin, async (req,res)=>{
   try{
+    const rawIds=String(req.query.ids||'').split(',').map(v=>Number(v)).filter(v=>Number.isInteger(v)&&v>0);
+    const hasFilter=rawIds.length>0;
     const [cardsR,playersR,linksR,libraryLinksR]=await Promise.all([
-      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.origin,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players,c.created_at,c.updated_at
-                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id GROUP BY c.id ORDER BY c.id ASC`),
+      pool.query(hasFilter?`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.origin,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players,c.created_at,c.updated_at
+                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id WHERE c.id=ANY($1::bigint[]) GROUP BY c.id ORDER BY c.id ASC`:
+                 `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.origin,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players,c.created_at,c.updated_at
+                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id GROUP BY c.id ORDER BY c.id ASC`, hasFilter?[rawIds]:[]),
       pool.query(`SELECT id,nick,number,house,patent,active FROM players ORDER BY nick COLLATE "C" ASC`),
-      pool.query(`SELECT pc.player_id,pc.card_id,p.nick,p.number,p.house,c.name,c.name_pt,COALESCE(c.category,c.type) AS category,pc.acquisition_type,pc.acquisition_name
-                  FROM player_cards pc JOIN players p ON p.id=pc.player_id JOIN cards c ON c.id=pc.card_id ORDER BY p.nick COLLATE "C",c.id ASC`),
-      pool.query(`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label,cl.sort_order,c.name,c.name_pt
-                  FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id JOIN cards c ON c.id=cl.card_id ORDER BY cl.card_id,cl.sort_order,cl.id`)
+      pool.query(hasFilter?`SELECT pc.player_id,pc.card_id,p.nick,p.number,p.house,c.name,c.name_pt,COALESCE(c.category,c.type) AS category,pc.acquisition_type,pc.acquisition_name
+                  FROM player_cards pc JOIN players p ON p.id=pc.player_id JOIN cards c ON c.id=pc.card_id WHERE c.id=ANY($1::bigint[]) ORDER BY p.nick COLLATE "C",c.id ASC`:
+                 `SELECT pc.player_id,pc.card_id,p.nick,p.number,p.house,c.name,c.name_pt,COALESCE(c.category,c.type) AS category,pc.acquisition_type,pc.acquisition_name
+                  FROM player_cards pc JOIN players p ON p.id=pc.player_id JOIN cards c ON c.id=pc.card_id ORDER BY p.nick COLLATE "C",c.id ASC`, hasFilter?[rawIds]:[]),
+      pool.query(hasFilter?`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label,cl.sort_order,c.name,c.name_pt
+                  FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id JOIN cards c ON c.id=cl.card_id WHERE c.id=ANY($1::bigint[]) ORDER BY cl.card_id,cl.sort_order,cl.id`:
+                 `SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label,cl.sort_order,c.name,c.name_pt
+                  FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id JOIN cards c ON c.id=cl.card_id ORDER BY cl.card_id,cl.sort_order,cl.id`, hasFilter?[rawIds]:[])
     ]);
     const wb=XLSX.utils.book_new();
     const cardData=cardsR.rows.map(c=>({
@@ -5878,9 +5926,9 @@ async function refreshPlayerCardPower(client, playerId){
 
 app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
   const body=req.body||{};
-  const playerIds=[...new Set((Array.isArray(body.player_ids)?body.player_ids:[])
-    .map(Number).filter(x=>Number.isInteger(x)&&x>0))];
+  const playerIds=[...new Set((Array.isArray(body.player_ids)?body.player_ids:[]).map(Number).filter(x=>Number.isInteger(x)&&x>0))];
   const cardId=Number(body.card_id);
+  const mode=String(body.mode||"add").trim().toLowerCase();
   const acquisitionType=String(body.acquisition_type||"OUTRO").trim().toUpperCase();
   const acquisitionName=String(body.acquisition_name||"").trim();
   const acquisitionId=(body.acquisition_id!==undefined&&body.acquisition_id!=="")?Number(body.acquisition_id):null;
@@ -5888,21 +5936,18 @@ app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
 
   if(!playerIds.length)return res.status(400).json({error:"Selecione pelo menos um jogador."});
   if(!Number.isInteger(cardId)||cardId<=0)return res.status(400).json({error:"Selecione um card."});
-  if(!validTypes.includes(acquisitionType))return res.status(400).json({error:"Origem inválida."});
-  if(!acquisitionName && !acquisitionId)return res.status(400).json({error:"Informe a origem do card."});
+  if(!["add","remove"].includes(mode))return res.status(400).json({error:"Modo inválido."});
+  if(mode==="add" && !validTypes.includes(acquisitionType))return res.status(400).json({error:"Origem inválida."});
+  if(mode==="add" && !acquisitionName && !acquisitionId)return res.status(400).json({error:"Informe a origem do card."});
 
   const client=await pool.connect();
   try{
     await client.query("BEGIN");
-    const cr=await client.query(
-      "SELECT id,name,COALESCE(category,type) AS category,active FROM cards WHERE id=$1 FOR UPDATE",[cardId]
-    );
+    const cr=await client.query("SELECT id,name,COALESCE(category,type) AS category,active FROM cards WHERE id=$1 FOR UPDATE",[cardId]);
     if(!cr.rows[0]){await client.query("ROLLBACK");return res.status(404).json({error:"Card não encontrado."});}
-    if(!Number(cr.rows[0].active)){await client.query("ROLLBACK");return res.status(400).json({error:"Este card está desativado."});}
+    if(mode==="add" && !Number(cr.rows[0].active)){await client.query("ROLLBACK");return res.status(400).json({error:"Este card está desativado."});}
 
-    const prs=await client.query(
-      `SELECT id,nick,house FROM players WHERE id=ANY($1::bigint[]) ORDER BY nick COLLATE "C"`,[playerIds]
-    );
+    const prs=await client.query(`SELECT id,nick,house FROM players WHERE id=ANY($1::bigint[]) ORDER BY nick COLLATE "C"`,[playerIds]);
     if(prs.rows.length!==playerIds.length){
       const found=new Set(prs.rows.map(x=>Number(x.id)));
       const missing=playerIds.filter(id=>!found.has(id));
@@ -5910,64 +5955,37 @@ app.post("/api/admin/cards/distribute", requireAdmin, async (req,res)=>{
       return res.status(404).json({error:`Jogador(es) não encontrado(s): ${missing.join(", ")}`});
     }
 
-    const added=[],skipped=[];
+    const changed=[],skipped=[];
     for(const pr of prs.rows){
-      const existing=await client.query(
-        "SELECT 1 FROM player_cards WHERE player_id=$1 AND card_id=$2",[pr.id,cardId]
-      );
-      if(existing.rows[0]){
-        skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"Já possui este card."});
-        continue;
-      }
-
-      let resolvedName=acquisitionName;
-      let resolvedId=acquisitionId;
-
-      if(acquisitionType==="MISSAO" && resolvedId){
-        const mr=await client.query(
-          "SELECT id,title FROM missions WHERE id=$1 AND player_id=$2",[resolvedId,pr.id]
-        );
-        if(!mr.rows[0]){
-          skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"A missão informada não pertence a este jogador."});
-          continue;
+      const existing=await client.query("SELECT 1 FROM player_cards WHERE player_id=$1 AND card_id=$2 FOR UPDATE",[pr.id,cardId]);
+      if(mode==="add"){
+        if(existing.rows[0]){skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"Já possui este card."});continue;}
+        let resolvedName=acquisitionName, resolvedId=acquisitionId;
+        if(acquisitionType==="MISSAO" && resolvedId){
+          const mr=await client.query("SELECT id,title FROM missions WHERE id=$1 AND player_id=$2",[resolvedId,pr.id]);
+          if(!mr.rows[0]){skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"A missão informada não pertence a este jogador."});continue;}
+          resolvedName=mr.rows[0].title;
         }
-        resolvedName=mr.rows[0].title;
+        if(!resolvedName)resolvedName="Distribuição administrativa em massa";
+        await client.query(`INSERT INTO player_cards(player_id,card_id,quantity,acquisition_type,acquisition_id,acquisition_name,acquired_at,updated_at) VALUES($1,$2,1,$3,$4,$5,NOW(),NOW())`,[pr.id,cardId,acquisitionType,resolvedId,resolvedName]);
+        await client.query(`INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes) VALUES($1,$2,'ADQUIRIDO',$3,$4,$5,$6)`,[pr.id,cardId,acquisitionType,resolvedId,resolvedName,"Card distribuído pela administração em massa."]);
+        await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'CARDS',$2)`,[pr.id,`Card adquirido: ${cr.rows[0].name} • origem ${acquisitionType}${resolvedName?` — ${resolvedName}`:""}. Distribuição em massa.`]);
+        changed.push({player_id:Number(pr.id),nick:pr.nick});
+      }else{
+        if(!existing.rows[0]){skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"Não possui este card."});continue;}
+        const owned=await client.query(`SELECT acquisition_type,acquisition_id,acquisition_name FROM player_cards WHERE player_id=$1 AND card_id=$2`,[pr.id,cardId]);
+        const ownedRow=owned.rows[0]||{};
+        await client.query("DELETE FROM player_cards WHERE player_id=$1 AND card_id=$2",[pr.id,cardId]);
+        await client.query(`INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes) VALUES($1,$2,'REMOVIDO',COALESCE($3,'OUTRO'),$4,COALESCE($5,''),$6)`,[pr.id,cardId,ownedRow.acquisition_type||'OUTRO',ownedRow.acquisition_id||null,ownedRow.acquisition_name||'',"Card removido pela administração em massa."]);
+        await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'CARDS',$2)`,[pr.id,`Card removido: ${cr.rows[0].name}. Remoção em massa.`]);
+        changed.push({player_id:Number(pr.id),nick:pr.nick});
       }
-      if(!resolvedName){
-        skipped.push({player_id:Number(pr.id),nick:pr.nick,reason:"Origem não informada."});
-        continue;
-      }
-
-      await client.query(
-        `INSERT INTO player_cards(player_id,card_id,quantity,acquisition_type,acquisition_id,acquisition_name,acquired_at,updated_at)
-         VALUES($1,$2,1,$3,$4,$5,NOW(),NOW())`,
-        [pr.id,cardId,acquisitionType,resolvedId,resolvedName]
-      );
-      await client.query(
-        `INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes)
-         VALUES($1,$2,'ADQUIRIDO',$3,$4,$5,$6)`,
-        [pr.id,cardId,acquisitionType,resolvedId,resolvedName,"Card distribuído pela administração em massa."]
-      );
-      await client.query(
-        `INSERT INTO player_admin_history(player_id,action,description)
-         VALUES($1,'CARDS',$2)`,
-        [pr.id,`Card adquirido: ${cr.rows[0].name} • origem ${acquisitionType}${resolvedName?` — ${resolvedName}`:""}. Distribuição em massa.`]
-      );
-      added.push({player_id:Number(pr.id),nick:pr.nick});
     }
-
-    for(const pr of prs.rows){ await refreshPlayerCardPower(client, pr.id); }
+    for(const pr of prs.rows){await refreshPlayerCardPower(client,pr.id);}
     await client.query("COMMIT");
-    res.json({
-      ok:true,
-      card:{id:Number(cr.rows[0].id),name:cr.rows[0].name,category:cr.rows[0].category||"Outros"},
-      added,skipped,total:playerIds.length
-    });
-  }catch(e){
-    await client.query("ROLLBACK");
-    console.error(e);
-    res.status(500).json({error:"Erro ao distribuir o card."});
-  }finally{client.release();}
+    res.json({ok:true,mode,card:{id:Number(cr.rows[0].id),name:cr.rows[0].name,category:cr.rows[0].category||"Outros"},changed,skipped,total:playerIds.length});
+  }catch(e){await client.query("ROLLBACK").catch(()=>{});console.error(e);res.status(500).json({error:"Erro ao alterar a posse do card."});}
+  finally{client.release();}
 });
 
 const GRIMOIRE_EXP_THRESHOLDS={1:120,2:200,3:300,4:450,5:500,6:650,7:700};
