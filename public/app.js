@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardDetail:null};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardDetail:null,cardLibraryManager:{cardId:null,links:[],materials:[]}};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -331,6 +331,26 @@ function libraryChildCard(child,index){
     <i>→</i>
   </button>`;
 }
+function libraryRelatedCardsForNode(item,node){
+  const links=Array.isArray(item?.related_cards)?item.related_cards:[];
+  if(!links.length)return [];
+  if(node?.level==='material')return links;
+  if(node?.level==='section'){
+    const sectionTitle=String(node.section?.title||'').trim();
+    return links.filter(x=>String(x.section_title||'').trim()===sectionTitle);
+  }
+  if(node?.level==='child'){
+    const sectionTitle=String(node.section?.title||'').trim();
+    const childTitle=String(node.node?.title||node.child?.title||'').trim();
+    return links.filter(x=>String(x.section_title||'').trim()===sectionTitle&&String(x.child_title||'').trim()===childTitle);
+  }
+  return [];
+}
+function libraryRelatedCardsBlock(item,node){
+  const cards=libraryRelatedCardsForNode(item,node);
+  if(!cards.length)return '';
+  return `<section class="library-related-cards"><div class="library-related-cards-head"><div><p class="eyebrow">CARDS RELACIONADOS</p><h3>Cards desta regra</h3></div><strong>${cards.length}</strong></div><div class="library-related-card-list">${cards.map(c=>`<button type="button" class="library-related-card" data-library-card-id="${Number(c.card_id)}"><span>🃏</span><span><b>#${Number(c.card_id)} • ${escapeHtml(c.name_pt||c.name||'Card')}</b><small>${escapeHtml(c.category||'Outros')}${c.path_label?` • ${escapeHtml(c.path_label)}`:''}</small></span><i>→</i></button>`).join('')}</div></section>`;
+}
 function libraryRenderDetail(node){
   const body=[];
   if(node.item?.description) body.push(`<p class="library-detail-lead">${escapeHtml(node.item.description)}</p>`);
@@ -360,19 +380,23 @@ function renderLibraryExplorer(){
     content=`<div class="library-explorer-intro"><div class="library-explorer-intro-icon">${escapeHtml(item.icon||'📚')}</div><div><span class="tag">${escapeHtml(item.category||'BIBLIOTECA')}</span><h3>Mapa do material</h3><p>${escapeHtml(item.description||'Use as seções abaixo para aprofundar a leitura.')}</p></div></div>`+
       (sections.length?`<div class="library-explorer-list">${sections.map(librarySectionCard).join('')}</div>`:`<div class="library-detail-full">${buildLibraryReader(item).html}</div>`);
     if(node.outline.intro?.length) content+=`<div class="library-material-intro-copy">${node.outline.intro.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</div>`;
+    content+=libraryRelatedCardsBlock(item,node);
   }else if(node.level==='section'){
-    const item=node.item; const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex];
+    const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const topicItems=libraryItemsForTopic(items,node.topicKey); const item=node.item||topicItems[node.itemIndex]; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex];
     if(!section)return openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex});
     node.section=section; title=section.title; desc=item.title; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title},{level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,label:section.title});
     const st=libraryNodeStats(section);
     content=`<div class="library-section-detail-head"><span class="library-section-number large">${String(node.sectionIndex+1).padStart(2,'0')}</span><div><span class="tag">SEÇÃO • ${st.total} ${st.total===1?'ITEM':'ITENS'}</span><h3>${escapeHtml(section.title)}</h3></div></div>`;
     if(section.paragraphs?.length)content+=section.paragraphs.map(p=>`<p class="library-section-paragraph">${escapeHtml(p)}</p>`).join('');
     if(section.children?.length)content+=`<div class="library-detail-children">${section.children.map((c,i)=>libraryChildCard(c,i)).join('')}</div>`;
+    content+=libraryRelatedCardsBlock(item,node);
   }else if(node.level==='child'){
-    const item=node.item; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex]; const child=section?.children?.[node.childIndex];
+    const topicItems=libraryItemsForTopic(items,node.topicKey); const item=node.item||topicItems[node.itemIndex]; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex]; const child=section?.children?.[node.childIndex];
     if(!section||!child)return openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex});
+    node.section=section; node.node=child;
     title=child.title; desc=`${item.title} • ${section.title}`; crumbs.push({level:'topic',topicKey:node.topicKey,label:(LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all).label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title},{level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,label:section.title},{level:'child',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,childIndex:node.childIndex,label:child.title});
     content=`<div class="library-leaf-card"><span class="tag">${child.kind==='item'?'ITEM':'SUBTÓPICO'}</span><h3>${escapeHtml(child.title)}</h3>${child.body?`<div class="library-leaf-body">${escapeHtml(child.body)}</div>`:''}${child.paragraphs?.map(p=>`<p>${escapeHtml(p)}</p>`).join('')||''}</div>`;
+    content+=libraryRelatedCardsBlock(item,node);
   }
   const trail=crumbs.map((c,i)=>`<button type="button" class="library-breadcrumb ${i===crumbs.length-1?'current':''}" data-library-crumb='${escapeHtml(JSON.stringify(c))}'>${escapeHtml(c.label)}</button>`).join('<span>›</span>');
   modal.innerHTML=`<div class="library-explorer-shell" role="dialog" aria-modal="true" aria-labelledby="libraryExplorerTitle">
@@ -388,6 +412,7 @@ function renderLibraryExplorer(){
   qsa('[data-library-material-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:Number(b.dataset.libraryMaterialIndex)}));
   qsa('[data-library-section-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:Number(b.dataset.librarySectionIndex),item:node.item,outline:node.outline}));
   qsa('[data-library-child-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'child',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,childIndex:Number(b.dataset.libraryChildIndex),item:node.item,outline:node.outline}));
+  qsa('[data-library-card-id]').forEach(b=>b.onclick=()=>openCardDetailModal(Number(b.dataset.libraryCardId),false));
 }
 function renderLibrary(items,q=""){
   const el=qs('#libraryGrid'); if(!el)return;
@@ -2644,29 +2669,139 @@ function renderAdminCardCatalog(){
     if(!term)return true;
     return `${c.id} ${c.name_pt||c.name} ${c.name_jp||""} ${c.category||""} ${c.origin||""} ${c.element||""} ${c.description||""}`.toLowerCase().includes(term);
   });
-  list.innerHTML=cards.map(c=>`<div class="card-catalog-item"><div class="card-catalog-main"><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-view="${c.id}">👁</button><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card corresponde aos filtros.</div>`;
+  const canLink=hasAdminPermission('cards_write');
+  list.innerHTML=cards.map(c=>`<div class="card-catalog-item"><div class="card-catalog-main"><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${Number(c.library_links||0)?` • 📚 ${Number(c.library_links)} regra(s)`:''}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-view="${c.id}">👁</button><button type="button" data-card-edit="${c.id}">✎</button>${canLink?`<button type="button" title="Vincular à Biblioteca" data-card-library="${c.id}">📚</button>`:""}<button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card corresponde aos filtros.</div>`;
   qsa("[data-card-view]").forEach(b=>b.onclick=()=>openCardDetailModal(Number(b.dataset.cardView),true));
-  qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
+  qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));
+  qsa("[data-card-library]").forEach(b=>b.onclick=()=>openCardLibraryManager(Number(b.dataset.cardLibrary)));
+  qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
 }
 
 function cardDetailMetaLabel(type){return ({MANA:"♦️ Mana",VIDA:"❤️ Vida",SEM_CUSTO:"Sem custo"})[type]||type||"Sem custo";}
 function cardDetailDamageLabel(c){const t=String(c.damage_type||"SEM_DANO");return t==="SEM_DANO"?"Sem dano":`${Number(c.damage_value||0)} • ${t.replaceAll('_',' ')}`;}
 function renderCardDetailBody(data,isAdmin){
   const c=data.card||data;
-  const holderRows=isAdmin?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">POSSE DO CARD</p><h3>Jogadores</h3></div><strong>${Number(data.players?.length||0)}</strong></div>${data.players?.length?`<div class="card-holder-list">${data.players.map(p=>`<div class="card-holder-row"><div><b>${escapeHtml(p.nick)}</b><small>#${Number(p.id)} • ${escapeHtml(p.house||"Sem Casa")}${p.patent?` • ${escapeHtml(p.patent)}`:""}</small></div><span>${Number(p.quantity||1)} un.</span></div>`).join("")}</div>`:`<div class="card-detail-empty">Nenhum jogador possui este Card.</div>`}</section><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">ALIADOS</p><h3>Contas de aliado</h3></div><strong>${Number(data.allies?.length||0)}</strong></div>${data.allies?.length?`<div class="card-holder-list">${data.allies.map(a=>`<div class="card-holder-row"><div><b>${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)}</small></div><span>Aliado</span></div>`).join("")}</div>`:`<div class="card-detail-empty">Nenhum aliado possui este Card.</div>`}</section>`:"";
-  return `<div class="card-detail-hero"><div class="card-detail-icon">${c.element_type==="ELEMENTAL"?escapeHtml(c.element||"✦"):"✦"}</div><div><div class="card-detail-tags"><span>${escapeHtml(c.category||"Outros")}</span><span>${c.element_type==="ELEMENTAL"?"ELEMENTAL":"NÃO ELEMENTAL"}</span><span>${escapeHtml(c.status||"ATIVO")}</span></div><h3>${escapeHtml(c.name_pt||c.name)}</h3>${c.name_jp?`<p>${escapeHtml(c.name_jp)}</p>`:""}</div></div><div class="card-detail-stats"><div><small>Nº interno</small><b>#${Number(c.id)}</b></div><div><small>Custo</small><b>${escapeHtml(c.cost||"—")}</b><span>${escapeHtml(cardDetailMetaLabel(c.cost_type))}</span></div><div><small>Poder</small><b>${Number(c.power_value||0)}</b></div><div><small>Dano</small><b>${escapeHtml(cardDetailDamageLabel(c))}</b></div><div><small>Origem</small><b>${escapeHtml(c.origin||"Exclusivo")}</b></div></div><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">DESCRIÇÃO</p><h3>Efeito do Card</h3></div></div><div class="card-detail-description">${escapeHtml(c.description||"Descrição não cadastrada.").replace(/\n/g,"<br>")}</div></section>${holderRows}`;
+  const links=data.library_links||c.library_links||[];
+  const linkSection=links.length?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">📚 BIBLIOTECA</p><h3>Regras relacionadas</h3></div><strong>${links.length}</strong></div><div class="card-library-link-list">${links.map(l=>`<button type="button" class="card-library-link" data-card-library-open="${Number(l.library_item_id)}" data-card-library-section="${escapeHtml(l.section_title||'')}" data-card-library-child="${escapeHtml(l.child_title||'')}"><span>📖</span><span><b>${escapeHtml(l.library_title||'Material da Biblioteca')}</b><small>${escapeHtml(l.path_label||[l.section_title,l.child_title].filter(Boolean).join(' › ')||'Abrir material')}</small></span><i>→</i></button>`).join('')}</div>${isAdmin&&hasAdminPermission('cards_write')?`<div class="editor-actions" style="margin-top:10px"><button type="button" class="outline dark-outline small" data-card-library-manage="${Number(c.id)}">⚙ Gerenciar vínculos</button></div>`:''}</section>`:`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">📚 BIBLIOTECA</p><h3>Regras relacionadas</h3></div></div><div class="card-detail-empty">Este Card ainda não possui uma regra da Biblioteca vinculada.</div>${isAdmin&&hasAdminPermission('cards_write')?`<div class="editor-actions" style="margin-top:10px"><button type="button" class="outline dark-outline small" data-card-library-manage="${Number(c.id)}">＋ Vincular à Biblioteca</button></div>`:''}</section>`;
+  const holderRows=isAdmin?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">POSSE DO CARD</p><h3>Jogadores</h3></div><strong>${Number(data.players?.length||0)}</strong></div>${data.players?.length?`<div class="card-holder-list">${data.players.map(p=>`<div class="card-holder-row"><div><b>${escapeHtml(p.nick)}</b><small>#${Number(p.id)} • ${escapeHtml(p.house||"Sem Casa")}${p.patent?` • ${escapeHtml(p.patent)}`:""}</small></div><span>${Number(p.quantity||1)} un.</span></div>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum jogador possui este Card.</div>`}</section><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">ALIADOS</p><h3>Contas de aliado</h3></div><strong>${Number(data.allies?.length||0)}</strong></div>${data.allies?.length?`<div class="card-holder-list">${data.allies.map(a=>`<div class="card-holder-row"><div><b>${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)}</small></div><span>Aliado</span></div>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum aliado possui este Card.</div>`}</section>`:"";
+  return `<div class="card-detail-hero"><div class="card-detail-icon">${c.element_type==="ELEMENTAL"?escapeHtml(c.element||"✦"):"✦"}</div><div><div class="card-detail-tags"><span>${escapeHtml(c.category||"Outros")}</span><span>${c.element_type==="ELEMENTAL"?"ELEMENTAL":"NÃO ELEMENTAL"}</span><span>${escapeHtml(c.status||"ATIVO")}</span></div><h3>${escapeHtml(c.name_pt||c.name)}</h3>${c.name_jp?`<p>${escapeHtml(c.name_jp)}</p>`:""}</div></div><div class="card-detail-stats"><div><small>Nº interno</small><b>#${Number(c.id)}</b></div><div><small>Custo</small><b>${escapeHtml(c.cost||"—")}</b><span>${escapeHtml(cardDetailMetaLabel(c.cost_type))}</span></div><div><small>Poder</small><b>${Number(c.power_value||0)}</b></div><div><small>Dano</small><b>${escapeHtml(cardDetailDamageLabel(c))}</b></div><div><small>Origem</small><b>${escapeHtml(c.origin||"Exclusivo")}</b></div></div><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">DESCRIÇÃO</p><h3>Efeito do Card</h3></div></div><div class="card-detail-description">${escapeHtml(c.description||"Descrição não cadastrada.").replace(/\n/g,"<br>")}</div></section>${linkSection}${holderRows}`;
+}
+function bindCardDetailLibraryButtons(){
+  qsa('[data-card-library-open]').forEach(b=>b.onclick=()=>openLibraryFromCard({library_item_id:Number(b.dataset.cardLibraryOpen),section_title:b.dataset.cardLibrarySection||'',child_title:b.dataset.cardLibraryChild||''}));
+  qsa('[data-card-library-manage]').forEach(b=>b.onclick=()=>openCardLibraryManager(Number(b.dataset.cardLibraryManage)));
 }
 async function openCardDetailModal(id,isAdmin=true){
   const modal=qs("#cardDetailModal");if(!modal)return;
-  const local=(state.adminCards||[]).find(c=>Number(c.id)===Number(id)) || (state.playerCards||[]).find(c=>Number(c.id)===Number(id));
+  let local=(state.adminCards||[]).find(c=>Number(c.id)===Number(id)) || (state.playerCards||[]).find(c=>Number(c.id)===Number(id));
+  if(!local && !isAdmin){
+    try{const d=await api(`/api/cards/${Number(id)}`);local=d.card;}
+    catch(e){alert(e.message||"Não foi possível carregar o Card.");return;}
+  }
   if(!local)return;
   modal.hidden=false;modal.classList.add("open");document.body.classList.add("card-detail-open");
-  qs("#cardDetailTitle").textContent=`#${Number(local.id)} • ${local.name_pt||local.name}`;qs("#cardDetailSubtitle").textContent=isAdmin?"Catálogo oficial e possuidores do Card.":"Detalhes do Card no seu inventário.";qs("#cardDetailBody").innerHTML=renderCardDetailBody({card:local,players:[],allies:[]},false);
+  qs("#cardDetailTitle").textContent=`#${Number(local.id)} • ${local.name_pt||local.name}`;qs("#cardDetailSubtitle").textContent=isAdmin?"Catálogo oficial e possuidores do Card.":"Detalhes do Card.";qs("#cardDetailBody").innerHTML=renderCardDetailBody({card:local,players:[],allies:[]},false);bindCardDetailLibraryButtons();
   if(isAdmin){
-    try{const d=await adminApi(`/api/admin/cards/${Number(id)}/details`);state.cardDetail=d;qs("#cardDetailBody").innerHTML=renderCardDetailBody(d,true);qs("#cardDetailSubtitle").textContent=`${Number(d.holders_total||0)} conta(s) possuem este Card.`;}catch(e){qs("#cardDetailBody").innerHTML=`<div class="card-detail-empty">${escapeHtml(e.message||"Não foi possível carregar os possuidores do Card.")}</div>`;}
+    try{const d=await adminApi(`/api/admin/cards/${Number(id)}/details`);state.cardDetail=d;qs("#cardDetailBody").innerHTML=renderCardDetailBody(d,true);qs("#cardDetailSubtitle").textContent=`${Number(d.holders_total||0)} conta(s) possuem este Card.`;bindCardDetailLibraryButtons();}
+    catch(e){qs("#cardDetailBody").innerHTML=`<div class="card-detail-empty">${escapeHtml(e.message||"Não foi possível carregar os possuidores do Card.")}</div>`;}
   }
 }
+
 function closeCardDetailModal(){const modal=qs("#cardDetailModal");if(!modal)return;modal.classList.remove("open");modal.hidden=true;document.body.classList.remove("card-detail-open");state.cardDetail=null;}
+
+function cardLibraryNormalizeText(v){return String(v||'').trim();}
+async function openCardLibraryManager(cardId){
+  if(!hasAdminPermission('cards_write'))return alert('Você não possui permissão para vincular Cards à Biblioteca.');
+  const card=(state.adminCards||[]).find(c=>Number(c.id)===Number(cardId));
+  if(!card)return;
+  const modal=ensureCardLibraryManager();
+  state.cardLibraryManager={cardId:Number(cardId),links:[],materials:[]};
+  modal.classList.add('open');modal.hidden=false;document.body.classList.add('card-library-manager-open');
+  renderCardLibraryManager();
+  try{
+    const [linksR,libR]=await Promise.all([adminApi(`/api/admin/cards/${Number(cardId)}/library-links`),api('/api/library')]);
+    state.cardLibraryManager.links=linksR.links||[];
+    state.cardLibraryManager.materials=libR.items||[];
+    renderCardLibraryManager();
+  }catch(e){qs('#cardLibraryManagerStatus').textContent=e.message||'Não foi possível carregar os vínculos.';}
+}
+function ensureCardLibraryManager(){
+  let modal=qs('#cardLibraryManagerModal');
+  if(modal)return modal;
+  modal=document.createElement('div');modal.id='cardLibraryManagerModal';modal.className='card-library-manager-modal';modal.hidden=true;
+  document.body.appendChild(modal);return modal;
+}
+function closeCardLibraryManager(){const modal=qs('#cardLibraryManagerModal');if(!modal)return;modal.classList.remove('open');modal.hidden=true;document.body.classList.remove('card-library-manager-open');state.cardLibraryManager={cardId:null,links:[],materials:[]};}
+function cardLibraryMaterialOptions(){
+  const {materials}=state.cardLibraryManager;return materials.map(m=>`<option value="${Number(m.id)}">${escapeHtml(m.title)}</option>`).join('');
+}
+function populateCardLibraryPathSelectors(){
+  const mat=qs('#cardLibraryMaterial');if(!mat)return;
+  const current=mat.value;mat.innerHTML=`<option value="">Escolher material…</option>${cardLibraryMaterialOptions()}`;if(current)mat.value=current;populateCardLibrarySection();
+}
+function populateCardLibrarySection(){
+  const mat=qs('#cardLibraryMaterial'),sec=qs('#cardLibrarySection'),child=qs('#cardLibraryChild'),ref=qs('#cardLibraryPath');
+  if(!mat||!sec||!child)return;
+  const item=state.cardLibraryManager.materials.find(x=>Number(x.id)===Number(mat.value));
+  const outline=item?parseLibraryHierarchy(item):{sections:[]};
+  sec.innerHTML=`<option value="">Material inteiro</option>`+outline.sections.map((x,i)=>`<option value="${i}">${escapeHtml(x.title)}</option>`).join('');
+  child.innerHTML='<option value="">Seção inteira</option>';
+  if(ref)ref.value='';
+  populateCardLibraryChild();
+}
+function populateCardLibraryChild(){
+  const mat=qs('#cardLibraryMaterial'),sec=qs('#cardLibrarySection'),child=qs('#cardLibraryChild'),ref=qs('#cardLibraryPath');
+  if(!mat||!sec||!child)return;
+  const item=state.cardLibraryManager.materials.find(x=>Number(x.id)===Number(mat.value));
+  const outline=item?parseLibraryHierarchy(item):{sections:[]};
+  const sidx=sec.value===''?null:Number(sec.value);const section=sidx===null?null:outline.sections[sidx];
+  const currentChild=child.value;
+  child.innerHTML='<option value="">Seção inteira</option>'+(section?.children||[]).map((x,i)=>`<option value="${i}">${escapeHtml(x.title)}</option>`).join('');
+  if(currentChild && section?.children?.[Number(currentChild)]) child.value=currentChild;
+  if(ref){const parts=[];if(section)parts.push(section.title);const cidx=child.value===''?null:Number(child.value);if(cidx!==null&&section?.children?.[cidx])parts.push(section.children[cidx].title);ref.value=parts.join(' › ');}
+}
+function renderCardLibraryManager(){
+  const modal=ensureCardLibraryManager();const id=state.cardLibraryManager.cardId;const card=(state.adminCards||[]).find(c=>Number(c.id)===Number(id));if(!card)return;
+  const links=state.cardLibraryManager.links||[];
+  modal.innerHTML=`<div class="card-library-manager-shell" role="dialog" aria-modal="true" aria-labelledby="cardLibraryManagerTitle"><header><div><p class="eyebrow">📚 VÍNCULOS DO CARD</p><h2 id="cardLibraryManagerTitle">#${Number(card.id)} • ${escapeHtml(card.name_pt||card.name)}</h2><p>Relacione este Card a um material, seção ou subtópico da Biblioteca.</p></div><button type="button" class="library-explorer-close" id="cardLibraryManagerClose">×</button></header><main><div class="card-library-manager-form"><select id="cardLibraryMaterial"><option value="">Carregando materiais…</option></select><select id="cardLibrarySection"><option value="">Material inteiro</option></select><select id="cardLibraryChild"><option value="">Seção inteira</option></select><button type="button" class="gold small" id="cardLibraryAddBtn">＋ Vincular</button></div><input id="cardLibraryPath" class="card-library-manager-status" readonly placeholder="Caminho do vínculo"><div id="cardLibraryManagerStatus" class="card-library-manager-status"></div><div class="card-library-manager-list">${links.length?links.map(l=>`<div class="card-library-manager-row"><div><b>${escapeHtml(l.library_title||'Material')}</b><small>${escapeHtml(l.path_label||[l.section_title,l.child_title].filter(Boolean).join(' › ')||'Material inteiro')} • vínculo #${Number(l.id)}</small></div><button type="button" class="outline danger small" data-card-library-remove="${Number(l.id)}">Remover</button></div>`).join(''):`<div class="card-detail-empty">Nenhuma regra vinculada a este Card.</div>`}</div></main><footer><span>Um Card pode estar relacionado a várias regras da Biblioteca.</span><button type="button" class="outline dark-outline small" id="cardLibraryManagerDone">Fechar</button></footer></div>`;
+  qs('#cardLibraryManagerClose').onclick=closeCardLibraryManager;qs('#cardLibraryManagerDone').onclick=closeCardLibraryManager;
+  qs('#cardLibraryMaterial').onchange=()=>{populateCardLibrarySection();};
+  qs('#cardLibrarySection').onchange=()=>{populateCardLibraryChild();};
+  qs('#cardLibraryChild').onchange=()=>{populateCardLibraryChild();};
+  qs('#cardLibraryAddBtn').onclick=addCardLibraryLink;
+  qsa('[data-card-library-remove]').forEach(b=>b.onclick=()=>removeCardLibraryLink(Number(b.dataset.cardLibraryRemove)));
+  populateCardLibraryPathSelectors();
+  if((state.cardLibraryManager.materials||[]).length===0)qs('#cardLibraryManagerStatus').textContent='Nenhum material publicado disponível.';
+}
+async function addCardLibraryLink(){
+  const materialId=Number(qs('#cardLibraryMaterial')?.value||0);if(!materialId)return alert('Escolha um material da Biblioteca.');
+  const item=state.cardLibraryManager.materials.find(x=>Number(x.id)===materialId);if(!item)return;
+  const outline=parseLibraryHierarchy(item);const secVal=qs('#cardLibrarySection')?.value||'';const childVal=qs('#cardLibraryChild')?.value||'';
+  const section=secVal===''?null:outline.sections[Number(secVal)];const child=childVal===''?null:section?.children?.[Number(childVal)];
+  if(childVal!==''&&!child)return alert('Subtópico inválido.');
+  const body={library_item_id:materialId,section_title:section?.title||'',child_title:child?.title||'',path_label:[section?.title,child?.title].filter(Boolean).join(' › '),sort_order:0};
+  const status=qs('#cardLibraryManagerStatus');if(status)status.textContent='Salvando…';
+  try{const d=await adminApi(`/api/admin/cards/${Number(state.cardLibraryManager.cardId)}/library-links`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});state.cardLibraryManager.links=[...(state.cardLibraryManager.links||[]),d.link];if(status)status.textContent='Vínculo salvo.';renderCardLibraryManager();}
+  catch(e){if(status)status.textContent=e.message||'Erro ao vincular.';}
+}
+async function removeCardLibraryLink(linkId){
+  const cardId=Number(state.cardLibraryManager.cardId);if(!cardId||!linkId)return;if(!confirm('Remover este vínculo da Biblioteca?'))return;
+  try{await adminApi(`/api/admin/cards/${cardId}/library-links/${linkId}`,{method:'DELETE'});state.cardLibraryManager.links=(state.cardLibraryManager.links||[]).filter(x=>Number(x.id)!==linkId);renderCardLibraryManager();}
+  catch(e){alert(e.message||'Erro ao remover vínculo.');}
+}
+async function openLibraryFromCard(link){
+  try{
+    if(!(state.libraryAllItems||[]).length){const d=await api('/api/library');state.libraryAllItems=d.items||[];state.libraryItems=d.items||[];}
+    const items=state.libraryAllItems||[];const libItem=items.find(x=>Number(x.id)===Number(link.library_item_id));
+    if(!libItem){alert('O material relacionado não está disponível na Biblioteca pública.');return;}
+    const key=Object.entries(LIBRARY_TOPICS).find(([_,t])=>t.category===libItem.category)?.[0]||'all';
+    const topicItems=libraryItemsForTopic(items,key);const itemIndex=topicItems.findIndex(x=>Number(x.id)===Number(libItem.id));
+    if(itemIndex<0){alert('Não foi possível localizar o material na área da Biblioteca.');return;}
+    const outline=parseLibraryHierarchy(libItem);const sectionTitle=cardLibraryNormalizeText(link.section_title);const childTitle=cardLibraryNormalizeText(link.child_title);
+    closeCardDetailModal();
+    if(sectionTitle){const sidx=outline.sections.findIndex(s=>cardLibraryNormalizeText(s.title)===sectionTitle);if(sidx>=0){if(childTitle){const cidx=(outline.sections[sidx].children||[]).findIndex(c=>cardLibraryNormalizeText(c.title)===childTitle);if(cidx>=0)return openLibraryExplorer({level:'child',topicKey:key,itemIndex,sectionIndex:sidx,childIndex:cidx,item:libItem,outline});}return openLibraryExplorer({level:'section',topicKey:key,itemIndex,sectionIndex:sidx,item:libItem,outline});}}
+    openLibraryExplorer({level:'material',topicKey:key,itemIndex});
+  }catch(e){alert(e.message||'Não foi possível abrir a regra relacionada.');}
+}
 
 async function deleteCard(id){const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;if(!confirm(`Excluir o card "${c.name_pt||c.name}"?`))return;try{await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});if(Number(qs("#cardId").value)===id)resetCardForm();await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);alert("Card excluído.");}catch(e){alert(e.message)}}
 
