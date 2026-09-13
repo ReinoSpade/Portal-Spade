@@ -1,0 +1,331 @@
+  else if(key==='card_origins') { portalSettings.card_origins=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.card_origins); CARD_ORIGINS=portalSettings.card_origins.slice(); }
+  else if(key==='card_elements') portalSettings.card_elements=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.card_elements);
+  else if(key==='visibility_scopes') portalSettings.visibility_scopes=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.visibility_scopes);
+  else if(['kingdom_name','kingdom_motto','timezone','footer_text'].includes(key)) portalSettings[key]=String(value??'').trim() || String(DEFAULT_PORTAL_SETTINGS[key]);
+}
+async function loadPortalSettings(){
+  const r=await pool.query('SELECT key,value FROM portal_settings');
+  portalSettings={...DEFAULT_PORTAL_SETTINGS};
+  for(const row of r.rows) applyPortalSetting(row.key,row.value);
+  MISSION_TYPES=portalSettings.mission_types.slice();
+  EVENT_TYPES=portalSettings.event_types.slice();
+  CARD_ORIGINS=portalSettings.card_origins.slice();
+}
+async function initDatabase() {
+  // Create all base tables before running any migrations or seed queries.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS players (
+      id BIGSERIAL PRIMARY KEY,
+      nick TEXT NOT NULL,
+      number TEXT NOT NULL,
+      identifier TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL DEFAULT '',
+      house TEXT DEFAULT '',
+      patent TEXT DEFAULT 'Cavaleiro Mágico Junior',
+      role TEXT DEFAULT '',
+      grimoire TEXT DEFAULT '',
+      hp INTEGER DEFAULT 200 CHECK (hp >= 0),
+      mana INTEGER DEFAULT 400 CHECK (mana >= 0),
+      yuls BIGINT DEFAULT 0 CHECK (yuls >= 0),
+      dracmas BIGINT DEFAULT 0 CHECK (dracmas >= 0),
+      missions INTEGER DEFAULT 0 CHECK (missions >= 0),
+      achievements INTEGER DEFAULT 0 CHECK (achievements >= 0),
+      ranking INTEGER DEFAULT 0 CHECK (ranking >= 0),
+      power INTEGER DEFAULT 0 CHECK (power >= 0),
+      public_profile INTEGER DEFAULT 1 CHECK (public_profile IN (0,1)),
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS grimoire_pages (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      level_number INTEGER NOT NULL CHECK (level_number > 0),
+      magic_name TEXT NOT NULL DEFAULT '',
+      description TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(player_id, level_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_grimoire_pages_player ON grimoire_pages(player_id, level_number);
+
+    CREATE TABLE IF NOT EXISTS exp_history (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL CHECK (amount > 0),
+      source_code TEXT NOT NULL DEFAULT 'AJUSTE',
+      source_detail TEXT DEFAULT '',
+      reason TEXT DEFAULT '',
+      exp_before INTEGER NOT NULL DEFAULT 0 CHECK (exp_before >= 0),
+      exp_after INTEGER NOT NULL DEFAULT 0 CHECK (exp_after >= 0),
+      level_before INTEGER NOT NULL DEFAULT 1 CHECK (level_before >= 1),
+      level_after INTEGER NOT NULL DEFAULT 1 CHECK (level_after >= 1),
+      upgraded INTEGER NOT NULL DEFAULT 0 CHECK (upgraded IN (0,1)),
+      created_by_admin_id BIGINT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_exp_history_player ON exp_history(player_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS exp_rules (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      percent_value INTEGER,
+      notes TEXT DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      display_name TEXT DEFAULT '',
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      last_login TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_permissions (
+      admin_id BIGINT PRIMARY KEY REFERENCES admin_users(id) ON DELETE CASCADE,
+      permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      method TEXT NOT NULL,
+      route TEXT NOT NULL,
+      entity_type TEXT DEFAULT '',
+      entity_id TEXT DEFAULT '',
+      status_code INTEGER NOT NULL DEFAULT 200,
+      detail TEXT DEFAULT '',
+      ip_address TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS portal_settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      description TEXT DEFAULT '',
+      updated_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS news (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT 'RPG',
+      excerpt TEXT DEFAULT '',
+      body TEXT DEFAULT '',
+      date DATE DEFAULT CURRENT_DATE,
+      published INTEGER DEFAULT 1 CHECK (published IN (0,1))
+    );
+
+    CREATE TABLE IF NOT EXISTS editions (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      edition TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      pdf_url TEXT DEFAULT '',
+      date DATE DEFAULT CURRENT_DATE,
+      published INTEGER DEFAULT 1 CHECK (published IN (0,1))
+    );
+
+
+    CREATE TABLE IF NOT EXISTS media_assets (
+      id BIGSERIAL PRIMARY KEY,
+      original_name TEXT DEFAULT '',
+      mime_type TEXT NOT NULL,
+      data BYTEA NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_assets_created ON media_assets(created_at DESC,id DESC);
+
+
+    CREATE TABLE IF NOT EXISTS articles (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      subtitle TEXT DEFAULT '',
+      author TEXT DEFAULT '',
+      category TEXT DEFAULT 'RPG',
+      excerpt TEXT DEFAULT '',
+      body TEXT DEFAULT '',
+      image_url TEXT DEFAULT '',
+      date DATE DEFAULT CURRENT_DATE,
+      published INTEGER DEFAULT 1 CHECK (published IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS edition_articles (
+      edition_id BIGINT NOT NULL REFERENCES editions(id) ON DELETE CASCADE,
+      article_id BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+      sort_order INTEGER DEFAULT 0,
+      PRIMARY KEY (edition_id, article_id)
+    );
+
+
+    -- Cards are created before Events because event reward tables reference them.
+    CREATE TABLE IF NOT EXISTS library_items (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'GERAL',
+      description TEXT DEFAULT '',
+      content TEXT DEFAULT '',
+      url TEXT DEFAULT '',
+      icon TEXT DEFAULT '📚',
+      published INTEGER NOT NULL DEFAULT 1 CHECK (published IN (0,1)),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_items_public ON library_items(published,sort_order,id DESC);
+
+    CREATE TABLE IF NOT EXISTS player_statuses (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      status_date DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date),
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(player_id,status_date),
+      CHECK (char_length(message) BETWEEN 1 AND 280)
+    );
+
+    CREATE TABLE IF NOT EXISTS card_categories (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS cards (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      name_jp TEXT DEFAULT '',
+      name_pt TEXT DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'Outros',
+      category TEXT,
+      element_type TEXT NOT NULL DEFAULT 'NAO_ELEMENTAL' CHECK (element_type IN ('ELEMENTAL','NAO_ELEMENTAL')),
+      element TEXT DEFAULT '',
+      cost_type TEXT NOT NULL DEFAULT 'SEM_CUSTO' CHECK (cost_type IN ('MANA','VIDA','SEM_CUSTO')),
+      cost TEXT DEFAULT '',
+      power_value INTEGER NOT NULL DEFAULT 0 CHECK (power_value >= 0),
+      damage_value INTEGER NOT NULL DEFAULT 0 CHECK (damage_value >= 0),
+      damage_type TEXT NOT NULL DEFAULT 'SEM_DANO' CHECK (damage_type IN ('DANO_BRUTO','DANO_CONTINUO','DANO_DIRETO','SEM_DANO')),
+      origin TEXT NOT NULL DEFAULT 'Exclusivo',
+      status TEXT NOT NULL DEFAULT 'ATIVO',
+      description TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS player_cards (
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+      acquisition_type TEXT DEFAULT 'OUTRO',
+      acquisition_id BIGINT,
+      acquisition_name TEXT DEFAULT '',
+      acquired_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (player_id, card_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS player_card_history (
+      id BIGSERIAL PRIMARY KEY,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      acquisition_type TEXT DEFAULT 'OUTRO',
+      acquisition_id BIGINT,
+      acquisition_name TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS card_library_links (
+      id BIGSERIAL PRIMARY KEY,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      library_item_id BIGINT NOT NULL REFERENCES library_items(id) ON DELETE CASCADE,
+      section_title TEXT DEFAULT '',
+      child_title TEXT DEFAULT '',
+      path_label TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(card_id, library_item_id, section_title, child_title)
+    );
+    CREATE TABLE IF NOT EXISTS ally_accounts (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      origin_kingdom TEXT DEFAULT '',
+      origin_house TEXT DEFAULT '',
+      patent TEXT DEFAULT '',
+      role TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      active INTEGER DEFAULT 1 CHECK (active IN (0,1)),
+      hidden INTEGER DEFAULT 1 CHECK (hidden IN (0,1)),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      last_login TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS ally_cards (
+      ally_id BIGINT NOT NULL REFERENCES ally_accounts(id) ON DELETE CASCADE,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      acquisition_type TEXT DEFAULT 'ADMINISTRATIVO',
+      acquisition_id BIGINT,
+      acquisition_name TEXT DEFAULT '',
+      acquired_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (ally_id, card_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      event_type TEXT NOT NULL DEFAULT 'JOGO',
+      description TEXT DEFAULT '',
+      rules TEXT DEFAULT '',
+      start_date DATE,
+      end_date DATE,
+      status TEXT NOT NULL DEFAULT 'PLANEJADO',
+      image_url TEXT DEFAULT '',
+      featured INTEGER DEFAULT 0 CHECK (featured IN (0,1)),
+      published INTEGER DEFAULT 1 CHECK (published IN (0,1)),
+      yuls_reward BIGINT DEFAULT 0 CHECK (yuls_reward >= 0),
+      exp_reward BIGINT DEFAULT 0 CHECK (exp_reward >= 0),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS event_participants (
+      event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (event_id, player_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS event_actions (
+      id BIGSERIAL PRIMARY KEY,
+      event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      points INTEGER NOT NULL DEFAULT 0 CHECK (points > 0),
