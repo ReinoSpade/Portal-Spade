@@ -1,0 +1,111 @@
+      `INSERT INTO houses(name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
+      [name]
+    );
+  }
+
+  const defaultCards = [
+    ["Falha Simples 40/00","Falha","40/00","Cancela ataques do oponente conforme as regras do RPG.",10],
+    ["Falha Simples 50/00","Falha","50/00","Versão de 50 pontos da Falha Simples.",20],
+    ["Falha Ilusão 50/00","Falha","50/00","Falha aplicada contra ilusões.",30],
+    ["Fuga Simples 40/00","Fuga","40/00","Fuga simples; não pode ser falhada.",40],
+    ["Camuflagem 50/00","Fuga","50/00","Camuflagem para evasão conforme as regras do RPG.",50],
+    ["Ataque/Defesa 100/100","Ataque/Defesa","100/100","Ataca e defende simultaneamente.",60],
+    ["Barreira com Dano 50 em TC","Barreira","50/00","Barreira que causa 50 de dano em Técnica Comum.",70],
+    ["Paralisia Simples","Paralisia","70/70","Paralisa o oponente na rodada seguinte.",80],
+    ["Paralisia Falha-Ataque","Paralisia","","Falha ataques e aplica a paralisação conforme as regras.",90],
+    ["Paralisia Dano 70/70","Paralisia","70/70","Causa dano e anula técnicas ou magias menores.",100],
+    ["Magia Ofensiva 50/50","Magia Ofensiva","50/50","Magia ofensiva de 50 pontos.",110],
+    ["Magia Ofensiva 200/200","Magia Ofensiva","200/200","Magia ofensiva de 200 pontos.",120],
+    ["Refletivo de Magia Ofensiva a Distância","Magia Ofensiva","40","Reflete Magia Ofensiva a Distância.",130],
+    ["Réplica do Reino","Réplica","50","Réplica do Reino; custo de 50.",140],
+    ["Réplica Kruger","Réplica","50","Réplica Kruger; causa 50 de dano em Técnica Comum quando aplicada conforme as regras.",150],
+    ["Técnica Especial Corporal (TCE)","Técnica","00/130","Técnica Especial Corporal.",160],
+    ["Técnica Comum Corporal (TC)","Técnica","00/130","Técnica Comum Corporal.",170],
+    ["Técnica Comum a Distância (TD)","Técnica","00/130","Técnica Comum a Distância.",180],
+    ["Ativação","Ativação","-10 Mana/rodada","Torna o usuário imune a Técnicas Básicas e Ilusões enquanto ativa.",190]
+  ];
+  for (const [name,type,cost,description,sort_order] of defaultCards) {
+    await pool.query(
+      `INSERT INTO cards(name,type,category,name_pt,cost,cost_type,description,sort_order,origin,power_value)
+       VALUES ($1,$2,$2,$1,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (name) DO NOTHING`,
+      [name,type,cost,cost ? (String(cost).includes('Mana') ? 'MANA' : 'SEM_CUSTO') : 'SEM_CUSTO',description,sort_order,'SC Junior',0]
+    );
+  }
+
+  const cardCategorySeeds=['Falha','Fuga','Ataque/Defesa','Barreira','Paralisia','Magia Ofensiva','Réplica','Técnica','Ativação','Invocação','Ilusão','Regeneração','Outros'];
+  for (let i=0;i<cardCategorySeeds.length;i++) {
+    await pool.query(`INSERT INTO card_categories(name,sort_order) VALUES($1,$2) ON CONFLICT(name) DO NOTHING`,[cardCategorySeeds[i],i+1]);
+  }
+
+  // The announcements table definitely exists at this point.
+  const announcementCount = await pool.query(
+    "SELECT COUNT(*)::int AS c FROM announcements"
+  );
+  if (announcementCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO announcements(title,category,priority,body,featured,published)
+       VALUES ($1,$2,$3,$4,1,1)`,
+      [
+        "Bem-vindos ao Portal Spade",
+        "REINO SPADE",
+        "INFORMATIVO",
+        "Este espaço será usado para os comunicados oficiais do Reino."
+      ]
+    );
+  }
+
+  const newsCount = await pool.query("SELECT COUNT(*)::int AS c FROM news");
+  if (newsCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO news(title,category,excerpt,body) VALUES ($1,$2,$3,$4)`,
+      [
+        "O Portal Spade está oficialmente aberto",
+        "REINO SPADE",
+        "O centro digital do RPG começa uma nova fase.",
+        "Esta é uma notícia inicial de teste. Substitua pelo comunicado oficial."
+      ]
+    );
+  }
+
+  const editionCount = await pool.query("SELECT COUNT(*)::int AS c FROM editions");
+  if (editionCount.rows[0].c === 0) {
+    await pool.query(
+      `INSERT INTO editions(title,edition,description) VALUES ($1,$2,$3)`,
+      [
+        "The King Magazine — Setembro 2026",
+        "EDIÇÃO 01",
+        "A edição de estreia do novo ciclo de Spade."
+      ]
+    );
+  }
+
+  // V49: centralized portal configuration. Defaults are created once; existing values are preserved.
+  const settingMeta={
+    kingdom_name:'Nome oficial do Reino', kingdom_motto:'Lema do Reino', timezone:'Fuso horário principal', footer_text:'Texto do rodapé',
+    mission_types:'Tipos de missão aceitos', event_types:'Tipos de evento aceitos', card_origins:'Origens de Cards', card_elements:'Elementos cadastráveis', visibility_scopes:'Escopos de visibilidade'
+  };
+  for(const [key,value] of Object.entries(DEFAULT_PORTAL_SETTINGS)){
+    await pool.query(`INSERT INTO portal_settings(key,value,description) VALUES($1,$2::jsonb,$3) ON CONFLICT(key) DO NOTHING`,[key,JSON.stringify(value),settingMeta[key]||'Configuração do Portal']);
+  }
+  await loadPortalSettings();
+
+  // Bootstrap the first named administrator from environment variables.
+  // This keeps the legacy ADMIN_KEY working while providing a normal username/password login.
+  const adminUsername = String(process.env.ADMIN_USERNAME || "admin").trim().toLowerCase();
+  const adminPassword = String(process.env.ADMIN_PASSWORD || ADMIN_KEY || "");
+  if (adminUsername && adminPassword) {
+    const existingAdmin = await pool.query("SELECT id FROM admin_users WHERE username=$1 LIMIT 1", [adminUsername]);
+    if (!existingAdmin.rows[0]) {
+      const hash = await bcrypt.hash(adminPassword, 12);
+      await pool.query(
+        `INSERT INTO admin_users(username,password_hash,display_name,active) VALUES($1,$2,$3,1)`,
+        [adminUsername, hash, process.env.ADMIN_DISPLAY_NAME || "Administrador principal"]
+      );
+    }
+  }
+  // Every existing administrator starts with full access; permissions can then be restricted.
+  const admins = await pool.query("SELECT id FROM admin_users");
+  for (const a of admins.rows) {
+    await pool.query(`INSERT INTO admin_permissions(admin_id,permissions) VALUES($1,$2::jsonb) ON CONFLICT (admin_id) DO NOTHING`, [a.id, JSON.stringify(ALL_ADMIN_PERMISSIONS)]);
+  }

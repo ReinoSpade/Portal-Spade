@@ -1,0 +1,151 @@
+  try{
+    const r=await pool.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,source_id,status,activity_date,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,'AGUARDANDO_APROVACAO',$7,$8) RETURNING *`,[playerId,currency,amount,reason,String(b.source_type||'ADMINISTRATIVO'),b.source_id?Number(b.source_id):null,b.activity_date||new Date().toISOString().slice(0,10),req.admin.id]);
+    res.json({ok:true,transaction:r.rows[0]});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao criar transação.'});}
+});
+
+app.post("/api/admin/economy/transactions/:id/approve", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id); if(!Number.isInteger(id))return res.status(400).json({error:'Transação inválida.'});
+  try{const r=await pool.query(`UPDATE economy_transactions SET status='APROVADA_AGUARDANDO_PAGAMENTO',approval_date=NOW(),approved_by_admin_id=$1,updated_at=NOW() WHERE id=$2 AND status='AGUARDANDO_APROVACAO' RETURNING *`,[req.admin.id,id]);if(!r.rows[0])return res.status(404).json({error:'Transação não está aguardando aprovação.'});res.json({ok:true});}catch(e){res.status(500).json({error:'Erro ao aprovar transação.'});}
+});
+
+app.post("/api/admin/economy/transactions/:id/pay", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id); const client=await pool.connect();
+  try{await client.query('BEGIN'); const tx=(await client.query(`SELECT * FROM economy_transactions WHERE id=$1 AND status='APROVADA_AGUARDANDO_PAGAMENTO' FOR UPDATE`,[id])).rows[0]; if(!tx){await client.query('ROLLBACK');return res.status(404).json({error:'Transação não está aguardando pagamento.'});}
+    const balance=await applyEconomyTransaction(client,tx,req.admin.id);
+    await client.query(`UPDATE economy_transactions SET status='PAGA',payment_date=NOW(),paid_by_admin_id=$1,updated_at=NOW() WHERE id=$2`,[req.admin.id,id]);
+    await client.query('COMMIT');res.json({ok:true,balance});
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao efetivar pagamento.'});}finally{client.release();}
+});
+
+app.post("/api/admin/economy/transactions/:id/reject", requireAdmin, async(req,res)=>{const id=Number(req.params.id);try{const r=await pool.query(`UPDATE economy_transactions SET status='REJEITADA',updated_at=NOW() WHERE id=$1 AND status IN ('AGUARDANDO_APROVACAO','APROVADA_AGUARDANDO_PAGAMENTO') RETURNING id`,[id]);if(!r.rows[0])return res.status(404).json({error:'Transação não pode ser rejeitada neste estado.'});res.json({ok:true});}catch(e){res.status(500).json({error:'Erro ao rejeitar transação.'});}});
+
+app.post("/api/admin/economy/transactions/:id/reverse", requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id), client=await pool.connect();
+  try{await client.query('BEGIN');const tx=(await client.query(`SELECT * FROM economy_transactions WHERE id=$1 AND status='PAGA' FOR UPDATE`,[id])).rows[0];if(!tx){await client.query('ROLLBACK');return res.status(404).json({error:'Somente transações pagas podem ser estornadas.'});}
+    const reverse={...tx,amount:-Number(tx.amount),reason:`Estorno: ${tx.reason||'Transação'}`}; await applyEconomyTransaction(client,reverse,req.admin.id);
+    await client.query(`UPDATE economy_transactions SET status='ESTORNADA',reversed_at=NOW(),reversed_by_admin_id=$1,updated_at=NOW() WHERE id=$2`,[req.admin.id,id]);
+    await client.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,source_id,status,activity_date,approval_date,payment_date,created_by_admin_id,approved_by_admin_id,paid_by_admin_id) VALUES($1,$2,$3,$4,'ESTORNO',$5,'PAGA',$6,NOW(),NOW(),$7,$7,$7)`,[tx.player_id,tx.currency,-Number(tx.amount),`Estorno: ${tx.reason||'Transação'}`,id,tx.activity_date,req.admin.id]);
+    await client.query('COMMIT');res.json({ok:true});
+  }catch(e){await client.query('ROLLBACK');console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao estornar.'});}finally{client.release();}
+});
+
+app.get("/api/me/yuls-history", async (req, res) => {
+  const id = readPlayerToken(req);
+  if (!id) return res.status(401).json({ error: "Não autenticado." });
+  try {
+    const [playerResult, historyResult] = await Promise.all([
+      pool.query("SELECT yuls,dracmas FROM players WHERE id=$1", [id]),
+      pool.query(
+        `SELECT id,amount,reason,balance_after,created_at
+         FROM yuls_history WHERE player_id=$1 ORDER BY id DESC LIMIT 50`,
+        [id]
+      )
+    ]);
+    const player = playerResult.rows[0];
+    if (!player) return res.status(401).json({ error: "Sessão inválida." });
+    res.json({
+      balance: Number(player.yuls || 0),
+      dracmas: Number(player.dracmas || 0),
+      history: historyResult.rows.map(h => ({
+        id: Number(h.id),
+        amount: Number(h.amount),
+        reason: h.reason || "",
+        balance_after: Number(h.balance_after),
+        created_at: h.created_at
+      }))
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Erro ao carregar histórico de Yuls." });
+  }
+});
+
+
+
+app.get("/api/me/events", async (req,res)=>{
+  const playerId=readPlayerToken(req);
+  if(!playerId)return res.status(401).json({error:"Não autenticado."});
+  try{
+    const r=await pool.query(`
+      SELECT e.id,e.title,e.event_type,e.description,e.start_date,e.end_date,e.status,e.featured,
+             COALESCE(points.points,0)::int AS points
+      FROM event_participants participant
+      JOIN events e ON e.id=participant.event_id
+      LEFT JOIN event_points points ON points.event_id=e.id AND points.player_id=$1
+      WHERE participant.player_id=$1 AND e.published=1
+      ORDER BY CASE e.status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,e.id DESC
+    `,[playerId]);
+    res.json({events:r.rows.map(e=>({...e,id:Number(e.id),points:Number(e.points||0),featured:Boolean(e.featured)}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus eventos."});}
+});
+
+app.get("/api/me/ally-cards", async (req,res)=>{
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type!=="ALLY")return res.status(403).json({error:"Rota exclusiva de aliados."});
+  try{
+    const r=await pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
+      FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1 ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,[viewer.id]);
+    const ids=r.rows.map(x=>Number(x.id));
+    const lr=ids.length?await pool.query(`SELECT cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=ANY($1::bigint[]) AND li.published=1 ORDER BY cl.card_id,cl.sort_order,cl.id`,[ids]):{rows:[]};
+    const linkMap=new Map();for(const x of lr.rows){const k=Number(x.card_id);if(!linkMap.has(k))linkMap.set(k,[]);linkMap.get(k).push({library_item_id:Number(x.library_item_id),library_title:x.library_title,library_category:x.library_category,section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''});}
+    res.json({cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Administrativo",status:c.status||"ATIVO",description:c.description||"",acquisition_type:c.acquisition_type||"ADMINISTRATIVO",acquisition_name:c.acquisition_name||"",acquired_at:c.acquired_at,library_links:linkMap.get(Number(c.id))||[]}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus Cards de aliado."});}
+});
+
+app.get("/api/me/cards", async (req,res)=>{
+  const viewer=await resolveViewer(req);
+  if(!viewer)return res.status(401).json({error:"Não autenticado."});
+  if(viewer.type!=="PLAYER")return res.status(403).json({error:"Use o painel de Cards do Aliado."});
+  const id=viewer.id;
+  try{
+    const r=await pool.query(
+      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,pc.quantity,
+              pc.acquisition_type,pc.acquisition_name,pc.acquisition_id,pc.acquired_at,pc.updated_at
+       FROM player_cards pc
+       JOIN cards c ON c.id=pc.card_id
+       WHERE pc.player_id=$1
+       ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,
+      [id]
+    );
+    const cardIds=r.rows.map(x=>Number(x.id));
+    const lr=cardIds.length?await pool.query(`SELECT cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=ANY($1::bigint[]) AND li.published=1 ORDER BY cl.card_id,cl.sort_order,cl.id`,[cardIds]):{rows:[]};
+    const linkMap=new Map();for(const x of lr.rows){const k=Number(x.card_id);if(!linkMap.has(k))linkMap.set(k,[]);linkMap.get(k).push({library_item_id:Number(x.library_item_id),library_title:x.library_title,library_category:x.library_category,section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''});}
+    res.json({
+      cards:r.rows.map(c=>({
+        id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
+        description:c.description||"",quantity:Number(c.quantity||1),library_links:linkMap.get(Number(c.id))||[],
+        acquisition_type:c.acquisition_type||"OUTRO",
+        acquisition_name:c.acquisition_name||"",
+        acquisition_id:c.acquisition_id?Number(c.acquisition_id):null,
+        acquired_at:c.acquired_at,updated_at:c.updated_at
+      }))
+    });
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar inventário de cards."});
+  }
+});
+
+app.get("/api/me/missions", async (req, res) => {
+  const id = readPlayerToken(req);
+  if (!id) return res.status(401).json({ error: "Não autenticado." });
+  try {
+    const result = await pool.query(
+      `SELECT id,title,mission_type,mission_rank,status,reward_yuls,notes,completed_at,created_at
+       FROM missions WHERE player_id=$1 ORDER BY id DESC LIMIT 100`,
+      [id]
+    );
+    res.json({ missions: result.rows.map(m => ({
+      id:Number(m.id), title:m.title, mission_type:m.mission_type||"", mission_rank:m.mission_rank||"",
+      status:m.status||"", reward_yuls:Number(m.reward_yuls||0), notes:m.notes||"", completed_at:m.completed_at, created_at:m.created_at
+    })) });
+  } catch (e) {
+    console.error(e); res.status(500).json({ error:"Erro ao carregar missões." });
+  }
+});
+
+app.get("/api/announcements", async (req,res)=>{
+  try{
+    const r=await pool.query(

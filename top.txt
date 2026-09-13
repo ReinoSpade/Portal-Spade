@@ -1,0 +1,180 @@
+const express = require("express");
+const cookieParser = require("cookie-parser");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const path = require("path");
+const fs = require("fs");
+const { Pool } = require("pg");
+const multer = require("multer");
+const XLSX = require("xlsx");
+
+const app = express();
+const PORT = Number(process.env.PORT || 3000);
+const ADMIN_KEY = process.env.ADMIN_KEY || "troque-esta-chave";
+const SESSION_SECRET = process.env.SESSION_SECRET || "troque-este-segredo";
+
+const ADMIN_PERMISSION_DEFS = {
+  dashboard: "Painel geral",
+  players: "Jogadores",
+  cards: "Cards",
+  missions: "Missões",
+  events: "Eventos",
+  schedule: "Cronograma",
+  houses: "Casas",
+  hierarchy: "Cargos & Patentes",
+  journal: "Jornal",
+  announcements: "Comunicados",
+  economy: "Economia / Yuls",
+  admin_users: "Administradores",
+  audit: "Auditoria",
+  reports: "Relatórios",
+  settings: "Configurações",
+  library: "Biblioteca",
+  community: "Comunidade / Status",
+  rankings: "Rankings",
+  notifications: "Notificações & Alertas",
+  allies: "Aliados Ocultos",
+
+  // Permissões de ação: continuam separadas das permissões de módulo.
+  players_write: "Jogadores — criar/editar",
+  players_import: "Jogadores — importar por planilha",
+  players_delete: "Jogadores — excluir",
+  cards_write: "Cards — criar/editar",
+  cards_import: "Cards — importar por planilha",
+  cards_assign: "Cards — vincular a jogadores/aliados",
+  cards_delete: "Cards — excluir",
+  missions_write: "Missões — criar/editar",
+  missions_import: "Missões — importar por planilha",
+  missions_delete: "Missões — excluir",
+  events_write: "Eventos — criar/editar",
+  events_delete: "Eventos — excluir",
+  economy_write: "Economia — movimentar/aprovar",
+  houses_write: "Casas — criar/editar",
+  houses_import: "Casas — importar por planilha",
+  hierarchy_write: "Hierarquia — criar/editar",
+  hierarchy_import: "Hierarquia — importar por planilha",
+  journal_write: "Jornal — criar/editar",
+  announcements_write: "Comunicados — criar/editar",
+  library_write: "Biblioteca — criar/editar",
+  rankings_write: "Rankings — aprovar/rejeitar",
+  notifications_write: "Notificações — criar",
+  allies_write: "Aliados — criar/editar",
+  admin_users_write: "Administradores — criar/alterar/desativar",
+  backup_export: "Backup — exportar dados"
+};
+const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
+
+function adminPermissionForRequest(req) {
+  const rawPath = req.path || "";
+  const path = rawPath.startsWith("/api/admin") ? (rawPath.slice("/api/admin".length) || "/") : rawPath;
+  if (path === "/me") return null;
+  if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users";
+  if (path === "/reports") return "reports";
+  if (path === "/audit") return "audit";
+  if (path.startsWith("/settings") || path.startsWith("/backup") || path.startsWith("/health")) return "settings";
+  if (path === "/overview") return "dashboard";
+  if (path.startsWith("/grimoire")) return "players";
+  if (path.startsWith("/players")) {
+    if (path.includes("/cards") || path.includes("/cards/")) return "cards";
+    if (path.includes("/yuls")) return "economy";
+    if (path.includes("/missions")) return "missions";
+    if (req.body?.action === "cards") return "cards";
+    if (req.body?.action === "yuls") return "economy";
+    if (req.body?.action === "missions") return "missions";
+    return "players";
+  }
+  if (path.startsWith("/cards")) return "cards";
+  if (path.startsWith("/events")) return "events";
+  if (path.startsWith("/event-actions")) return "events";
+  if (path.startsWith("/schedule")) return "schedule";
+  if (path.startsWith("/houses")) return "houses";
+  if (path.startsWith("/hierarchy") || path.startsWith("/patents") || path.startsWith("/roles")) return "hierarchy";
+  if (path.startsWith("/articles") || path.startsWith("/editions") || path.startsWith("/news")) return "journal";
+  if (path.startsWith("/announcements")) return "announcements";
+  if (path.startsWith("/library")) return "library";
+  if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings";
+  if (path.startsWith("/notifications")) return "notifications";
+  if (path.startsWith("/allies")) return "allies";
+  if (path.startsWith("/missions")) return "missions";
+  return "dashboard";
+}
+
+function adminActionPermissionForRequest(req) {
+  const rawPath = req.path || "";
+  const path = rawPath.startsWith("/api/admin") ? (rawPath.slice("/api/admin".length) || "/") : rawPath;
+  const method = String(req.method || "GET").toUpperCase();
+
+  if (path === "/cards/distribution-targets") return "cards_assign";
+  // Leitura não exige permissão de ação adicional.
+  if (method === "GET" || path === "/me") return null;
+
+  if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users_write";
+  if (path.startsWith("/backup")) return "backup_export";
+
+  if (path.startsWith("/players")) {
+    if (path.includes("/cards")) return method === "DELETE" ? "cards_assign" : "cards_assign";
+    if (path.includes("/yuls")) return "economy_write";
+    if (path.includes("/missions")) return method === "DELETE" ? "missions_delete" : "missions_write";
+    if (path.includes("/bulk-sheet") || path.includes("/import")) return "players_import";
+    if (path === "/bulk") return "players_write";
+    if (method === "DELETE") return "players_delete";
+    return "players_write";
+  }
+
+  if (path.startsWith("/cards")) {
+    if (path.includes("/library-links")) return "cards_write";
+    if (path.includes("/bulk-sheet")) return "cards_import";
+    if (path.includes("/distribute")) return "cards_assign";
+    if (method === "DELETE") return "cards_delete";
+    return "cards_write";
+  }
+
+  if (path.startsWith("/missions")) {
+    if (path.includes("/bulk-sheet")) return "missions_import";
+    if (method === "DELETE") return "missions_delete";
+    return "missions_write";
+  }
+
+  if (path.startsWith("/events") || path.startsWith("/event-actions")) {
+    if (method === "DELETE") return "events_delete";
+    return "events_write";
+  }
+
+  if (path.startsWith("/houses")) {
+    if (path.includes("/bulk-sheet")) return "houses_import";
+    return "houses_write";
+  }
+
+  if (path.startsWith("/hierarchy") || path.startsWith("/patents") || path.startsWith("/roles")) {
+    if (path.includes("/bulk-sheet")) return "hierarchy_import";
+    return "hierarchy_write";
+  }
+
+  if (path.startsWith("/articles") || path.startsWith("/editions") || path.startsWith("/news")) {
+    return "journal_write";
+  }
+
+  if (path.startsWith("/announcements")) return "announcements_write";
+  if (path.startsWith("/library")) return "library_write";
+  if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings_write";
+  if (path.startsWith("/notifications")) return "notifications_write";
+  if (path.startsWith("/allies")) return "allies_write";
+  if (path.startsWith("/economy")) return "economy_write";
+  if (path.startsWith("/settings")) return "settings";
+
+  return null;
+}
+
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+  console.error("DATABASE_URL não foi configurada.");
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
+});

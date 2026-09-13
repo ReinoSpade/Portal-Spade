@@ -1,0 +1,226 @@
+    res.json({ok:true});
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao excluir comunicado."});
+  }
+});
+
+
+let CARD_ORIGINS=["SC Junior","SC Inter","SC Sênior","Patente","Missão","Evento","Exclusivo","Loja Mágica","Mercado Negro","Função/Cargo"];
+const CARD_ELEMENT_TYPES=["ELEMENTAL","NAO_ELEMENTAL"];
+const CARD_COST_TYPES=["MANA","VIDA","SEM_CUSTO"];
+const CARD_DAMAGE_TYPES=["DANO_BRUTO","DANO_CONTINUO","DANO_DIRETO","SEM_DANO"];
+const CARD_STATUSES=["ATIVO","INATIVO"];
+
+app.post("/api/admin/card-categories", requireAdmin, async (req,res)=>{
+  const name=String(req.body?.name||"").trim();
+  if(!name)return res.status(400).json({error:"Nome da categoria é obrigatório."});
+  try{const r=await pool.query(`INSERT INTO card_categories(name,sort_order) VALUES($1,COALESCE((SELECT MAX(sort_order)+1 FROM card_categories),1)) RETURNING *`,[name]);res.json({category:r.rows[0]});}
+  catch(e){if(e.code==="23505")return res.status(400).json({error:"Essa categoria já existe."});res.status(500).json({error:"Erro ao criar categoria."});}
+});
+
+app.get("/api/admin/cards", requireAdmin, async (req,res)=>{
+  try{
+    const [r,cats]=await Promise.all([
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,COUNT(DISTINCT pc.player_id)::int AS players,COUNT(DISTINCT cl.id)::int AS library_links
+                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id LEFT JOIN card_library_links cl ON cl.card_id=c.id
+                  GROUP BY c.id ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`),
+      pool.query(`SELECT name FROM card_categories WHERE active=1 ORDER BY sort_order,name COLLATE "C"`)
+    ]);
+    res.json({
+      categories:cats.rows.map(x=>x.name),origins:CARD_ORIGINS,element_types:CARD_ELEMENT_TYPES,cost_types:CARD_COST_TYPES,damage_types:CARD_DAMAGE_TYPES,statuses:CARD_STATUSES,
+      cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_jp:c.name_jp||"",name_pt:c.name_pt||c.name,category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",description:c.description||"",sort_order:Number(c.sort_order||0),active:Number(c.active),players:Number(c.players||0),library_links:Number(c.library_links||0)}))
+    });
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar banco de cards."});}
+});
+
+app.get("/api/admin/cards/:id/details", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
+  try{
+    const [cardR,playersR,alliesR,libraryR]=await Promise.all([
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,c.created_at,c.updated_at
+                  FROM cards c WHERE c.id=$1`,[id]),
+      pool.query(`SELECT p.id,p.nick,p.number,p.house,p.patent,pc.quantity,pc.acquisition_type,pc.acquisition_name,pc.acquired_at,pc.updated_at
+                  FROM player_cards pc JOIN players p ON p.id=pc.player_id
+                  WHERE pc.card_id=$1 ORDER BY p.nick COLLATE "C",p.id`,[id]),
+      pool.query(`SELECT a.id,a.display_name,a.username,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
+                  FROM ally_cards ac JOIN ally_accounts a ON a.id=ac.ally_id
+                  WHERE ac.card_id=$1 ORDER BY a.display_name COLLATE "C",a.id`,[id]),
+      pool.query(`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,li.published,cl.section_title,cl.child_title,cl.path_label,cl.sort_order
+                  FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=$1 ORDER BY cl.sort_order,cl.id`,[id])
+    ]);
+    if(!cardR.rows[0])return res.status(404).json({error:"Card não encontrado."});
+    const c=cardR.rows[0];
+    res.json({
+      card:{...c,id:Number(c.id),power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),sort_order:Number(c.sort_order||0),active:Number(c.active??1)},
+      players:playersR.rows.map(x=>({...x,id:Number(x.id),quantity:Number(x.quantity||1)})),
+      allies:alliesR.rows.map(x=>({...x,id:Number(x.id)})),
+      library_links:libraryR.rows.map(x=>({...x,id:Number(x.id),card_id:Number(x.card_id),library_item_id:Number(x.library_item_id),sort_order:Number(x.sort_order||0),section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||'',library_title:x.library_title,library_category:x.library_category,published:Number(x.published||0)})),
+      holders_total:playersR.rows.length+alliesR.rows.length
+    });
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar a ficha do card."});
+  }
+});
+
+app.get("/api/admin/cards/:id/library-links", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Card inválido.'});
+  try{const r=await pool.query(`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,li.published,cl.section_title,cl.child_title,cl.path_label,cl.sort_order FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=$1 ORDER BY cl.sort_order,cl.id`,[id]);res.json({links:r.rows.map(x=>({...x,id:Number(x.id),card_id:Number(x.card_id),library_item_id:Number(x.library_item_id),published:Number(x.published||0),sort_order:Number(x.sort_order||0),section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''}))});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar as regras vinculadas ao Card.'});}
+});
+app.post("/api/admin/cards/:id/library-links", requireAdmin, async (req,res)=>{
+  const cardId=Number(req.params.id),libraryItemId=Number(req.body?.library_item_id),sectionTitle=String(req.body?.section_title||'').trim(),childTitle=String(req.body?.child_title||'').trim(),pathLabel=String(req.body?.path_label||[sectionTitle,childTitle].filter(Boolean).join(' › ')).trim(),sortOrder=Number.isFinite(Number(req.body?.sort_order))?Math.round(Number(req.body.sort_order)):0;
+  if(!Number.isInteger(cardId)||cardId<=0)return res.status(400).json({error:'Card inválido.'});if(!Number.isInteger(libraryItemId)||libraryItemId<=0)return res.status(400).json({error:'Material da Biblioteca inválido.'});
+  try{const [card,lib]=await Promise.all([pool.query('SELECT id FROM cards WHERE id=$1',[cardId]),pool.query('SELECT id FROM library_items WHERE id=$1',[libraryItemId])]);if(!card.rows[0])return res.status(404).json({error:'Card não encontrado.'});if(!lib.rows[0])return res.status(404).json({error:'Material da Biblioteca não encontrado.'});const r=await pool.query(`INSERT INTO card_library_links(card_id,library_item_id,section_title,child_title,path_label,sort_order,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[cardId,libraryItemId,sectionTitle,childTitle,pathLabel,sortOrder,req.admin.id||null]);res.json({link:{...r.rows[0],id:Number(r.rows[0].id),card_id:Number(r.rows[0].card_id),library_item_id:Number(r.rows[0].library_item_id)}});}
+  catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:'Esta regra já está vinculada ao Card.'});res.status(500).json({error:'Erro ao vincular regra da Biblioteca.'});}
+});
+app.delete("/api/admin/cards/:id/library-links/:linkId", requireAdmin, async (req,res)=>{
+  const cardId=Number(req.params.id),linkId=Number(req.params.linkId);if(!Number.isInteger(cardId)||!Number.isInteger(linkId)||cardId<=0||linkId<=0)return res.status(400).json({error:'Vínculo inválido.'});
+  try{const r=await pool.query('DELETE FROM card_library_links WHERE id=$1 AND card_id=$2 RETURNING id',[linkId,cardId]);if(!r.rows[0])return res.status(404).json({error:'Vínculo não encontrado.'});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Erro ao remover vínculo da Biblioteca.'});}
+});
+
+app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
+  const b=req.body||{};
+  const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
+  const category=String(b.category||"Outros").trim();
+  const elementType=String(b.element_type||"NAO_ELEMENTAL").toUpperCase();
+  const element=String(b.element||"").trim();
+  const costType=String(b.cost_type||"SEM_CUSTO").toUpperCase();
+  const cost=String(b.cost||"").trim();
+  const power=Math.max(0,Math.round(Number(b.power_value||0)));
+  const damage=Math.max(0,Math.round(Number(b.damage_value||0)));
+  let damageType=String(b.damage_type||'SEM_DANO').toUpperCase();
+  if(damage===0) damageType='SEM_DANO';
+  const origin=String(b.origin||"Exclusivo").trim();
+  const status=String(b.status||"ATIVO").toUpperCase();
+  const description=String(b.description||"").trim();
+  const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
+  if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
+  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_DAMAGE_TYPES.includes(damageType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
+  if(damageType==="SEM_DANO" && damage>0)return res.status(400).json({error:"Cards sem dano devem possuir Dano 0."});
+  if(damageType!=="SEM_DANO" && damage<=0)return res.status(400).json({error:"Informe um valor de dano para este tipo de dano."});
+  try{
+    const categoryCheck=await pool.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
+    if(!categoryCheck.rowCount)return res.status(400).json({error:"Categoria de card inválida ou inativa."});
+    const r=await pool.query(`INSERT INTO cards(name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,damage_value,damage_type,origin,status,description,sort_order,active)
+      VALUES($1,$2,$1,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,damageType,origin,status,description,sort_order,status==="ATIVO"?1:0]);
+    res.json({card:r.rows[0]});
+  }catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});res.status(500).json({error:"Erro ao criar card."});}
+});
+
+app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id),b=req.body||{};
+  const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
+  const category=String(b.category||"Outros").trim(),elementType=String(b.element_type||"NAO_ELEMENTAL").toUpperCase(),element=String(b.element||"").trim(),costType=String(b.cost_type||"SEM_CUSTO").toUpperCase(),cost=String(b.cost||"").trim();
+  const power=Math.max(0,Math.round(Number(b.power_value||0))),damage=Math.max(0,Math.round(Number(b.damage_value||0)));
+  let damageType=String(b.damage_type||'SEM_DANO').toUpperCase();
+  if(damage===0) damageType='SEM_DANO';
+  const origin=String(b.origin||"Exclusivo").trim(),status=String(b.status||"ATIVO").toUpperCase(),description=String(b.description||"").trim();
+  const sort_order=Number.isFinite(Number(b.sort_order))?Math.round(Number(b.sort_order)):0;
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
+  if(!namePt)return res.status(400).json({error:"Nome em português é obrigatório."});
+  if(!CARD_ELEMENT_TYPES.includes(elementType)||!CARD_COST_TYPES.includes(costType)||!CARD_DAMAGE_TYPES.includes(damageType)||!CARD_ORIGINS.includes(origin)||!CARD_STATUSES.includes(status))return res.status(400).json({error:"Configuração do card inválida."});
+  if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
+  if(damageType==="SEM_DANO" && damage>0)return res.status(400).json({error:"Cards sem dano devem possuir Dano 0."});
+  if(damageType!=="SEM_DANO" && damage<=0)return res.status(400).json({error:"Informe um valor de dano para este tipo de dano."});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const categoryCheck=await client.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
+    if(!categoryCheck.rowCount){await client.query('ROLLBACK');return res.status(400).json({error:"Categoria de card inválida ou inativa."});}
+    const holderR=await client.query(`SELECT DISTINCT player_id FROM player_cards WHERE card_id=$1`,[id]);
+    const r=await client.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,damageType,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
+    if(!r.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:"Card não encontrado."});}
+    for(const holder of holderR.rows){ await refreshPlayerCardPower(client, holder.player_id); }
+    await client.query('COMMIT');
+    res.json({card:r.rows[0],players_recalculated:holderR.rows.length});
+  }catch(e){
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error(e);
+    if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});
+    res.status(500).json({error:"Erro ao atualizar card."});
+  }finally{client.release();}
+});
+
+app.delete("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
+  try{
+    const r=await pool.query(`UPDATE cards SET active=0,status='INATIVO',updated_at=NOW() WHERE id=$1 RETURNING id,name,name_pt`,[id]);
+    if(!r.rows[0])return res.status(404).json({error:"Card não encontrado."});
+    res.json({ok:true,card:r.rows[0],message:"Card desativado. O histórico e a posse existente foram preservados."});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao desativar card."});}
+});
+
+const CARD_SHEET_NAMES = { cards: 'Cards', links: 'Vinculos', players: 'Jogadores', libraryLinks: 'Biblioteca_Cards', instructions: 'Instrucoes' };
+
+function normalizeCardSpreadsheetName(v){
+  return normalizeImportHeader(v || '').replace(/[^a-z0-9]+/g,'');
+}
+function parseSpreadsheetInt(v, field, row, {allowBlank=false, min=0, max=Number.MAX_SAFE_INTEGER}={}){
+  const raw=String(v??'').trim();
+  if(raw==='' && allowBlank)return null;
+  if(raw==='')throw Object.assign(new Error(`Linha ${row}: ${field} é obrigatório.`),{statusCode:400});
+  const n=Number(raw.replace(/\./g,'').replace(',','.'));
+  if(!Number.isInteger(n)||!Number.isFinite(n)||n<min||n>max)throw Object.assign(new Error(`Linha ${row}: ${field} deve ser um número inteiro entre ${min} e ${max}.`),{statusCode:400});
+  return n;
+}
+function spreadsheetWorkbook(buffer,filename){
+  const lower=String(filename||'').toLowerCase();
+  if(lower.endsWith('.csv')){
+    return XLSX.read(buffer.toString('utf8'),{type:'string',raw:true});
+  }
+  return XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true});
+}
+function sheetRowsByAliases(wb, aliases){
+  const wanted=new Set(aliases.map(x=>normalizeCardSpreadsheetName(x)));
+  const name=wb.SheetNames.find(n=>wanted.has(normalizeCardSpreadsheetName(n)));
+  if(!name)return [];
+  return XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:'',raw:false}).map((row,index)=>({row:index+2,data:row}));
+}
+function getSheetCell(row, ...aliases){
+  const normalized={};
+  for(const [k,v] of Object.entries(row||{})) normalized[normalizeCardSpreadsheetName(k)]=String(v??'').trim();
+  for(const alias of aliases){
+    const key=normalizeCardSpreadsheetName(alias);
+    if(Object.prototype.hasOwnProperty.call(normalized,key))return normalized[key];
+  }
+  return '';
+}
+function normalizeCardAction(v){
+  const key=normalizeCardSpreadsheetName(v);
+  if(!key)return '';
+  if(['adicionar','add','a','incluir'].includes(key))return 'ADICIONAR';
+  if(['remover','remove','r','excluir'].includes(key))return 'REMOVER';
+  if(['manter','keep','m','ignorar','ignore'].includes(key))return '';
+  return '__INVALID__';
+}
+function normalizeCardIdentity(v){
+  return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
+}
+
+function cardSpreadsheetControlKey(id){
+  return crypto.createHmac('sha256',SESSION_SECRET).update(`card:${Number(id)}`).digest('hex').slice(0,24);
+}
+
+function parseCardCatalogSheet(buffer,filename){
+  const wb=spreadsheetWorkbook(buffer,filename);
+  const sheetName=wb.SheetNames.find(n=>normalizeCardSpreadsheetName(n)==='cards');
+  if(!sheetName)throw Object.assign(new Error('A planilha não possui a aba "Cards".'),{statusCode:400});
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:false});
+  if(!rows.length)throw Object.assign(new Error('A aba "Cards" não possui registros.'),{statusCode:400});
+  return rows.map((row,index)=>({
+    row:index+2,
+    internal:getSheetCell(row,'Nº interno','N° interno','Numero interno','Número interno','ID card','Card ID'),
+    control:getSheetCell(row,'Chave de controle','Chave controle','Controle'),
+    name:getSheetCell(row,'Nome','Nome do card','Card','Name'),
+    name_jp:getSheetCell(row,'Nome japonês','Nome Japones','Name JP','Name Japanese'),
+    category:getSheetCell(row,'Categoria','Category'),
+    origin:getSheetCell(row,'Origem','Origin'),
+    element_type:getSheetCell(row,'Tipo de elemento','Element Type'),
+    element:getSheetCell(row,'Elemento','Element'),
+    cost_type:getSheetCell(row,'Tipo de custo','Cost Type'),
+    cost:getSheetCell(row,'Custo','Cost'),

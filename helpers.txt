@@ -1,0 +1,141 @@
+    CREATE INDEX IF NOT EXISTS idx_player_card_history_card ON player_card_history(card_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_card_library_links_card ON card_library_links(card_id, sort_order, id);
+    CREATE INDEX IF NOT EXISTS idx_card_library_links_library ON card_library_links(library_item_id, sort_order, id);
+    CREATE INDEX IF NOT EXISTS idx_cards_type ON cards(type, sort_order, name);
+    CREATE INDEX IF NOT EXISTS idx_cards_category ON cards(category, sort_order, name);
+    CREATE INDEX IF NOT EXISTS idx_roles_rank ON roles(rank_code, sort_order, name);
+    CREATE INDEX IF NOT EXISTS idx_role_ranks_order ON role_ranks(sort_order, code);
+    CREATE INDEX IF NOT EXISTS idx_articles_date ON articles(date DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_edition_articles_edition ON edition_articles(edition_id, sort_order, article_id);
+    CREATE INDEX IF NOT EXISTS idx_edition_articles_article ON edition_articles(article_id);
+    CREATE INDEX IF NOT EXISTS idx_events_public ON events(published,status,featured,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_event_participants_player ON event_participants(player_id,event_id);
+    CREATE INDEX IF NOT EXISTS idx_event_actions_event ON event_actions(event_id,sort_order,id);
+    CREATE INDEX IF NOT EXISTS idx_event_action_history_player ON event_action_history(player_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_event_points_player ON event_points(player_id,event_id);
+    CREATE INDEX IF NOT EXISTS idx_event_rewards_player ON event_reward_history(player_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_event_results_event ON event_results(event_id,slot);
+    CREATE INDEX IF NOT EXISTS idx_event_results_player ON event_results(player_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_schedule_public ON schedule_activities(published,activity_date,start_time,id);
+    CREATE INDEX IF NOT EXISTS idx_schedule_event ON schedule_activities(event_id);
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS mission_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_schedule_mission ON schedule_activities(mission_id);
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS end_date DATE;
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS result_text TEXT DEFAULT '';
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS winner_player_id BIGINT REFERENCES players(id) ON DELETE SET NULL;
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS cycle_label TEXT DEFAULT '';
+    ALTER TABLE schedule_activities ADD COLUMN IF NOT EXISTS source_key TEXT;
+    CREATE INDEX IF NOT EXISTS idx_schedule_end_date ON schedule_activities(end_date);
+    CREATE INDEX IF NOT EXISTS idx_schedule_winner ON schedule_activities(winner_player_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_source_key ON schedule_activities(source_key) WHERE source_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS schedule_champions (
+      id BIGSERIAL PRIMARY KEY,
+      period_key TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'DESTAQUE',
+      title TEXT NOT NULL,
+      winner_nick TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(period_key,category,title,winner_nick)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ally_accounts_username ON ally_accounts(lower(username));
+    CREATE INDEX IF NOT EXISTS idx_ally_cards_ally ON ally_cards(ally_id,card_id);
+
+  `);
+
+  // Migrate the old single-role field to the multiple-role relationship.
+  await pool.query(`
+    INSERT INTO player_roles(player_id, role_id)
+    SELECT p.id, r.id
+    FROM players p
+    JOIN roles r ON lower(trim(p.role))=lower(trim(r.name))
+    LEFT JOIN player_roles pr ON pr.player_id=p.id AND pr.role_id=r.id
+    WHERE trim(COALESCE(p.role,'')) <> ''
+      AND pr.player_id IS NULL
+  `);
+
+
+  const rankDefinitions = [
+    ["I","RANK I — ADMINISTRAÇÃO",
+     "Cargos de maior responsabilidade, ligados à administração de recursos, informações ou estruturas fundamentais do RPG.",
+     "Experiência ou conhecimento equivalente aos requisitos do Rank II e/ou III e pelo menos 60 dias ocupando uma função; elevado domínio dos sistemas e regras; histórico consistente de responsabilidade; alto grau de confiança do Conselho; capacidade de administrar, decidir e coordenar; organização, maturidade e imparcialidade. Ocupação por nomeação ou aprovação do Conselho.",
+     1],
+    ["II","RANK II — GESTÃO",
+     "Cargos responsáveis pela administração e funcionamento de setores específicos do Reino.",
+     "Experiência ou conhecimento equivalente aos requisitos do Rank IV e pelo menos 30 dias de experiência prévia ocupando alguma função; amplo domínio das regras; histórico de responsabilidade e confiança; capacidade de administrar atividades, recursos ou informações; autonomia; orientar e supervisionar; organização e registros; solucionar problemas; maturidade. Nomeação mediante aprovação do Conselho com ciência do Parlamento.",
+     2],
+    ["III","RANK III — COORDENAÇÃO",
+     "Cargos destinados à organização, supervisão ou execução de atividades relevantes para o funcionamento do RPG.",
+     "Experiência ou conhecimento equivalente aos requisitos do Rank IV e pelo menos 15 dias de experiência em cargo anterior; domínio das regras do setor; organização e regularidade; capacidade de coordenar atividades e solucionar problemas; cumprir prazos e registros; responsabilidade; histórico satisfatório. Nomeação depende de aprovação do Conselho.",
+     3],
+    ["IV","RANK IV — ESPECIALIZAÇÃO",
+     "Cargos que dependem de habilidades específicas para produção ou execução de trabalhos especializados.",
+     "Domínio da atividade; conhecimento das regras necessárias; autonomia; regularidade; qualidade compatível; cumprimento dos registros ou procedimentos. O Conselho poderá solicitar avaliação.",
+     4],
+    ["V","RANK V — OPERACIONAL",
+     "Cargos voltados à execução direta de tarefas práticas e atividades operacionais.",
+     "Estar ativo no RPG; conhecer as regras básicas; demonstrar disponibilidade; cumprir atividades; manter organização; respeitar orientações do Conselho. Não é exigida experiência anterior.",
+     5]
+  ];
+  for(const rank of rankDefinitions){
+    await pool.query(
+      `INSERT INTO role_ranks(code,name,description,requirements,sort_order)
+       VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT(code) DO UPDATE SET
+         name=EXCLUDED.name,description=EXCLUDED.description,requirements=EXCLUDED.requirements,
+         sort_order=EXCLUDED.sort_order,updated_at=NOW()`,
+      rank
+    );
+  }
+
+  const officialRoles = [
+    ["Contador de Yuls","V","até 02 por Reino","Por atualização","150, 50, 04 por atualização (máximo de 02 pagamentos por semana por reino).","Função de atualização das Listas de Yuls e EXP, duas vezes por semana, nos períodos definidos no regulamento.","Card Personalizado “+20 de Vida e +10 Mana” ou “+30 de Vida” ou “+20 de Mana” por Listas sem Atrasos; progressão do bônus prevista.","Reino",1],
+    ["Contador de EXP","V","até 02 por Reino","Por atualização","120, 40, 03 por atualização (máximo de 02 pagamentos por semana por reino).","Função de atualização das Listas de Yuls e EXP, duas vezes por semana, nos períodos definidos no regulamento.","Card Personalizado conforme bônus operacional das listas sem atrasos.","Reino",2],
+    ["Contador de Saldo das Organizações","V","01 por Reino","Por atualização","175, 60, 05 por atualização (01 pagamento por semana).","Manutenção da Lista de Saldo das Organizações até o fim do sábado.","Card Personalizado conforme bônus operacional de listas sem atrasos.","Reino",3],
+    ["Contador de Dracmas","V","01 por Reino","Por atualização","150, 50, 4 por atualização (01 pagamento por semana).","Manutenção das listas de saldo e de Dracmas até o fim do sábado.","Card Personalizado conforme bônus operacional de listas sem atrasos.","Reino",4],
+    ["Contador de Ajudas por Luta","V","01 por Reino","Por produção","10, 5 e 1 a cada 10 ajudas contadas.","Contabilizar ajudas enviadas no dia posterior ao fim da missão.","Card Personalizado “+20 de Aumento de Dano” ou “+10 de Redução de Dano” conforme bônus operacional.","Reino",5],
+    ["Vendedor de Itens da Loja Mágica","V","01 por Reino","Por semana e produção","100, 30 e 3 por semana + 75 e 15 a cada 5 vendas na mesma semana.","Enviar as fichas de venda no grupo pertinente no momento da venda, observadas as restrições previstas.","Card Personalizado conforme bônus operacional de vendas, entregas e relatórios no prazo.","Reino",6],
+    ["Contador de Missões","V","01 por Reino","Por produção","50, 25 e 3 a cada 50 magos em missão + 20 e 10 por andamento com diferença de 2 horas entre si ou a cada 15 magos.","Mínimo de 2 andamentos por dia de missão e entrega do resultado padronizado; missões revezadas entre Reinos.","Card Personalizado conforme bônus operacional de contabilizações/entregas/relatórios no prazo.","Reino",7],
+    ["Crupiê/Mestre de Apostas do Cassino","V","04 por Reino","Por abertura e participante","80, 20 e 3 por abertura de jogo + 20 e 10 por pessoa em seu jogo que participe.","Caso fique sem abrir jogos por 15 dias será retirado da função.","Card Personalizado conforme bônus operacional de abertura em todas as edições do cassino no mês.","Reino",8],
+    ["Editor de Imagens","V","02 por organização em cada Reino","Por produção","75, 25 e 4 por conjunto de imagens editadas e postadas com aprovação do Conselho (máximo de 02 pagamentos por semana).","Produção e postagem de conjuntos de imagens com aprovação do Conselho.","Card Personalizado conforme bônus operacional aplicável.","Organização",9],
+
+    ["Desenhista","IV","02 por Organização na Forja do Reino e 01 por Organização na Forja Central","Por produção","50, 30, 03 e 01 por card produzido + 10, 5 por cada troca de elemento.","Desenhos submetidos conforme o fluxo e prazos da Forja do Reino/Forja Central.","Card Personalizado “Dreno 20 de Vida e 10 Mana” ou “Dreno de 30 de Vida” ou “Dreno 20 de Mana” conforme o bônus operacional.","Organização",10],
+    ["Criador de Imagens e Vídeos","IV","Membros que também exercem a função de Editores de Imagem","Por produção","50, 30, 03 e 01 por imagem produzida e postada no Feed sobre assunto relevante do RPG e aprovada pelo Parlamento.","Solicitações no grupo de divulgação; prazo mínimo de 48 horas para envio.","Card Personalizado conforme regra ³ do bônus operacional.","Organização",11],
+    ["Organizador de Eventos","IV","02 por Organização","Por evento e participante","70, 35, 05 e 01 por evento produzido sem reclamações ou indícios de imparcialidade + 10 e 5 a cada 10 participantes devidamente comprovados.","Organizar os eventos distribuídos no planejamento mensal do Reino.","Card Personalizado conforme regra ³ do bônus operacional.","Organização",12],
+    ["Jornalistas","IV","02 vagas por organização","Por matéria","75, 25, 03 por matéria pública com correlação ao RPG e aprovada; 50, 15 e 02 por matéria sem correlação e aprovada; 25, 5 e 01 por matéria não aprovada (máximo de 03 pagamentos por semana).","Enviar matérias até o dia anterior à publicação, conforme planejamento do jornal.","Card Personalizado conforme regra ³ do bônus operacional.","Organização",13],
+    ["Recuperadores de Card","IV","02 vagas por Reino","Por produção","40, 20 e 1 a cada 20 Cards Recuperados.","Demandas rotativas entre recuperadores e membros dos respectivos Reinos; período de 15 dias para fins de pagamento.","Card Personalizado conforme regra ³ do bônus operacional.","Reino",14],
+    ["Juízes de Lutas","IV","De acordo com sua patente","Por atividade","De acordo com a tabela dos juízes.","Aplicação das regras de ajuizamento, estrelas e restrições conforme tipo e complexidade das lutas.","Card Personalizado da regra ⁴ para os 05 com maior quantidade de lutas ajuizadas sem reclamações.","Reino",15],
+
+    ["Coordenador de Forja","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Forja e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",16],
+    ["Coordenador de Divulgação","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Divulgação e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",17],
+    ["Coordenador de Eventos","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Eventos e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",18],
+    ["Coordenador de Jornal","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o setor de Jornal e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",19],
+    ["Coordenador de Catalogação de Card’s","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena a Catalogação de Cards e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",20],
+    ["Coordenador de Ajuizamento","III","01 por Reino","Mensal","750, 500 e 25 por mês.","Coordena o Ajuizamento e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",21],
+    ["Coordenador de Cassino","III","01 por Reino","Conforme atividade","De acordo com sua atividade e nunca somando rendimentos acima do rendimento base dos Coordenadores.","Coordena o setor de Cassino e participa do planejamento mensal, sujeito às aprovações previstas.","Cargo privativo a Magos Intermediários ou patentes superiores.","Reino",22],
+
+    ["Líder de Casa","II","03 por Casa (01 líder e 02 vice-líderes)","Mensal e por meta","250, 150, 5 por meta batida mensalmente + pagamentos individuais por magos sem organizações participantes de missões, torneios, eventos e treinados.","Liderança da Casa e acompanhamento de metas e participação.","Card Personalizado “Aumento 30 de Vida, Aumento 30 de Mana e Aumento 30 de Dano”; progressão e Card único Rank SS conforme regulamento.","Casa",23],
+    ["Dirigente de Organização","II","02 por Organização","Por missão","150, 100 e 4 por missão com todos os membros participantes.","Direção da Organização e acompanhamento das missões com participação dos membros.","Card Personalizado conforme regra ⁶, com progressão e Card único Rank SS após 6 meses consecutivos.","Organização",24],
+
+    ["Administrador de Reino","I","01 por patente, por Reino","Por produção de metas","500, 250 e 10 a cada 100 magos em missão, inscritos em torneio e inscritos em exame.","Administração de recursos, informações ou estruturas importantes do Reino.","Card Personalizado Rank SS caso bata as metas estabelecidas, sem aumento de efeitos e permanente após 03 vezes consecutivas.","Reino",25],
+    ["Imperador Supremo","I","01 por patente, por Reino","Por produção de metas","500, 250 e 10 a cada 100 magos em missão, inscritos em torneio e inscritos em exame.","Exercício da autoridade máxima prevista para o cargo no Reino.","Card Personalizado Rank SS caso bata as metas estabelecidas, sem aumento de efeitos e permanente após 03 vezes consecutivas.","Reino",26]
+  ];
+
+  for(const role of officialRoles){
+    const [name,rank,vacancies,paymentMode,remunerationDetail,responsibilities,benefits,scope,sortOrder]=role;
+    const requirements=["III","II","I"].includes(rank)
+      ? "Aplicam-se também os requisitos do respectivo Rank; nomeação/aprovação conforme o regulamento."
+      : "";
+    await pool.query(
+      `INSERT INTO roles(name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope,active)
+       VALUES($1,$2,0,$3,$4,$5,$6,$7,$8,$9,$10,1)
+       ON CONFLICT(name) DO UPDATE SET
+         description=EXCLUDED.description,
+         sort_order=EXCLUDED.sort_order,
+         rank_code=EXCLUDED.rank_code,
+         vacancies=EXCLUDED.vacancies,
+         payment_mode=EXCLUDED.payment_mode,
+         remuneration_detail=EXCLUDED.remuneration_detail,
+         requirements=EXCLUDED.requirements,
+         benefits=EXCLUDED.benefits,
