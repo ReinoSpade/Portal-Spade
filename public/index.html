@@ -571,7 +571,7 @@
       <option value="yuls">Mais Yuls</option><option value="power">Mais força</option>
       <option value="ranking">Melhor ranking</option><option value="updated">Mais recentes</option>
     </select>
-    <button class="outline dark-outline" id="exportPlayersBtn" title="Baixar os dados atuais dos jogadores em Excel">📤 Baixar planilha</button><button class="gold" id="bulkUpdatePlayersBtn" title="Enviar uma planilha editada para atualizar jogadores">📥 Atualizar por planilha</button><button class="gold" id="importPlayersBtn">＋ Importar novos</button><button class="gold" id="newPlayerBtn">＋ Novo jogador</button>
+    <button class="outline dark-outline" id="exportPlayersBtn" title="Baixar os dados atuais dos jogadores em Excel">📤 Baixar planilha</button><button class="outline dark-outline" id="exportVisiblePlayersBtn" title="Baixar somente os jogadores que estão visíveis com os filtros atuais">📤 Exportar visíveis</button><button class="gold" id="bulkUpdatePlayersBtn" title="Enviar uma planilha editada para atualizar jogadores">📥 Atualizar por planilha</button><button class="gold" id="importPlayersBtn">＋ Importar novos</button><button class="gold" id="newPlayerBtn">＋ Novo jogador</button>
     <button class="outline dark-outline" id="refreshAdminBtn">↻ Atualizar</button>
   </div>
   <div class="admin-mission-manager panel" id="adminMissionManager">
@@ -599,7 +599,8 @@
       <button type="button" class="bulk-action" data-bulk-action="patent">🎖️ Patente</button>
       <button type="button" class="bulk-action" data-bulk-action="roles">👑 Cargos</button>
       <button type="button" class="bulk-action" data-bulk-action="missions">📋 Missões</button>
-      <button type="button" class="bulk-action" data-bulk-action="power">⚔️ Força</button>
+      <button type="button" class="bulk-action" data-bulk-action="attributes">📊 Atributos</button>
+      <button type="button" class="bulk-action" data-bulk-action="power">⚔️ Recalcular força</button>
       <button type="button" class="bulk-action" data-bulk-action="visibility">👁️ Visibilidade</button><button type="button" class="bulk-action" data-bulk-action="status">🔐 Acesso</button>
     </div>
   </div>
@@ -1192,6 +1193,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=65.1.0-integration"></script>
+<script src="/app.js?v=67.0.0-players"></script>
 </body>
 </html>
