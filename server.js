@@ -2129,7 +2129,7 @@ app.get("/api/me/cards", async (req,res)=>{
   const id=viewer.id;
   try{
     const r=await pool.query(
-      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,
+      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,pc.quantity,
               pc.acquisition_type,pc.acquisition_name,pc.acquisition_id,pc.acquired_at,pc.updated_at
        FROM player_cards pc
        JOIN cards c ON c.id=pc.card_id
@@ -2140,7 +2140,7 @@ app.get("/api/me/cards", async (req,res)=>{
     res.json({
       cards:r.rows.map(c=>({
         id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
-        description:c.description||"",
+        description:c.description||"",quantity:Number(c.quantity||1),
         acquisition_type:c.acquisition_type||"OUTRO",
         acquisition_name:c.acquisition_name||"",
         acquisition_id:c.acquisition_id?Number(c.acquisition_id):null,
@@ -3505,6 +3505,34 @@ app.get("/api/admin/cards", requireAdmin, async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar banco de cards."});}
 });
 
+app.get("/api/admin/cards/:id/details", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
+  try{
+    const [cardR,playersR,alliesR]=await Promise.all([
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,c.created_at,c.updated_at
+                  FROM cards c WHERE c.id=$1`,[id]),
+      pool.query(`SELECT p.id,p.nick,p.number,p.house,p.patent,pc.quantity,pc.acquisition_type,pc.acquisition_name,pc.acquired_at,pc.updated_at
+                  FROM player_cards pc JOIN players p ON p.id=pc.player_id
+                  WHERE pc.card_id=$1 ORDER BY p.nick COLLATE "C",p.id`,[id]),
+      pool.query(`SELECT a.id,a.display_name,a.username,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
+                  FROM ally_cards ac JOIN ally_accounts a ON a.id=ac.ally_id
+                  WHERE ac.card_id=$1 ORDER BY a.display_name COLLATE "C",a.id`,[id])
+    ]);
+    if(!cardR.rows[0])return res.status(404).json({error:"Card não encontrado."});
+    const c=cardR.rows[0];
+    res.json({
+      card:{...c,id:Number(c.id),power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),sort_order:Number(c.sort_order||0),active:Number(c.active??1)},
+      players:playersR.rows.map(x=>({...x,id:Number(x.id),quantity:Number(x.quantity||1)})),
+      allies:alliesR.rows.map(x=>({...x,id:Number(x.id)})),
+      holders_total:playersR.rows.length+alliesR.rows.length
+    });
+  }catch(e){
+    console.error(e);
+    res.status(500).json({error:"Erro ao carregar a ficha do card."});
+  }
+});
+
 app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
   const b=req.body||{};
   const namePt=String(b.name_pt||b.name||"").trim(), nameJp=String(b.name_jp||"").trim();
@@ -3550,13 +3578,23 @@ app.put("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   if(elementType==="ELEMENTAL"&&!element)return res.status(400).json({error:"Informe o elemento do card elemental."});
   if(damageType==="SEM_DANO" && damage>0)return res.status(400).json({error:"Cards sem dano devem possuir Dano 0."});
   if(damageType!=="SEM_DANO" && damage<=0)return res.status(400).json({error:"Informe um valor de dano para este tipo de dano."});
+  const client=await pool.connect();
   try{
-    const categoryCheck=await pool.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
-    if(!categoryCheck.rowCount)return res.status(400).json({error:"Categoria de card inválida ou inativa."});
-    const r=await pool.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,damageType,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
-    if(!r.rows[0])return res.status(404).json({error:"Card não encontrado."});
-    res.json({card:r.rows[0]});
-  }catch(e){console.error(e);if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});res.status(500).json({error:"Erro ao atualizar card."});}
+    await client.query('BEGIN');
+    const categoryCheck=await client.query(`SELECT 1 FROM card_categories WHERE name=$1 AND active=1 LIMIT 1`,[category]);
+    if(!categoryCheck.rowCount){await client.query('ROLLBACK');return res.status(400).json({error:"Categoria de card inválida ou inativa."});}
+    const holderR=await client.query(`SELECT DISTINCT player_id FROM player_cards WHERE card_id=$1`,[id]);
+    const r=await client.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16 RETURNING *`,[namePt,nameJp,category,elementType,element,costType,cost,power,damage,damageType,origin,status,description,sort_order,status==="ATIVO"?1:0,id]);
+    if(!r.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:"Card não encontrado."});}
+    for(const holder of holderR.rows){ await refreshPlayerCardPower(client, holder.player_id); }
+    await client.query('COMMIT');
+    res.json({card:r.rows[0],players_recalculated:holderR.rows.length});
+  }catch(e){
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error(e);
+    if(e.code==="23505")return res.status(400).json({error:"Esse card já existe."});
+    res.status(500).json({error:"Erro ao atualizar card."});
+  }finally{client.release();}
 });
 
 app.delete("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
@@ -3859,7 +3897,7 @@ app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'
     const issues=[...cards.issues,...links.issues];
     if(issues.length)return res.status(400).json({error:'A operação foi bloqueada porque existem dados inválidos. Nenhuma alteração foi aplicada.',issues});
     const client=await pool.connect();
-    let created=0,updated=0,added=0,removed=0;const touchedPlayers=new Set();
+    let created=0,updated=0,added=0,removed=0;const touchedPlayers=new Set(),updatedCardIds=new Set();
     try{
       await client.query('BEGIN');
       for(const r of cards.rows){
@@ -3875,7 +3913,12 @@ app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'
           if(!current.rows[0])throw Object.assign(new Error(`Card ${r.id} não foi encontrado durante a gravação.`),{statusCode:400});
           await client.query(`UPDATE cards SET name=$1,name_jp=$2,name_pt=$1,type=$3,category=$3,element_type=$4,element=$5,cost_type=$6,cost=$7,power_value=$8,damage_value=$9,damage_type=$10,origin=$11,status=$12,description=$13,sort_order=$14,active=$15,updated_at=NOW() WHERE id=$16`,[r.name,r.name_jp,r.category,r.element_type,r.element,r.cost_type,r.cost,r.power_value,r.damage_value,r.damage_type,r.origin,r.status,r.description,r.sort_order,r.status==='ATIVO'?1:0,r.id]);
           updated++;
+          updatedCardIds.add(Number(r.id));
         }
+      }
+      if(updatedCardIds.size){
+        const holderPlayers=await client.query(`SELECT DISTINCT player_id FROM player_cards WHERE card_id = ANY($1::bigint[])`,[[...updatedCardIds]]);
+        for(const hp of holderPlayers.rows)touchedPlayers.add(Number(hp.player_id));
       }
       for(const r of links.rows.filter(x=>!x.ignored)){
         const pr=(await client.query(`SELECT id,nick FROM players WHERE id=$1 FOR UPDATE`,[r.player_id_num])).rows[0];
@@ -5856,7 +5899,7 @@ app.get("/api/admin/players/:id/cards", requireAdmin, async (req,res)=>{
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Jogador inválido."});
   try{
     const r=await pool.query(
-      `SELECT c.id,c.name,COALESCE(c.category,c.type) AS category,c.cost,c.description,c.active,
+      `SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.active,pc.quantity,
               pc.acquisition_type,pc.acquisition_id,pc.acquisition_name,pc.acquired_at,pc.updated_at
        FROM player_cards pc
        JOIN cards c ON c.id=pc.card_id
@@ -5866,8 +5909,8 @@ app.get("/api/admin/players/:id/cards", requireAdmin, async (req,res)=>{
     );
     res.json({
       cards:r.rows.map(c=>({
-        id:Number(c.id),name:c.name,category:c.category||"Outros",cost:c.cost||"",
-        description:c.description||"",active:Number(c.active),
+        id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
+        description:c.description||"",active:Number(c.active),quantity:Number(c.quantity||1),
         acquisition_type:c.acquisition_type||"OUTRO",
         acquisition_id:c.acquisition_id?Number(c.acquisition_id):null,
         acquisition_name:c.acquisition_name||"",
