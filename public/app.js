@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[]};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardDetail:null};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -1262,7 +1262,8 @@ function renderPlayerCardItem(c){
     <p class="card-description">${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
     <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>Dano: <b>${Number(c.damage_value||0)}</b> <small>${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}</small></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${elemental&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
     ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
-    <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}</div>
+    <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}${Number(c.quantity||1)>1?` • Quantidade: ${Number(c.quantity)}`:""}</div>
+    <button type="button" class="outline dark-outline small card-view-button" data-player-card-view="${Number(c.id)}">👁 Ver ficha do Card #${Number(c.id)}</button>
   </article>`;
 }
 function renderPlayerCards(cards){
@@ -1280,6 +1281,7 @@ function renderPlayerCards(cards){
   }
   const groups={}; filtered.forEach(c=>(groups[c.category]??=[]).push(c));
   grid.innerHTML=Object.entries(groups).map(([category,items])=>`<section class="player-card-group"><div class="player-card-group-head"><h2>${escapeHtml(category)}</h2><span>${items.length} card(s)</span></div><div class="player-card-grid">${items.map(renderPlayerCardItem).join("")}</div></section>`).join("");
+  qsa("[data-player-card-view]").forEach(b=>b.addEventListener("click",()=>openCardDetailModal(Number(b.dataset.playerCardView),false)));
 }
 
 async function loadAllyCards(){
@@ -2219,10 +2221,10 @@ function renderAdminPlayerCardsPanel(p){
   const list=inventory.length
     ? inventory.map(c=>`<div class="admin-card-row">
         <div>
-          <b>${escapeHtml(c.name)}</b>
-          <small>${escapeHtml(c.category)}${c.cost?` • ${escapeHtml(c.cost)}`:""} • ${escapeHtml(acquisitionLabel(c))}</small>
+          <b>#${Number(c.id)} • ${escapeHtml(c.name)}</b>
+          <small>${escapeHtml(c.category)}${c.cost?` • ${escapeHtml(c.cost)}`:""} • Poder ${Number(c.power_value||0)} • ${escapeHtml(acquisitionLabel(c))}</small>
         </div>
-        <button type="button" class="card-remove-btn" data-admin-card-remove="${c.id}">Retirar</button>
+        <div class="admin-card-row-actions"><button type="button" class="outline dark-outline small" data-admin-card-view="${c.id}">👁</button><button type="button" class="card-remove-btn" data-admin-card-remove="${c.id}">Retirar</button></div>
       </div>`).join("")
     : `<div class="admin-history-empty">Este jogador ainda não possui cards.</div>`;
 
@@ -2379,6 +2381,7 @@ function renderEditor(p){
   qs("#adminCardSourceType")?.addEventListener("change",updateAdminCardSourceFields);
   updateAdminCardSourceFields();
   qsa("[data-admin-card-remove]").forEach(b=>b.addEventListener("click",()=>removeAdminCard(Number(b.dataset.adminCardRemove))));
+  qsa("[data-admin-card-view]").forEach(b=>b.addEventListener("click",()=>openCardDetailModal(Number(b.dataset.adminCardView),true)));
   qsa("[data-mission-delete]").forEach(b=>b.addEventListener("click",()=>deleteMission(Number(b.dataset.missionDelete))));
   qs("#adminExpSource")?.addEventListener("change",()=>{const src=qs("#adminExpSource")?.value||"",custom=qs("#adminExpCustom");const fixed={MISSAO_LUTA:10,MISSAO_RECRUTA:15,EVENTO_PARTICIPACAO:2,TORNEIO_PARTICIPACAO:5,EXAME_VENCEDOR:12,EVENTO_VITORIA:7,TORNEIO_VITORIA:20,RANKING_VITORIA:2,JUIZ_INTER:4,JUIZ_SENIOR:8,ORGANIZAR_EXAME:10};const val=fixed[src];if(custom){custom.disabled=val===undefined;custom.value=val===undefined?"":String(val);}});
   qs("#adminExpForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#adminExpError");err.textContent="";const src=qs("#adminExpSource")?.value||"AJUSTE",fixed={MISSAO_LUTA:10,MISSAO_RECRUTA:15,EVENTO_PARTICIPACAO:2,TORNEIO_PARTICIPACAO:5,EXAME_VENCEDOR:12,EVENTO_VITORIA:7,TORNEIO_VITORIA:20,RANKING_VITORIA:2,JUIZ_INTER:4,JUIZ_SENIOR:8,ORGANIZAR_EXAME:10},amount=Number(fixed[src] ?? (qs("#adminExpCustom")?.value || 0));try{const d=await adminApi(`/api/admin/players/${p.id}/exp`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,source_code:src,source_detail:qs("#adminExpDetail")?.value||"",reason:qs("#adminExpReason")?.value||""})});await selectAdminPlayer(p.id);alert(d.upgraded?`EXP registrada e Grimório elevado para o nível ${d.level}. A nova página pode ser registrada.`:"EXP registrada.");}catch(ex){err.textContent=ex.message}});
@@ -2568,6 +2571,12 @@ qs("#closeCardBulkSheet")?.addEventListener("click",closeCardBulkSheet);
 qs("#cardBulkSheetCancel")?.addEventListener("click",closeCardBulkSheet);
 qs("#cardBulkSheetFile")?.addEventListener("change",previewCardBulkSheet);
 qs("#cardBulkSheetConfirm")?.addEventListener("click",confirmCardBulkSheet);
+qs("#adminCardSearch")?.addEventListener("input",e=>{state.cardCatalogSearch=e.target.value;renderAdminCardCatalog();});
+qs("#adminCardCatalogFilter")?.addEventListener("change",e=>{state.cardCatalogCategory=e.target.value;renderAdminCardCatalog();});
+qs("#closeCardDetail")?.addEventListener("click",closeCardDetailModal);
+qs("#closeCardDetailFooter")?.addEventListener("click",closeCardDetailModal);
+qs("#cardDetailModal")?.addEventListener("click",e=>{if(e.target.id==="cardDetailModal")closeCardDetailModal();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&qs("#cardDetailModal")?.classList.contains("open"))closeCardDetailModal();});
 qs("#bulkCenterPlayersExport")?.addEventListener("click",()=>downloadPlayersSheet());
 qs("#bulkCenterPlayersImport")?.addEventListener("click",openPlayerBulkSheet);
 qs("#bulkCenterCardsExport")?.addEventListener("click",()=>downloadCardsSheet());
@@ -2602,25 +2611,21 @@ qs("#roleCancelBtn").addEventListener("click",resetRoleForm);
 async function loadAdminCards(){
   try{
     const d=await adminApi("/api/admin/cards");
-    state.adminCards=d.cards||[];
-    state.cardCategories=d.categories||d.types||[];
-    renderAdminCardCatalog();
-  }catch(e){console.error(e)}
-}
-
-async function loadAdminCards(){
-  try{
-    const d=await adminApi("/api/admin/cards");
     state.adminCards=d.cards||[];state.cardCategories=d.categories||[];state.cardOrigins=d.origins||[];state.cardElementTypes=d.element_types||[];state.cardCostTypes=d.cost_types||[];state.cardDamageTypes=d.damage_types||[];state.cardStatuses=d.statuses||[];
     renderAdminCardCatalog();
   }catch(e){console.error(e)}
 }
 
 function populateCardSelects(){
-  const cat=qs("#adminCardCategory"),origin=qs("#cardOrigin"),damageType=qs("#cardDamageType");
+  const cat=qs("#adminCardCategory"),origin=qs("#cardOrigin"),damageType=qs("#cardDamageType"),catalogCat=qs("#adminCardCatalogFilter");
   if(cat)cat.innerHTML=(state.cardCategories||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
   if(origin)origin.innerHTML=(state.cardOrigins||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
   if(damageType)damageType.innerHTML=(state.cardDamageTypes||["DANO_BRUTO","DANO_CONTINUO","DANO_DIRETO","SEM_DANO"]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x.replaceAll('_',' '))}</option>`).join("");
+  if(catalogCat){
+    const current=state.cardCatalogCategory||"";
+    catalogCat.innerHTML=`<option value="">Todas as categorias</option>`+(state.cardCategories||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
+    catalogCat.value=current;
+  }
 }
 function resetCardForm(){
   const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value="Automático";populateCardSelects();
@@ -2632,9 +2637,37 @@ function editCardForm(id){
 }
 function renderAdminCardCatalog(){
   const list=qs("#adminCardCatalogList");if(!list)return;populateCardSelects();
-  list.innerHTML=(state.adminCards||[]).map(c=>`<div class="card-catalog-item"><div><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card cadastrado.</div>`;
+  const term=String(state.cardCatalogSearch||"").trim().toLowerCase();
+  const category=String(state.cardCatalogCategory||"");
+  const cards=(state.adminCards||[]).filter(c=>{
+    if(category && String(c.category||"")!==category)return false;
+    if(!term)return true;
+    return `${c.id} ${c.name_pt||c.name} ${c.name_jp||""} ${c.category||""} ${c.origin||""} ${c.element||""} ${c.description||""}`.toLowerCase().includes(term);
+  });
+  list.innerHTML=cards.map(c=>`<div class="card-catalog-item"><div class="card-catalog-main"><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-view="${c.id}">👁</button><button type="button" data-card-edit="${c.id}">✎</button><button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card corresponde aos filtros.</div>`;
+  qsa("[data-card-view]").forEach(b=>b.onclick=()=>openCardDetailModal(Number(b.dataset.cardView),true));
   qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
 }
+
+function cardDetailMetaLabel(type){return ({MANA:"♦️ Mana",VIDA:"❤️ Vida",SEM_CUSTO:"Sem custo"})[type]||type||"Sem custo";}
+function cardDetailDamageLabel(c){const t=String(c.damage_type||"SEM_DANO");return t==="SEM_DANO"?"Sem dano":`${Number(c.damage_value||0)} • ${t.replaceAll('_',' ')}`;}
+function renderCardDetailBody(data,isAdmin){
+  const c=data.card||data;
+  const holderRows=isAdmin?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">POSSE DO CARD</p><h3>Jogadores</h3></div><strong>${Number(data.players?.length||0)}</strong></div>${data.players?.length?`<div class="card-holder-list">${data.players.map(p=>`<div class="card-holder-row"><div><b>${escapeHtml(p.nick)}</b><small>#${Number(p.id)} • ${escapeHtml(p.house||"Sem Casa")}${p.patent?` • ${escapeHtml(p.patent)}`:""}</small></div><span>${Number(p.quantity||1)} un.</span></div>`).join("")}</div>`:`<div class="card-detail-empty">Nenhum jogador possui este Card.</div>`}</section><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">ALIADOS</p><h3>Contas de aliado</h3></div><strong>${Number(data.allies?.length||0)}</strong></div>${data.allies?.length?`<div class="card-holder-list">${data.allies.map(a=>`<div class="card-holder-row"><div><b>${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)}</small></div><span>Aliado</span></div>`).join("")}</div>`:`<div class="card-detail-empty">Nenhum aliado possui este Card.</div>`}</section>`:"";
+  return `<div class="card-detail-hero"><div class="card-detail-icon">${c.element_type==="ELEMENTAL"?escapeHtml(c.element||"✦"):"✦"}</div><div><div class="card-detail-tags"><span>${escapeHtml(c.category||"Outros")}</span><span>${c.element_type==="ELEMENTAL"?"ELEMENTAL":"NÃO ELEMENTAL"}</span><span>${escapeHtml(c.status||"ATIVO")}</span></div><h3>${escapeHtml(c.name_pt||c.name)}</h3>${c.name_jp?`<p>${escapeHtml(c.name_jp)}</p>`:""}</div></div><div class="card-detail-stats"><div><small>Nº interno</small><b>#${Number(c.id)}</b></div><div><small>Custo</small><b>${escapeHtml(c.cost||"—")}</b><span>${escapeHtml(cardDetailMetaLabel(c.cost_type))}</span></div><div><small>Poder</small><b>${Number(c.power_value||0)}</b></div><div><small>Dano</small><b>${escapeHtml(cardDetailDamageLabel(c))}</b></div><div><small>Origem</small><b>${escapeHtml(c.origin||"Exclusivo")}</b></div></div><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">DESCRIÇÃO</p><h3>Efeito do Card</h3></div></div><div class="card-detail-description">${escapeHtml(c.description||"Descrição não cadastrada.").replace(/\n/g,"<br>")}</div></section>${holderRows}`;
+}
+async function openCardDetailModal(id,isAdmin=true){
+  const modal=qs("#cardDetailModal");if(!modal)return;
+  const local=(state.adminCards||[]).find(c=>Number(c.id)===Number(id)) || (state.playerCards||[]).find(c=>Number(c.id)===Number(id));
+  if(!local)return;
+  modal.hidden=false;modal.classList.add("open");document.body.classList.add("card-detail-open");
+  qs("#cardDetailTitle").textContent=`#${Number(local.id)} • ${local.name_pt||local.name}`;qs("#cardDetailSubtitle").textContent=isAdmin?"Catálogo oficial e possuidores do Card.":"Detalhes do Card no seu inventário.";qs("#cardDetailBody").innerHTML=renderCardDetailBody({card:local,players:[],allies:[]},false);
+  if(isAdmin){
+    try{const d=await adminApi(`/api/admin/cards/${Number(id)}/details`);state.cardDetail=d;qs("#cardDetailBody").innerHTML=renderCardDetailBody(d,true);qs("#cardDetailSubtitle").textContent=`${Number(d.holders_total||0)} conta(s) possuem este Card.`;}catch(e){qs("#cardDetailBody").innerHTML=`<div class="card-detail-empty">${escapeHtml(e.message||"Não foi possível carregar os possuidores do Card.")}</div>`;}
+  }
+}
+function closeCardDetailModal(){const modal=qs("#cardDetailModal");if(!modal)return;modal.classList.remove("open");modal.hidden=true;document.body.classList.remove("card-detail-open");state.cardDetail=null;}
+
 async function deleteCard(id){const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;if(!confirm(`Excluir o card "${c.name_pt||c.name}"?`))return;try{await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});if(Number(qs("#cardId").value)===id)resetCardForm();await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);alert("Card excluído.");}catch(e){alert(e.message)}}
 
 async function loadAdminEvents(){
