@@ -806,6 +806,10 @@
         <input id="newCardCategory" placeholder="Nova categoria">
         <button type="button" class="outline dark-outline small" id="addCardCategoryBtn">+ Categoria</button>
       </div>
+      <div class="card-catalog-filters">
+        <input id="adminCardSearch" class="search" placeholder="Pesquisar no catálogo por nome, categoria, elemento ou origem...">
+        <select id="adminCardCatalogFilter" class="admin-filter"><option value="">Todas as categorias</option></select>
+      </div>
       <div id="adminCardCatalogList" class="card-catalog-list"></div>
     </div>
   </div>
@@ -1165,12 +1169,29 @@
 </div>
 <div class="admin-danger"><button class="outline danger" id="logoutAdminBtn">Sair da administração</button></div>
 </div></section>
+  <div class="card-detail-modal" id="cardDetailModal" hidden>
+    <div class="card-detail-shell" role="dialog" aria-modal="true" aria-labelledby="cardDetailTitle">
+      <div class="card-detail-head">
+        <div>
+          <p class="eyebrow" id="cardDetailEyebrow">FICHA DO CARD</p>
+          <h2 id="cardDetailTitle">Card</h2>
+          <p id="cardDetailSubtitle">Carregando informações...</p>
+        </div>
+        <button type="button" class="journal-close" id="closeCardDetail">×</button>
+      </div>
+      <div id="cardDetailBody" class="card-detail-body">
+        <div class="card-detail-loading">Carregando ficha...</div>
+      </div>
+      <div class="card-detail-footer"><span id="cardDetailFooterNote">Número interno permanente do catálogo.</span><button class="outline dark-outline small" type="button" id="closeCardDetailFooter">Fechar</button></div>
+    </div>
+  </div>
+
 </main>
 <footer class="site-footer">
   <div class="footer-brand"><span>♠</span><b>THE KING MAGAZINE</b></div>
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=63.0.0"></script>
+<script src="/app.js?v=64.0.0-cards"></script>
 </body>
 </html>
