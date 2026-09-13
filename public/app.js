@@ -107,46 +107,55 @@ function runPageTransition(){
 
 let globalSearchTimer=null;
 let globalSearchAbort=null;
-function closeGlobalSearch(){const box=qs("#globalSearchResults");if(box){box.hidden=true;box.innerHTML="";}const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle");if(panel){panel.hidden=true;}if(toggle){toggle.setAttribute("aria-expanded","false");}}
-function openGlobalSearch(){const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle"),input=qs("#globalSearchInput");if(!panel)return;panel.hidden=false;toggle?.setAttribute("aria-expanded","true");setTimeout(()=>input?.focus(),0);}
-
-function searchResultIcon(kind){return {player:'👤',house:'🏰',event:'🎪',mission:'⚔️',schedule:'📅',article:'📰',library:'📚',card:'🃏'}[kind]||'•';}
+const GLOBAL_SEARCH_HISTORY_KEY='spade-global-search-history';
+const GLOBAL_SEARCH_LABELS={player:'Jogadores',card:'Cards',library:'Biblioteca',house:'Casas',mission:'Missões',event:'Eventos',schedule:'Cronograma',article:'Jornal',news:'Notícias',status:'Status',role:'Cargos',patent:'Patentes'};
+const GLOBAL_SEARCH_ICONS={player:'👤',card:'🃏',library:'📚',house:'🏰',mission:'⚔️',event:'🎪',schedule:'📅',article:'📰',news:'🗞️',status:'📢',role:'👑',patent:'🎖️'};
+function getGlobalSearchHistory(){try{const a=JSON.parse(localStorage.getItem(GLOBAL_SEARCH_HISTORY_KEY)||'[]');return Array.isArray(a)?a.filter(x=>typeof x==='string').slice(0,5):[]}catch{return[]}}
+function saveGlobalSearchHistory(q){const term=String(q||'').trim();if(term.length<2)return;try{const next=[term,...getGlobalSearchHistory().filter(x=>x.toLocaleLowerCase('pt-BR')!==term.toLocaleLowerCase('pt-BR'))].slice(0,5);localStorage.setItem(GLOBAL_SEARCH_HISTORY_KEY,JSON.stringify(next));}catch{}}
+function closeGlobalSearch(){const box=qs("#globalSearchResults");if(box){box.hidden=true;box.innerHTML="";}const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle");if(panel)panel.hidden=true;if(toggle)toggle.setAttribute("aria-expanded","false");}
+function renderGlobalSearchRecent(){const box=qs('#globalSearchResults');if(!box)return;const history=getGlobalSearchHistory();if(!history.length){box.innerHTML='<div class="global-search-empty">Digite pelo menos 2 caracteres para pesquisar.</div>';box.hidden=false;return;}box.innerHTML=`<div class="global-search-head"><span>BUSCAS RECENTES</span><small>somente neste navegador</small></div><div class="global-search-recent-list">${history.map(q=>`<button type="button" class="global-search-recent" data-search-history="${escapeHtml(q)}"><span>↗</span><b>${escapeHtml(q)}</b></button>`).join('')}</div>`;box.hidden=false;qsa('[data-search-history]').forEach(b=>b.addEventListener('click',()=>{const input=qs('#globalSearchInput');if(input){input.value=b.dataset.searchHistory||'';performGlobalSearch(input.value,true);}}));}
+function openGlobalSearch(){const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle"),input=qs("#globalSearchInput");if(!panel)return;panel.hidden=false;toggle?.setAttribute("aria-expanded","true");if(!(input?.value||'').trim())renderGlobalSearchRecent();setTimeout(()=>input?.focus(),0);}
+function searchResultIcon(kind){return GLOBAL_SEARCH_ICONS[kind]||'•';}
 function renderGlobalSearchResults(data){
   const box=qs("#globalSearchResults"); if(!box)return;
   const results=data?.results||[];
-  if(!results.length){box.innerHTML='<div class="global-search-empty">Nenhum resultado encontrado.</div>';box.hidden=false;return;}
-  const labels={player:'Jogador',house:'Casa',event:'Evento',mission:'Missão',schedule:'Cronograma',article:'Jornal',library:'Biblioteca',card:'Card'};
+  if(!results.length){box.innerHTML=`<div class="global-search-empty"><strong>Nenhum resultado para “${escapeHtml(data?.query||'')}”.</strong><small>Experimente menos palavras ou termos como “paralisia”, “Mattiel”, “Casa Mars” ou “#184”.</small></div>`;box.hidden=false;return;}
+  const groups=[];for(const g of (data.groups||[])){const items=results.filter(r=>r.kind===g.kind);if(items.length)groups.push({...g,items});}
   box.innerHTML=`<div class="global-search-head"><span>RESULTADOS</span><small>${results.length} encontrado${results.length===1?'':'s'}</small></div>`+
-    results.map((r,i)=>`<button type="button" class="global-search-result" data-search-kind="${escapeHtml(r.kind)}" data-search-id="${Number(r.id)||0}" data-search-page="${escapeHtml(r.page||'home')}"><span class="global-search-icon">${searchResultIcon(r.kind)}</span><span class="global-search-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(labels[r.kind]||'Portal')}${r.meta?` • ${escapeHtml(r.meta)}`:''}</small></span></button>`).join("");
+    groups.map(g=>`<section class="global-search-group"><div class="global-search-group-title"><b>${escapeHtml(g.label)}</b><span>${g.count}</span></div>${g.items.map(r=>`<button type="button" class="global-search-result" data-search-kind="${escapeHtml(r.kind)}" data-search-id="${Number(r.id)||0}" data-search-page="${escapeHtml(r.page||'home')}" data-search-player="${Number(r.player_id)||0}"><span class="global-search-icon">${escapeHtml(r.icon||searchResultIcon(r.kind))}</span><span class="global-search-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(GLOBAL_SEARCH_LABELS[r.kind]||'Portal')}${r.meta?` • ${escapeHtml(r.meta)}`:''}</small>${r.snippet?`<em>${escapeHtml(r.snippet)}</em>`:''}</span><span class="global-search-arrow">→</span></button>`).join('')}</section>`).join('');
   box.hidden=false;
 }
-async function performGlobalSearch(q){
-  const box=qs("#globalSearchResults"); if(!box)return;
-  if(globalSearchAbort)globalSearchAbort.abort();
-  if(q.trim().length<2){closeGlobalSearch();return;}
-  globalSearchAbort=new AbortController();
-  box.innerHTML='<div class="global-search-loading">Pesquisando...</div>';box.hidden=false;
-  try{
-    const d=await api(`/api/search?q=${encodeURIComponent(q.trim())}`,{signal:globalSearchAbort.signal});
-    renderGlobalSearchResults(d);
-  }catch(e){if(e.name!=='AbortError'){box.innerHTML=`<div class="global-search-empty">${escapeHtml(e.message)}</div>`;box.hidden=false;}}
+function scrollToLoadedSearchTarget(selector){let tries=0;const tick=()=>{const el=document.querySelector(selector);if(el){el.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});el.classList.add('search-target-highlight');setTimeout(()=>el.classList.remove('search-target-highlight'),1800);return;}if(++tries<25)setTimeout(tick,100)};tick();}
+async function openLibrarySearchResult(id){try{if(!state.libraryAllItems?.length)await loadLibrary();const item=(state.libraryAllItems||state.libraryItems||[]).find(x=>Number(x.id)===Number(id));if(!item){go('biblioteca');return;}const topicKey=Object.entries(LIBRARY_TOPICS).find(([_,t])=>t.category===item.category)?.[0]||'all';const topicItems=libraryItemsForTopic(state.libraryAllItems||state.libraryItems,topicKey);const itemIndex=topicItems.findIndex(x=>Number(x.id)===Number(id));go('biblioteca');openLibraryExplorer({level:'material',topicKey,itemIndex:Math.max(0,itemIndex),item});}catch(e){go('biblioteca');}}
+async function openArticleSearchResult(id){try{const d=await api(`/api/articles/${Number(id)}`);openPublicArticle(Number(id),[d.article]);}catch(e){go('jornal');}}
+function focusSearchTarget(kind,id){
+  const map={mission:`#mission-${id}`,schedule:`[data-schedule-id="${id}"]`,status:`[data-status-id="${id}"]`};const sel=map[kind];if(!sel)return;scrollToLoadedSearchTarget(sel);
+}
+async function performGlobalSearch(q,fromHistory=false){
+  const box=qs("#globalSearchResults");if(!box)return;const term=q.trim();if(globalSearchAbort)globalSearchAbort.abort();if(term.length<2){renderGlobalSearchRecent();return;}
+  globalSearchAbort=new AbortController();box.innerHTML='<div class="global-search-loading">Pesquisando no Reino...</div>';box.hidden=false;
+  try{const d=await api(`/api/search?q=${encodeURIComponent(term)}`,{signal:globalSearchAbort.signal});saveGlobalSearchHistory(term);renderGlobalSearchResults(d);}catch(e){if(e.name!=='AbortError'){box.innerHTML=`<div class="global-search-empty">${escapeHtml(e.message)}</div>`;box.hidden=false;}}
 }
 function initGlobalSearch(){
-  const input=qs("#globalSearchInput"); if(!input)return;
+  const input=qs("#globalSearchInput");if(!input)return;
   qs("#globalSearchToggle")?.addEventListener("click",e=>{e.stopPropagation();const panel=qs("#globalSearchPanel");if(panel?.hidden)openGlobalSearch();else closeGlobalSearch();});
   qs("#globalSearchClose")?.addEventListener("click",e=>{e.stopPropagation();input.blur();closeGlobalSearch();});
   input.addEventListener('input',()=>{clearTimeout(globalSearchTimer);globalSearchTimer=setTimeout(()=>performGlobalSearch(input.value),180);});
-  input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.blur();closeGlobalSearch();}if(e.key==='Enter'){const first=qs('#globalSearchResults .global-search-result');if(first){e.preventDefault();first.click();}}});
+  input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.blur();closeGlobalSearch();return;}if(e.key==='Enter'){const first=qs('#globalSearchResults .global-search-result');if(first){e.preventDefault();first.click();}}});
   document.addEventListener('click',e=>{if(!e.target.closest('#globalSearchWrap'))closeGlobalSearch();});
-  document.addEventListener('click',e=>{const r=e.target.closest('[data-search-page]');if(!r)return;const kind=r.dataset.searchKind,id=Number(r.dataset.searchId||0);closeGlobalSearch();input.value='';
+  document.addEventListener('click',async e=>{const r=e.target.closest('[data-search-page]');if(!r)return;const kind=r.dataset.searchKind,id=Number(r.dataset.searchId||0);closeGlobalSearch();input.value='';
     if(kind==='player'&&id)return openPublicPlayer(id);
     if(kind==='house'&&id)return openHouse(id);
     if(kind==='event'&&id)return openPublicEvent(id);
-    if(kind==='library'){state.libraryTopic='all';go('biblioteca');const s=qs('#librarySearch');if(s){s.value=r.querySelector('b')?.textContent||'';loadLibrary();}return;}
-    if(kind==='article'){go('jornal');return;}
-    if(kind==='mission'){go('missoes');const s=qs('#missionSearch');if(s){s.value=(r.querySelector('b')?.textContent||'').replace(/^Missão de /,'');s.dispatchEvent(new Event('input'));}return;}
-    if(kind==='schedule'){go('cronograma');const s=qs('#scheduleSearch');if(s){s.value=r.querySelector('b')?.textContent||'';s.dispatchEvent(new Event('input'));}return;}
-    if(kind==='card'){go('cards');const s=qs('#playerCardSearch');if(s){s.value=r.querySelector('b')?.textContent||'';s.dispatchEvent(new Event('input'));}return;}
+    if(kind==='role'&&id)return openPublicRole(id);
+    if(kind==='patent'&&id)return openPublicPatent(id);
+    if(kind==='article'&&id)return openArticleSearchResult(id);
+    if(kind==='library'&&id)return openLibrarySearchResult(id);
+    if(kind==='card'&&id){go('cards');return openCardDetailModal(id,false);}
+    if(kind==='mission'&&id){go('missoes');focusSearchTarget(kind,id);return;}
+    if(kind==='schedule'&&id){go('cronograma');focusSearchTarget(kind,id);return;}
+    if(kind==='status'&&id){go('status');focusSearchTarget(kind,id);return;}
+    if(kind==='news')return go('home');
     go(r.dataset.searchPage||'home');
   });
 }
@@ -598,7 +607,7 @@ async function loadStatusBoard(){
 }
 function renderStatusBoard(items){
   const board=qs("#statusBoard");if(!board)return;
-  board.innerHTML=items.length?items.map(x=>`<article class="status-post ${x.mine?"mine":""}">
+  board.innerHTML=items.length?items.map(x=>`<article class="status-post ${x.mine?"mine":""}" data-status-id="${Number(x.id)}">
     <div class="status-avatar">♠</div>
     <div class="status-body">
       <div class="status-post-head"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")}${x.patent?` • ${escapeHtml(x.patent)}`:""}</small></div><time>${escapeHtml(statusDateHuman(x.status_date))}</time></div>
@@ -716,7 +725,7 @@ function renderScheduleDay(items){
   const list=filteredScheduleItems().filter(a=>activityTouchesDay(a,scheduleSelectedDate));
   label.textContent=new Intl.DateTimeFormat('pt-BR',{dateStyle:'full'}).format(new Date(scheduleSelectedDate+'T12:00:00'));
   if(count)count.textContent=`${list.length} ${list.length===1?'atividade':'atividades'}`;
-  panel.innerHTML=list.length?list.map(a=>`<article class="schedule-agenda-card ${scheduleStatusLabel(a)==='Em andamento'?'live':''}">
+  panel.innerHTML=list.length?list.map(a=>`<article class="schedule-agenda-card ${scheduleStatusLabel(a)==='Em andamento'?'live':''}" data-schedule-id="${Number(a.id)}">
     <div class="schedule-agenda-icon">${scheduleTypeIcon(a.activity_type)}</div>
     <div class="schedule-agenda-main"><div class="schedule-card-meta"><span>${escapeHtml(scheduleTypeLabel(a.activity_type))}</span><span>${escapeHtml(scheduleStatusLabel(a))}</span>${a.cycle_label?`<span>${escapeHtml(a.cycle_label)}</span>`:''}</div><h4>${escapeHtml(a.title)}</h4><p>${escapeHtml(a.description||'')}</p><small>${scheduleDateLabel(a.activity_date)}${a.end_date&&String(a.end_date).slice(0,10)!==String(a.activity_date).slice(0,10)?` → ${scheduleDateLabel(a.end_date)}`:''}${a.location?` • ${escapeHtml(a.location)}`:''}</small>${a.result_text?`<div class="schedule-result"><b>Resultado</b><span>${escapeHtml(a.result_text)}</span></div>`:''}</div>
   </article>`).join(''):`<div class="schedule-empty"><span>♠</span><div><b>Nenhuma atividade registrada neste dia.</b><p>Escolha outro dia ou altere os filtros.</p></div></div>`;
