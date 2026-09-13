@@ -528,6 +528,33 @@
     <div class="audit-summary" id="adminAuditSummary"></div>
     <div class="audit-list" id="adminAuditList"></div>
   </section>
+  <section class="admin-security-panel panel" id="adminSecurityPanel">
+    <div class="panel-head">
+      <div><p class="eyebrow">SEGURANÇA & MANUTENÇÃO</p><h3>Central de segurança do Portal</h3></div>
+      <span>Verifique a conexão e faça um backup lógico antes de grandes alterações.</span>
+    </div>
+    <div class="security-grid">
+      <div class="security-card" id="adminSystemHealthCard">
+        <div class="security-card-top"><span>🩺</span><div><b>Saúde do sistema</b><small id="adminSystemHealthText">Verificando conexão...</small></div></div>
+        <button class="outline dark-outline small" type="button" id="adminSystemHealthRefresh">↻ Verificar agora</button>
+      </div>
+      <div class="security-card">
+        <div class="security-card-top"><span>💾</span><div><b>Backup lógico</b><small>Exporta os dados administrativos sem expor senhas.</small></div></div>
+        <button class="gold small" type="button" id="adminBackupDownloadBtn">📥 Baixar backup</button>
+      </div>
+    </div>
+    <div class="admin-editor-note security-note">O backup inclui dados estruturais e registros do Portal. Senhas e arquivos de mídia binários não são exportados. O backup é uma cópia para segurança; a restauração deve ser tratada separadamente.</div>
+  </section>
+  <section class="admin-bulk-center panel" id="adminBulkCenter">
+    <div class="panel-head">
+      <div><p class="eyebrow">GESTÃO EM MASSA</p><h3>Central de planilhas</h3></div>
+      <span>Todos os fluxos de massa em um único lugar.</span>
+    </div>
+    <div class="bulk-center-grid">
+      <article class="bulk-center-card"><span>👤</span><div><b>Jogadores</b><small>Baixe, edite e devolva a planilha de atualização.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterPlayersExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterPlayersImport">📥 Importar</button></div></article>
+      <article class="bulk-center-card"><span>🃏</span><div><b>Cards & vínculos</b><small>Catálogo oficial + posse de Cards por jogador.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterCardsExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterCardsImport">📥 Importar</button></div></article>
+    </div>
+  </section>
   <div class="admin-toolbar admin-toolbar-v2">
     <div class="admin-search-wrap"><input class="search admin-search" id="adminSearch" placeholder="Pesquisar por nick, identificador ou Casa"></div>
     <select class="admin-filter" id="adminHouseFilter"><option value="">Todas as Casas</option></select>
@@ -1123,6 +1150,6 @@
   <small>Portal oficial do Reino Spade • 2026</small>
 </footer>
 </div>
-<script src="/app.js?v=59.0.0"></script>
+<script src="/app.js?v=61.0.0"></script>
 </body>
 </html>
