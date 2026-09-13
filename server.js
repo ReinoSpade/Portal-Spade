@@ -44,12 +44,15 @@ const ADMIN_PERMISSION_DEFS = {
   cards_assign: "Cards — vincular a jogadores/aliados",
   cards_delete: "Cards — excluir",
   missions_write: "Missões — criar/editar",
+  missions_import: "Missões — importar por planilha",
   missions_delete: "Missões — excluir",
   events_write: "Eventos — criar/editar",
   events_delete: "Eventos — excluir",
   economy_write: "Economia — movimentar/aprovar",
   houses_write: "Casas — criar/editar",
+  houses_import: "Casas — importar por planilha",
   hierarchy_write: "Hierarquia — criar/editar",
+  hierarchy_import: "Hierarquia — importar por planilha",
   journal_write: "Jornal — criar/editar",
   announcements_write: "Comunicados — criar/editar",
   library_write: "Biblioteca — criar/editar",
@@ -125,6 +128,7 @@ function adminActionPermissionForRequest(req) {
   }
 
   if (path.startsWith("/missions")) {
+    if (path.includes("/bulk-sheet")) return "missions_import";
     if (method === "DELETE") return "missions_delete";
     return "missions_write";
   }
@@ -135,10 +139,12 @@ function adminActionPermissionForRequest(req) {
   }
 
   if (path.startsWith("/houses")) {
+    if (path.includes("/bulk-sheet")) return "houses_import";
     return "houses_write";
   }
 
   if (path.startsWith("/hierarchy") || path.startsWith("/patents") || path.startsWith("/roles")) {
+    if (path.includes("/bulk-sheet")) return "hierarchy_import";
     return "hierarchy_write";
   }
 
@@ -4797,6 +4803,170 @@ app.delete("/api/admin/roles/:id", requireAdmin, async (req,res) => {
   } catch(e){console.error(e);res.status(500).json({error:"Erro ao excluir cargo."});}
 });
 
+
+
+// V63 — Gestão em Massa 2.0: planilhas de Casas, Hierarquia e Missões.
+function parseBulkWorkbook(buffer, filename){
+  const lower=String(filename||'').toLowerCase();
+  const wb=lower.endsWith('.csv')
+    ? XLSX.read(buffer.toString('utf8'),{type:'string',raw:true})
+    : XLSX.read(buffer,{type:'buffer',cellDates:false,raw:true});
+  if(!wb.SheetNames.length) throw new Error('A planilha não possui nenhuma aba.');
+  const sheets={};
+  for(const name of wb.SheetNames){
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:'',raw:false});
+    sheets[name]=rows.map((row,index)=>{
+      const out={row:index+2};
+      for(const [k,v] of Object.entries(row)) out[normalizeImportHeader(k)]=String(v??'').trim();
+      return out;
+    });
+  }
+  return {wb,sheets};
+}
+function bulkGet(row,...keys){
+  for(const key of keys){
+    const v=row[normalizeImportHeader(key)];
+    if(v!==undefined && String(v).trim()!=='') return String(v).trim();
+  }
+  return '';
+}
+function parseBulkBool(v,fallback=1){return boolImportValue(v,fallback)}
+function parseBulkDate(v,field,row){
+  const raw=String(v??'').trim();
+  if(!raw) throw Object.assign(new Error(`Linha ${row}: ${field} é obrigatório.`),{statusCode:400});
+  let d=null;
+  if(/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?(Z)?$/.test(raw)) d=new Date(raw.replace(' ','T'));
+  if(!d || Number.isNaN(d.getTime())){
+    const br=raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if(br){d=new Date(Date.UTC(Number(br[3]),Number(br[2])-1,Number(br[1]),Number(br[4]||0),Number(br[5]||0),Number(br[6]||0)))}
+  }
+  if(!d || Number.isNaN(d.getTime())) throw Object.assign(new Error(`Linha ${row}: ${field} contém uma data inválida.`),{statusCode:400});
+  return d.toISOString();
+}
+function parseBulkNonNegative(v,field,row,fallback=0){
+  if(String(v??'').trim()==='') return fallback;
+  const n=Number(String(v).replace(/\./g,'').replace(',','.'));
+  if(!Number.isFinite(n)||!Number.isInteger(n)||n<0) throw Object.assign(new Error(`Linha ${row}: ${field} deve ser um inteiro maior ou igual a zero.`),{statusCode:400});
+  return n;
+}
+function mapObjectChanges(fields,before,after){
+  const changes=[];
+  for(const [field,label] of fields){
+    const a=String(after[field]??''),b=String(before[field]??'');
+    if(a!==b) changes.push({field,label,before:b,after:a});
+  }
+  return changes;
+}
+function xlsxSend(res, wb, filename){
+  const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);
+  res.send(out);
+}
+
+async function validateHouseBulkSheet(buffer,filename){
+  const {sheets}=parseBulkWorkbook(buffer,filename);
+  const rows=sheets.Casas||sheets.Casa||[];
+  if(!rows.length) return {rows:[],issues:[{section:'Casas',row:0,field:'arquivo',message:'A aba Casas está vazia ou não existe.'}]};
+  const existing=(await pool.query(`SELECT id,name,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active FROM houses ORDER BY id`)).rows;
+  const byId=new Map(existing.map(x=>[String(x.id),x]));
+  const nameMap=new Map(existing.map(x=>[normalizeImportHeader(x.name),Number(x.id)]));
+  const seen=new Set(),clean=[],issues=[];
+  const fields=[['name','Nome'],['emblem','Emblema'],['description','Descrição'],['leader','Líder'],['vice_leader','Vice-líder'],['motto','Lema'],['color','Cor'],['banner_url','Banner URL'],['history','História'],['goals','Metas'],['achievements','Conquistas'],['status','Status'],['active','Ativa']];
+  for(const r of rows){
+    const out={row:r.row,id:null,name:'',emblem:'♜',description:'',leader:'',vice_leader:'',motto:'',color:'',banner_url:'',history:'',goals:'',achievements:'',status:'ATIVA',active:1,errors:[],changes:[],isNew:false};
+    const add=(field,message)=>{out.errors.push({field,message});issues.push({section:'Casas',row:r.row,field,message})};
+    const rawId=bulkGet(r,'id','ID');
+    if(rawId && !/^\d+$/.test(rawId)) add('ID','ID deve ser numérico.');
+    const current=rawId?byId.get(rawId):null;
+    if(rawId && !current) add('ID',`Casa com ID ${rawId} não foi encontrada.`);
+    if(rawId && seen.has(rawId)) add('ID','O mesmo ID aparece mais de uma vez na planilha.');
+    if(rawId) seen.add(rawId);
+    out.id=current?Number(current.id):null; out.isNew=!current;
+    out.name=bulkGet(r,'nome','name'); if(!out.name) add('Nome','Nome da Casa é obrigatório.');
+    if(out.name){const owner=nameMap.get(normalizeImportHeader(out.name)); if(owner && owner!==out.id) add('Nome','Essa Casa já existe.'); const nk=normalizeImportHeader(out.name); if(seen.has(`name:${nk}`))add('Nome','Nome duplicado na planilha.'); seen.add(`name:${nk}`);}
+    for(const [field,label] of fields){
+      if(field==='name') continue;
+      const val=bulkGet(r,label,field);
+      if(field==='active'){const n=normalizeImportHeader(val);if(n && !['0','1','sim','não','nao','true','false','ativo','ativa','inativo','inativa','oculto','oculta'].includes(n))add('Ativa','Use 1/0, sim/não, ativo/inativo ou true/false.');out.active=parseBulkBool(val,1);continue;}
+      if(field==='status'){out.status=val||'ATIVA';continue;}
+      out[field]=val;
+    }
+    if(current){
+      const before=Object.fromEntries(fields.map(([f])=>[f,current[f]??'']));
+      out.changes=mapObjectChanges(fields,before,out);
+    }
+    clean.push(out);
+  }
+  return {rows:clean,issues};
+}
+
+async function validateHierarchyBulkSheet(buffer,filename){
+  const {sheets}=parseBulkWorkbook(buffer,filename);
+  const patents=sheets.Patentes||[];
+  const roles=sheets.Cargos||[];
+  const [pe,re]=await Promise.all([pool.query(`SELECT id,name,description,sort_order FROM patents ORDER BY id`),pool.query(`SELECT id,name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope,active FROM roles ORDER BY id`)]);
+  const pById=new Map(pe.rows.map(x=>[String(x.id),x])),rById=new Map(re.rows.map(x=>[String(x.id),x]));
+  const pName=new Map(pe.rows.map(x=>[normalizeImportHeader(x.name),Number(x.id)])),rName=new Map(re.rows.map(x=>[normalizeImportHeader(x.name),Number(x.id)]));
+  const issues=[],outPatents=[],outRoles=[];
+  const seenP=new Set(),seenR=new Set();
+  for(const r of patents){
+    const o={row:r.row,id:null,name:bulkGet(r,'nome','name'),description:bulkGet(r,'descrição','description'),sort_order:0,errors:[],changes:[],isNew:false};
+    const add=(f,m)=>{o.errors.push({field:f,message:m});issues.push({section:'Patentes',row:r.row,field:f,message:m})};
+    try{o.sort_order=parseBulkNonNegative(bulkGet(r,'ordem','sort_order'), 'Ordem',r.row,0)}catch(e){add('Ordem',e.message)}
+    const id=bulkGet(r,'id');if(id&& !/^\d+$/.test(id))add('ID','ID deve ser numérico.'); const cur=id?pById.get(id):null;if(id&&!cur)add('ID',`Patente com ID ${id} não foi encontrada.`);if(id&&seenP.has(id))add('ID','ID duplicado.');if(id)seenP.add(id);o.id=cur?Number(cur.id):null;o.isNew=!cur;if(!o.name)add('Nome','Nome da patente é obrigatório.');if(o.name){const owner=pName.get(normalizeImportHeader(o.name));if(owner&&owner!==o.id)add('Nome','Essa patente já existe.');const k=normalizeImportHeader(o.name);if(seenP.has('n:'+k))add('Nome','Nome duplicado na planilha.');seenP.add('n:'+k);}if(cur){o.changes=mapObjectChanges([['name','Nome'],['description','Descrição'],['sort_order','Ordem']],{name:cur.name,description:cur.description||'',sort_order:Number(cur.sort_order||0)},o)}outPatents.push(o);
+  }
+  const validRanks=new Set(['I','II','III','IV','V']);
+  for(const r of roles){
+    const o={row:r.row,id:null,name:bulkGet(r,'nome','name'),description:bulkGet(r,'descrição','description'),salary:0,sort_order:0,rank_code:(bulkGet(r,'rank','rank_code')||'V').toUpperCase(),vacancies:bulkGet(r,'vagas','vacancies'),payment_mode:bulkGet(r,'modalidade','payment_mode'),remuneration_detail:bulkGet(r,'detalhe remuneração','remuneration_detail'),requirements:bulkGet(r,'requisitos','requirements'),benefits:bulkGet(r,'benefícios','benefits'),scope:bulkGet(r,'escopo','scope'),active:1,errors:[],changes:[],isNew:false};
+    const add=(f,m)=>{o.errors.push({field:f,message:m});issues.push({section:'Cargos',row:r.row,field:f,message:m})};
+    try{o.salary=parseBulkNonNegative(bulkGet(r,'salário','salary'),'Salário',r.row,0)}catch(e){add('Salário',e.message)}
+    try{o.sort_order=parseBulkNonNegative(bulkGet(r,'ordem','sort_order'),'Ordem',r.row,0)}catch(e){add('Ordem',e.message)}
+    const activeRaw=bulkGet(r,'ativo','active'); const an=normalizeImportHeader(activeRaw); if(an && !['0','1','sim','não','nao','true','false','ativo','ativa','inativo','inativa','oculto','oculta'].includes(an))add('Ativo','Use 1/0, sim/não, ativo/inativo ou true/false.'); o.active=parseBulkBool(activeRaw,1);
+    const id=bulkGet(r,'id');if(id&& !/^\d+$/.test(id))add('ID','ID deve ser numérico.'); const cur=id?rById.get(id):null;if(id&&!cur)add('ID',`Cargo com ID ${id} não foi encontrado.`);if(id&&seenR.has(id))add('ID','ID duplicado.');if(id)seenR.add(id);o.id=cur?Number(cur.id):null;o.isNew=!cur;if(!o.name)add('Nome','Nome do cargo é obrigatório.');if(o.name){const owner=rName.get(normalizeImportHeader(o.name));if(owner&&owner!==o.id)add('Nome','Esse cargo já existe.');const k=normalizeImportHeader(o.name);if(seenR.has('n:'+k))add('Nome','Nome duplicado na planilha.');seenR.add('n:'+k);}if(!validRanks.has(o.rank_code))add('Rank','Rank deve ser I, II, III, IV ou V.');if(cur){o.changes=mapObjectChanges([['name','Nome'],['description','Descrição'],['salary','Salário'],['sort_order','Ordem'],['rank_code','Rank'],['vacancies','Vagas'],['payment_mode','Modalidade'],['remuneration_detail','Detalhe remuneração'],['requirements','Requisitos'],['benefits','Benefícios'],['scope','Escopo'],['active','Ativo']],{name:cur.name,description:cur.description||'',salary:Number(cur.salary||0),sort_order:Number(cur.sort_order||0),rank_code:cur.rank_code||'',vacancies:cur.vacancies||'',payment_mode:cur.payment_mode||'',remuneration_detail:cur.remuneration_detail||'',requirements:cur.requirements||'',benefits:cur.benefits||'',scope:cur.scope||'',active:Number(cur.active??1)},o)}outRoles.push(o);
+  }
+  if(!outPatents.length && !outRoles.length) issues.push({section:'Hierarquia',row:0,field:'arquivo',message:'É necessário preencher a aba Patentes e/ou Cargos.'});
+  return {patents:outPatents,roles:outRoles,issues};
+}
+
+async function validateMissionBulkSheet(buffer,filename){
+  const {sheets}=parseBulkWorkbook(buffer,filename);
+  const rows=sheets.Missões||sheets.Missoes||sheets.Missões_Atividades||[];
+  if(!rows.length)return {rows:[],issues:[{section:'Missões',row:0,field:'arquivo',message:'A aba Missões está vazia ou não existe.'}]};
+  const existing=(await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published FROM mission_activities ORDER BY id`)).rows;
+  const byId=new Map(existing.map(x=>[String(x.id),x])); const seen=new Set();const out=[];const issues=[];
+  const allowed=new Set(['AGENDADA','EM_ANDAMENTO','CONCLUIDA','CANCELADA']);
+  for(const r of rows){
+    const o={row:r.row,id:null,mission_type:bulkGet(r,'tipo','tipo de missão','mission_type')||'Luta',start_at:null,end_at:null,description:bulkGet(r,'descrição','description'),instructions:bulkGet(r,'instruções','instructions'),reward_yuls:0,reward_exp:0,reward_cards:bulkGet(r,'cards recompensa','reward_cards'),status:(bulkGet(r,'status')||'AGENDADA').toUpperCase(),published:1,errors:[],changes:[],isNew:false};
+    const add=(f,m)=>{o.errors.push({field:f,message:m});issues.push({section:'Missões',row:r.row,field:f,message:m})};
+    try{o.reward_yuls=parseBulkNonNegative(bulkGet(r,'recompensa yuls','reward_yuls'),'Recompensa Yuls',r.row,0)}catch(e){add('Recompensa Yuls',e.message)}
+    try{o.reward_exp=parseBulkNonNegative(bulkGet(r,'recompensa exp','reward_exp'),'Recompensa EXP',r.row,0)}catch(e){add('Recompensa EXP',e.message)}
+    const pubRaw=bulkGet(r,'publicado','published'); const pn=normalizeImportHeader(pubRaw); if(pn && !['0','1','sim','não','nao','true','false','publico','publica','oculto','oculta'].includes(pn))add('Publicado','Use 1/0, sim/não, público/oculto ou true/false.'); o.published=parseBulkBool(pubRaw,1);
+    const id=bulkGet(r,'id');if(id&& !/^\d+$/.test(id))add('ID','ID deve ser numérico.');const cur=id?byId.get(id):null;if(id&&!cur)add('ID',`Missão com ID ${id} não foi encontrada.`);if(id&&seen.has(id))add('ID','ID duplicado.');if(id)seen.add(id);o.id=cur?Number(cur.id):null;o.isNew=!cur;
+    try{o.start_at=parseBulkDate(bulkGet(r,'início','inicio','start_at'),'Início',r.row)}catch(e){add('Início',e.message)}
+    try{o.end_at=parseBulkDate(bulkGet(r,'fim','end_at'),'Fim',r.row)}catch(e){add('Fim',e.message)}
+    if(o.start_at&&o.end_at&&new Date(o.end_at)<=new Date(o.start_at))add('Período','Fim deve ser posterior ao início.');
+    if(!allowed.has(o.status))add('Status',`Status inválido: ${o.status}. Use AGENDADA, EM_ANDAMENTO, CONCLUIDA ou CANCELADA.`);
+    if(cur){o.changes=mapObjectChanges([['mission_type','Tipo'],['start_at','Início'],['end_at','Fim'],['description','Descrição'],['instructions','Instruções'],['reward_yuls','Recompensa Yuls'],['reward_exp','Recompensa EXP'],['reward_cards','Cards recompensa'],['status','Status'],['published','Publicado']],{mission_type:cur.mission_type||'',start_at:cur.start_at?new Date(cur.start_at).toISOString():'',end_at:cur.end_at?new Date(cur.end_at).toISOString():'',description:cur.description||'',instructions:cur.instructions||'',reward_yuls:Number(cur.reward_yuls||0),reward_exp:Number(cur.reward_exp||0),reward_cards:cur.reward_cards||'',status:cur.status||'',published:Number(cur.published??1)},o)}
+    out.push(o);
+  }
+  return {rows:out,issues};
+}
+
+// Exports --------------------------------------------------------------------
+app.get('/api/admin/houses/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT h.*,COUNT(p.id)::int AS members FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) GROUP BY h.id ORDER BY h.name COLLATE "C"`)).rows;const data=rows.map(h=>({'ID':Number(h.id),'Nome':h.name||'','Emblema':h.emblem||'♜','Descrição':h.description||'','Líder':h.leader||'','Vice-líder':h.vice_leader||'','Lema':h.motto||'','Cor':h.color||'','Banner URL':h.banner_url||'','História':h.history||'','Metas':h.goals||'','Conquistas':h.achievements||'','Status':h.status||'ATIVA','Ativa':Number(h.active??1),'Membros':Number(h.members||0)}));const wb=XLSX.utils.book_new();const ws=XLSX.utils.json_to_sheet(data);ws['!cols']=[{wch:8},{wch:26},{wch:12},{wch:42},{wch:24},{wch:24},{wch:28},{wch:16},{wch:38},{wch:45},{wch:45},{wch:35},{wch:35},{wch:9},{wch:10}];XLSX.utils.book_append_sheet(wb,ws,'Casas');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — CASAS'],['ID preenchido = atualizar. ID vazio = criar uma nova Casa.'],['Membros é informativo e ignorado na importação.'],['Para retirar uma Casa da estrutura, use Ativa=0/Status=ARQUIVADA; o histórico é preservado.']]),'Instruções');xlsxSend(res,wb,'casas-spade-atualizacao.xlsx')}catch(e){console.error(e);res.status(500).json({error:'Não foi possível gerar a planilha de Casas.'})}});
+app.post('/api/admin/houses/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const checked=await validateHouseBulkSheet(req.file.buffer,req.file.originalname);const valid=checked.rows.filter(r=>!r.errors.length);res.json({filename:req.file.originalname,total:checked.rows.length,invalid:checked.issues.length,valid:valid.length,changes:valid.filter(r=>r.isNew||r.changes.length).length,issues:checked.issues,rows:checked.rows})}catch(e){res.status(400).json({error:e.message||'Não foi possível processar a planilha.'})}});
+app.post('/api/admin/houses/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const checked=await validateHouseBulkSheet(req.file.buffer,req.file.originalname);if(checked.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:checked.issues});let created=0,updated=0;await client.query('BEGIN');for(const r of checked.rows){if(r.isNew){const q=await client.query(`INSERT INTO houses(name,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW()) RETURNING id`,[r.name,r.emblem,r.description,r.leader,r.vice_leader,r.motto,r.color,r.banner_url,r.history,r.goals,r.achievements,r.status,r.active]);created++;await client.query(`INSERT INTO house_history(house_id,event_type,title,description,created_by_admin_id) VALUES($1,'ADMIN','Casa criada por planilha','Cadastro criado pela Gestão em Massa 2.0.',$2)`,[q.rows[0].id,req.admin?.id||null])}else{await client.query(`UPDATE houses SET name=$1,emblem=$2,description=$3,leader=$4,vice_leader=$5,motto=$6,color=$7,banner_url=$8,history=$9,goals=$10,achievements=$11,status=$12,active=$13,updated_at=NOW() WHERE id=$14`,[r.name,r.emblem,r.description,r.leader,r.vice_leader,r.motto,r.color,r.banner_url,r.history,r.goals,r.achievements,r.status,r.active,r.id]);updated++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'casas','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA CASAS','/api/admin/houses/bulk-sheet',`Planilha ${req.file.originalname}: ${created} criada(s), ${updated} atualizada(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,created,updated,total:checked.rows.length})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Casas. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
+
+app.get('/api/admin/hierarchy/export.xlsx', requireAdmin, async (req,res)=>{try{const [p,r]=await Promise.all([pool.query(`SELECT p.*,COUNT(pl.id)::int AS occupant_count FROM patents p LEFT JOIN players pl ON lower(trim(pl.patent))=lower(trim(p.name)) GROUP BY p.id ORDER BY p.sort_order,p.name COLLATE "C"`),pool.query(`SELECT r.*,COUNT(pr.player_id)::int AS occupant_count FROM roles r LEFT JOIN player_roles pr ON pr.role_id=r.id GROUP BY r.id ORDER BY CASE r.rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,r.sort_order,r.name COLLATE "C"`)]);const wb=XLSX.utils.book_new();const pw=p.rows.map(x=>({'ID':Number(x.id),'Nome':x.name||'','Descrição':x.description||'','Ordem':Number(x.sort_order||0),'Ocupantes':Number(x.occupant_count||0)}));const rw=r.rows.map(x=>({'ID':Number(x.id),'Nome':x.name||'','Descrição':x.description||'','Salário':Number(x.salary||0),'Ordem':Number(x.sort_order||0),'Rank':x.rank_code||'V','Vagas':x.vacancies||'','Modalidade':x.payment_mode||'','Detalhe remuneração':x.remuneration_detail||'','Requisitos':x.requirements||'','Benefícios':x.benefits||'','Escopo':x.scope||'','Ativo':Number(x.active??1),'Ocupantes':Number(x.occupant_count||0)}));XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(pw),'Patentes');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rw),'Cargos');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — HIERARQUIA'],['ID preenchido = atualizar. ID vazio = criar.'],['Ocupantes é informativo e ignorado.'],['Para cargos, use Rank I, II, III, IV ou V.'],['Não há exclusão em massa: desative cargos com Ativo=0.']]),'Instruções');xlsxSend(res,wb,'hierarquia-spade-atualizacao.xlsx')}catch(e){res.status(500).json({error:'Não foi possível gerar a planilha de Hierarquia.'})}});
+app.post('/api/admin/hierarchy/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateHierarchyBulkSheet(req.file.buffer,req.file.originalname);res.json({filename:req.file.originalname,patents:{total:c.patents.length,valid:c.patents.filter(r=>!r.errors.length).length,invalid:c.patents.filter(r=>r.errors.length).length,changes:c.patents.filter(r=>r.errors.length===0&&(r.isNew||r.changes.length)).length,rows:c.patents},roles:{total:c.roles.length,valid:c.roles.filter(r=>!r.errors.length).length,invalid:c.roles.filter(r=>r.errors.length).length,changes:c.roles.filter(r=>r.errors.length===0&&(r.isNew||r.changes.length)).length,rows:c.roles},issues:c.issues})}catch(e){res.status(400).json({error:e.message||'Não foi possível processar a planilha.'})}});
+app.post('/api/admin/hierarchy/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateHierarchyBulkSheet(req.file.buffer,req.file.originalname);if(c.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:c.issues});let createdPatents=0,updatedPatents=0,createdRoles=0,updatedRoles=0;await client.query('BEGIN');for(const x of c.patents){if(x.isNew){await client.query(`INSERT INTO patents(name,description,sort_order) VALUES($1,$2,$3)`,[x.name,x.description,x.sort_order]);createdPatents++}else{await client.query(`UPDATE patents SET name=$1,description=$2,sort_order=$3,updated_at=NOW() WHERE id=$4`,[x.name,x.description,x.sort_order,x.id]);updatedPatents++}}for(const x of c.roles){if(x.isNew){await client.query(`INSERT INTO roles(name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,[x.name,x.description,x.salary,x.sort_order,x.rank_code,x.vacancies,x.payment_mode,x.remuneration_detail,x.requirements,x.benefits,x.scope,x.active]);createdRoles++}else{await client.query(`UPDATE roles SET name=$1,description=$2,salary=$3,sort_order=$4,rank_code=$5,vacancies=$6,payment_mode=$7,remuneration_detail=$8,requirements=$9,benefits=$10,scope=$11,active=$12,updated_at=NOW() WHERE id=$13`,[x.name,x.description,x.salary,x.sort_order,x.rank_code,x.vacancies,x.payment_mode,x.remuneration_detail,x.requirements,x.benefits,x.scope,x.active,x.id]);updatedRoles++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'hierarquia','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA HIERARQUIA','/api/admin/hierarchy/bulk-sheet',`Planilha ${req.file.originalname}: patentes ${createdPatents} criada(s)/${updatedPatents} atualizada(s), cargos ${createdRoles} criado(s)/${updatedRoles} atualizado(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,createdPatents,updatedPatents,createdRoles,updatedRoles})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Hierarquia. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
+
+app.get('/api/admin/missions/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_at,updated_at FROM mission_activities ORDER BY start_at DESC,id DESC`)).rows;const data=rows.map(m=>({'ID':Number(m.id),'Tipo':m.mission_type||'','Início':m.start_at?new Date(m.start_at).toISOString():'','Fim':m.end_at?new Date(m.end_at).toISOString():'','Descrição':m.description||'','Instruções':m.instructions||'','Recompensa Yuls':Number(m.reward_yuls||0),'Recompensa EXP':Number(m.reward_exp||0),'Cards recompensa':m.reward_cards||'','Status':m.status||'AGENDADA','Publicado':Number(m.published??1)}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Missões');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — MISSÕES'],['ID preenchido = atualizar. ID vazio = criar.'],['Início/Fim aceitam ISO (recomendado) ou DD/MM/AAAA HH:MM.'],['Status: AGENDADA, EM_ANDAMENTO, CONCLUIDA ou CANCELADA.'],['Não há exclusão em massa: para arquivar, use CANCELADA e/ou Publicado=0.']]),'Instruções');xlsxSend(res,wb,'missoes-spade-atualizacao.xlsx')}catch(e){res.status(500).json({error:'Não foi possível gerar a planilha de Missões.'})}});
+app.post('/api/admin/missions/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateMissionBulkSheet(req.file.buffer,req.file.originalname);res.json({filename:req.file.originalname,total:c.rows.length,valid:c.rows.filter(r=>!r.errors.length).length,invalid:c.rows.filter(r=>r.errors.length).length,changes:c.rows.filter(r=>r.errors.length===0&&(r.isNew||r.changes.length)).length,issues:c.issues,rows:c.rows})}catch(e){res.status(400).json({error:e.message||'Não foi possível processar a planilha.'})}});
+app.post('/api/admin/missions/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateMissionBulkSheet(req.file.buffer,req.file.originalname);if(c.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:c.issues});let created=0,updated=0;await client.query('BEGIN');for(const x of c.rows){if(x.isNew){await client.query(`INSERT INTO mission_activities(mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_by_admin_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())`,[x.mission_type,x.start_at,x.end_at,x.description,x.instructions,x.reward_yuls,x.reward_exp,x.reward_cards,x.status,x.published,req.admin?.id||null]);created++}else{await client.query(`UPDATE mission_activities SET mission_type=$1,start_at=$2,end_at=$3,description=$4,instructions=$5,reward_yuls=$6,reward_exp=$7,reward_cards=$8,status=$9,published=$10,updated_at=NOW() WHERE id=$11`,[x.mission_type,x.start_at,x.end_at,x.description,x.instructions,x.reward_yuls,x.reward_exp,x.reward_cards,x.status,x.published,x.id]);updated++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'missoes','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA MISSÕES','/api/admin/missions/bulk-sheet',`Planilha ${req.file.originalname}: ${created} criada(s), ${updated} atualizada(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,created,updated,total:c.rows.length})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Missões. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
+
+app.get('/api/admin/rankings/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT id,nick,house,patent,skill_sc,skill_vt,ranking,power,active FROM players ORDER BY skill_vt DESC,skill_sc DESC,nick COLLATE "C"`)).rows;const data=rows.map(p=>({'ID jogador':Number(p.id),'Jogador':p.nick||'','Casa':p.house||'','Patente':p.patent||'','Ranking geral':Number(p.ranking||0),'Skill SC':Number(p.skill_sc||0),'Skill VT':Number(p.skill_vt||0),'Força':Number(p.power||0),'Ativo':Number(p.active??1)}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Ranking');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — RANKINGS (CONSULTA)'],['Esta exportação é somente para consulta. Os scores não são alterados por planilha nesta versão.']]),'Instruções');xlsxSend(res,wb,'rankings-spade-consulta.xlsx')}catch(e){res.status(500).json({error:'Não foi possível gerar a planilha de Rankings.'})}});
 
 const IMPORT_FIELDS = {
   nick:["nick","nome","jogador","player"],
