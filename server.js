@@ -35,6 +35,7 @@ const ADMIN_PERMISSION_DEFS = {
   notifications: "Notificações & Alertas",
   allies: "Aliados Ocultos",
   simulator_trainings: "Simulador — gerenciar treinamentos",
+  emblems: "Emblems — gerenciar catálogo",
 
   // Permissões de ação: continuam separadas das permissões de módulo.
   players_write: "Jogadores — criar/editar",
@@ -61,7 +62,9 @@ const ADMIN_PERMISSION_DEFS = {
   notifications_write: "Notificações — criar",
   allies_write: "Aliados — criar/editar",
   admin_users_write: "Administradores — criar/alterar/desativar",
-  backup_export: "Backup — exportar dados"
+  backup_export: "Backup — exportar dados",
+  emblems_write: "Emblems — criar/editar",
+  emblems_grant: "Emblems — conceder/revogar"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -97,6 +100,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/notifications")) return "notifications";
   if (path.startsWith("/allies")) return "allies";
   if (path.startsWith("/simulator/trainings")) return "simulator_trainings";
+  if (path.startsWith("/emblems")) return "emblems";
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
@@ -123,6 +127,10 @@ function adminActionPermissionForRequest(req) {
     return "players_write";
   }
 
+  if (path.startsWith("/emblems")) {
+    if (path.includes("/grant")) return "emblems_grant";
+    return "emblems_write";
+  }
   if (path.startsWith("/cards")) {
     if (path.includes("/library-links")) return "cards_write";
     if (path.includes("/bulk-sheet")) return "cards_import";
@@ -1075,6 +1083,50 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_simulator_trainings_active ON simulator_trainings(active, visibility, id);
+
+    CREATE TABLE IF NOT EXISTS emblems (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT DEFAULT '',
+      icon TEXT NOT NULL DEFAULT '🏅',
+      category TEXT NOT NULL DEFAULT 'Especial',
+      rarity TEXT NOT NULL DEFAULT 'COMUM',
+      origin TEXT NOT NULL DEFAULT 'Reino Spade',
+      secret INTEGER NOT NULL DEFAULT 0 CHECK (secret IN (0,1)),
+      auto_award INTEGER NOT NULL DEFAULT 1 CHECK (auto_award IN (0,1)),
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS emblem_stages (
+      id BIGSERIAL PRIMARY KEY,
+      emblem_id BIGINT NOT NULL REFERENCES emblems(id) ON DELETE CASCADE,
+      stage_number INTEGER NOT NULL CHECK (stage_number BETWEEN 1 AND 4),
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      requirements JSONB NOT NULL DEFAULT '{"logic":"ALL","conditions":[]}'::jsonb,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(emblem_id, stage_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS player_emblems (
+      player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+      emblem_id BIGINT NOT NULL REFERENCES emblems(id) ON DELETE CASCADE,
+      stage_number INTEGER NOT NULL CHECK (stage_number BETWEEN 1 AND 4),
+      source TEXT NOT NULL DEFAULT 'AUTO' CHECK (source IN ('AUTO','MANUAL')),
+      featured INTEGER NOT NULL DEFAULT 0 CHECK (featured IN (0,1)),
+      awarded_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      notes TEXT DEFAULT '',
+      PRIMARY KEY(player_id, emblem_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_emblem_stages_emblem ON emblem_stages(emblem_id, stage_number);
+    CREATE INDEX IF NOT EXISTS idx_player_emblems_player ON player_emblems(player_id, stage_number DESC);
+    CREATE INDEX IF NOT EXISTS idx_player_emblems_emblem ON player_emblems(emblem_id, stage_number DESC);
 
 
   `);
@@ -2246,6 +2298,94 @@ function validateSimulatorTrainingInput(body){
   };
 }
 
+
+const EMBLEM_STAGE_LABELS={1:'Inicial',2:'Mediano',3:'Avançado',4:'Supremo'};
+const EMBLEM_RARITY_LABELS={COMUM:'Comum',RARO:'Raro',EPICO:'Épico',LENDARIO:'Lendário',SUPREMO:'Supremo'};
+function normalizeEmblemRequirements(value){
+  if(Array.isArray(value)) return {logic:'ALL',conditions:value};
+  const v=value&&typeof value==='object'?value:{};
+  return {logic:String(v.logic||'ALL').toUpperCase()==='ANY'?'ANY':'ALL',conditions:Array.isArray(v.conditions)?v.conditions:[]};
+}
+function normalizeEmblemStage(stage,number){
+  const n=Math.max(1,Math.min(4,Number(number||stage?.stage_number||1)));
+  return {stage_number:n,name:String(stage?.name||EMBLEM_STAGE_LABELS[n]).trim().slice(0,80)||EMBLEM_STAGE_LABELS[n],description:String(stage?.description||'').trim().slice(0,500),requirements:normalizeEmblemRequirements(stage?.requirements),sort_order:Number(stage?.sort_order||n)};
+}
+function normalizeEmblemInput(body){
+  const b=body||{}; const name=String(b.name||'').trim();
+  if(name.length<2||name.length>100) throw Object.assign(new Error('Informe um nome de Emblem entre 2 e 100 caracteres.'),{statusCode:400});
+  const pick=(v,allowed,def)=>allowed.includes(String(v||def).toUpperCase())?String(v||def).toUpperCase():def;
+  const stages=Array.isArray(b.stages)?b.stages:[];
+  const out=[];
+  for(let i=1;i<=4;i++) out.push(normalizeEmblemStage(stages[i-1]||{},i));
+  return {name,description:String(b.description||'').trim().slice(0,1000),icon:String(b.icon||'🏅').trim().slice(0,8)||'🏅',category:String(b.category||'Especial').trim().slice(0,60)||'Especial',rarity:pick(b.rarity,Object.keys(EMBLEM_RARITY_LABELS),'COMUM'),origin:String(b.origin||'Reino Spade').trim().slice(0,100)||'Reino Spade',secret:b.secret?1:0,auto_award:b.auto_award===false||String(b.auto_award)==='0'?0:1,active:b.active===false||String(b.active)==='0'?0:1,stages:out};
+}
+async function emblemMetric(playerId,condition){
+  const c=condition||{}; const type=String(c.type||'').toUpperCase(); const target=Math.max(0,Number(c.value||0));
+  let current=0,label=String(c.label||'');
+  switch(type){
+    case 'CARDS_TOTAL': { const r=await pool.query(`SELECT COALESCE(SUM(quantity),0)::bigint AS value FROM player_cards WHERE player_id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Cards possuídos'; break; }
+    case 'CARD_CATEGORIES': { const r=await pool.query(`SELECT COUNT(DISTINCT COALESCE(NULLIF(c.category,''),c.type))::int AS value FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Categorias de Cards'; break; }
+    case 'MISSIONS_TOTAL': { const r=await pool.query(`SELECT COALESCE(missions,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Missões registradas'; break; }
+    case 'EVENTS_PARTICIPATED': { const r=await pool.query(`SELECT COUNT(*)::int AS value FROM event_participants WHERE player_id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Eventos participados'; break; }
+    case 'TOURNAMENT_WINS': { const r=await pool.query(`SELECT COUNT(*)::int AS value FROM event_results er JOIN events e ON e.id=er.event_id WHERE er.player_id=$1 AND er.published=1 AND lower(e.event_type) LIKE '%torneio%'`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Vitórias em torneios'; break; }
+    case 'POWER': { const r=await pool.query(`SELECT COALESCE(power,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Poder'; break; }
+    case 'SKILL_SC': { const r=await pool.query(`SELECT COALESCE(skill_sc,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Skill SC'; break; }
+    case 'SKILL_VT': { const r=await pool.query(`SELECT COALESCE(skill_vt,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Skill VT'; break; }
+    case 'ACHIEVEMENTS': { const r=await pool.query(`SELECT COALESCE(achievements,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Conquistas'; break; }
+    case 'ROLE': { const r=await pool.query(`SELECT 1 FROM player_roles pr JOIN roles r ON r.id=pr.role_id WHERE pr.player_id=$1 AND lower(trim(r.name))=lower(trim($2)) LIMIT 1`,[playerId,String(c.value||'')]); current=r.rows[0]?1:0; label ||= `Cargo: ${String(c.value||'')}`; return {type,current:current,target:1,label,met:current>=1,percent:current>=1?100:0}; }
+    case 'HOUSE': { const r=await pool.query(`SELECT 1 FROM players WHERE id=$1 AND lower(trim(house))=lower(trim($2)) LIMIT 1`,[playerId,String(c.value||'')]); current=r.rows[0]?1:0; label ||= `Casa: ${String(c.value||'')}`; return {type,current:current,target:1,label,met:current>=1,percent:current>=1?100:0}; }
+    case 'PATENT': { const r=await pool.query(`SELECT 1 FROM players WHERE id=$1 AND lower(trim(patent))=lower(trim($2)) LIMIT 1`,[playerId,String(c.value||'')]); current=r.rows[0]?1:0; label ||= `Patente: ${String(c.value||'')}`; return {type,current:current,target:1,label,met:current>=1,percent:current>=1?100:0}; }
+    default: return {type,current:0,target, label:label||'Requisito manual', met:false, percent:0};
+  }
+  const met=current>=target;
+  return {type,current,target,label,met,percent:target>0?Math.min(100,Math.round((current/target)*100)):met?100:0};
+}
+async function evaluateEmblemStage(playerId,requirements){
+  const req=normalizeEmblemRequirements(requirements); const results=[];
+  for(const condition of req.conditions) results.push(await emblemMetric(playerId,condition));
+  const achieved=req.conditions.length>0 && (req.logic==='ANY'?results.some(x=>x.met):results.every(x=>x.met));
+  const percent=results.length?(req.logic==='ANY'?Math.max(...results.map(x=>x.percent)):Math.round(results.reduce((s,x)=>s+x.percent,0)/results.length)):0;
+  return {achieved,percent,conditions:results};
+}
+async function getEmblemRecords({includeInactive=false}={}){
+  const [e,s]=await Promise.all([
+    pool.query(`SELECT * FROM emblems ${includeInactive?"":"WHERE active=1"} ORDER BY category COLLATE "C", name COLLATE "C", id`),
+    pool.query(`SELECT * FROM emblem_stages ORDER BY emblem_id,stage_number`)
+  ]);
+  const map=new Map(); for(const row of e.rows) map.set(Number(row.id),{...row,id:Number(row.id),secret:Boolean(row.secret),auto_award:Boolean(row.auto_award),active:Boolean(row.active),stages:[]});
+  for(const row of s.rows){const item=map.get(Number(row.emblem_id));if(item)item.stages.push({...normalizeEmblemStage(row,row.stage_number),id:Number(row.id)});}
+  return [...map.values()];
+}
+async function syncPlayerEmblems(playerId){
+  const emblems=await getEmblemRecords();
+  for(const emblem of emblems){
+    if(!emblem.auto_award) continue;
+    let highest=0;
+    for(const stage of emblem.stages.sort((a,b)=>a.stage_number-b.stage_number)){
+      const result=await evaluateEmblemStage(playerId,stage.requirements);
+      if(result.achieved) highest=stage.stage_number;
+    }
+    if(highest>0){
+      await pool.query(`INSERT INTO player_emblems(player_id,emblem_id,stage_number,source,featured,awarded_at,updated_at) VALUES($1,$2,$3,'AUTO',0,NOW(),NOW()) ON CONFLICT(player_id,emblem_id) DO UPDATE SET stage_number=GREATEST(player_emblems.stage_number,EXCLUDED.stage_number),updated_at=NOW()`,[playerId,emblem.id,highest]);
+    }
+  }
+}
+async function getPlayerEmblems(playerId,{sync=true,publicOnly=false}={}){
+  if(sync) await syncPlayerEmblems(playerId);
+  const [emblemsR,ownedR]=await Promise.all([
+    pool.query(`SELECT * FROM emblems WHERE active=1 ORDER BY category COLLATE "C", name COLLATE "C", id`),
+    pool.query(`SELECT emblem_id,stage_number,source,featured,awarded_at,updated_at FROM player_emblems WHERE player_id=$1`,[playerId])
+  ]);
+  const owned=new Map(ownedR.rows.map(r=>[Number(r.emblem_id),{stage:Number(r.stage_number),source:r.source,featured:Boolean(r.featured),awarded_at:r.awarded_at,updated_at:r.updated_at}]));
+  const stageR=await pool.query(`SELECT * FROM emblem_stages WHERE emblem_id=ANY($1::bigint[]) ORDER BY emblem_id,stage_number`,[emblemsR.rows.map(r=>r.id)]).catch(()=>({rows:[]}));
+  const stagesMap=new Map(); for(const row of stageR.rows){const arr=stagesMap.get(Number(row.emblem_id))||[];arr.push(normalizeEmblemStage(row,row.stage_number));stagesMap.set(Number(row.emblem_id),arr);}
+  const items=[];
+  for(const e of emblemsR.rows){const id=Number(e.id),own=owned.get(id),unlocked=!!own; if(publicOnly&&e.secret&&!unlocked)continue; const stages=stagesMap.get(id)||[]; const current=unlocked?own.stage:0; const next=stages.find(st=>st.stage_number>current); let progress=null; if(next){const ev=await evaluateEmblemStage(playerId,next.requirements);progress={stage:next.stage_number,percent:ev.percent,conditions:ev.conditions};}
+    items.push({id,name:unlocked||!e.secret?e.name:'Emblem secreto',description:unlocked||!e.secret?e.description:'Continue sua jornada para descobrir este Emblem.',icon:e.icon,category:e.category,rarity:e.rarity,rarity_label:EMBLEM_RARITY_LABELS[e.rarity]||e.rarity,origin:e.origin,secret:Boolean(e.secret),auto_award:Boolean(e.auto_award),unlocked,current_stage:current,stage_label:current?EMBLEM_STAGE_LABELS[current]:'Bloqueado',featured:!!own?.featured,awarded_at:own?.awarded_at||null,stages:(unlocked||!e.secret)?stages.map(st=>({...st,name:st.name,stage_label:EMBLEM_STAGE_LABELS[st.stage_number],requirements:undefined})) : [],next_stage:next?{stage_number:next.stage_number,name:next.name,stage_label:EMBLEM_STAGE_LABELS[next.stage_number],description:next.description}:null,progress});
+  }
+  return {emblems:items,summary:{total:items.length,unlocked:items.filter(x=>x.unlocked).length,featured:items.filter(x=>x.featured).length}};
+}
+
 app.get('/api/simulator/trainings', async (req,res)=>{
   try{
     const r=await pool.query(`SELECT * FROM simulator_trainings WHERE active=1 AND visibility='PUBLICO' ORDER BY id`);
@@ -2308,6 +2448,61 @@ app.delete('/api/admin/simulator/trainings/:id', requireAdmin, async (req,res)=>
   try{const r=await pool.query(`UPDATE simulator_trainings SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id,name`,[id]);if(!r.rows[0])return res.status(404).json({error:'Treinamento não encontrado.'});res.json({ok:true,message:'Treinamento desativado.',id});}
   catch(e){console.error(e);res.status(500).json({error:'Não foi possível desativar o treinamento.'});}
 });
+
+
+app.get('/api/emblems', async (req,res)=>{
+  try{const r=await pool.query(`SELECT id,name,description,icon,category,rarity,origin,secret,auto_award,active FROM emblems WHERE active=1 ORDER BY category COLLATE "C", name COLLATE "C", id`);res.json({emblems:r.rows.map(x=>({...x,id:Number(x.id),secret:Boolean(x.secret),auto_award:Boolean(x.auto_award),active:Boolean(x.active)}))});}
+  catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os Emblems.'});}
+});
+
+app.get('/api/me/emblems', async (req,res)=>{
+  const viewer=await resolveViewer(req); if(!viewer||viewer.type!=='PLAYER')return res.status(401).json({error:'Entre como jogador para consultar seus Emblems.'});
+  try{res.json(await getPlayerEmblems(viewer.id));}catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar seus Emblems.'});}
+});
+
+app.post('/api/me/emblems/:id/feature', async (req,res)=>{
+  const viewer=await resolveViewer(req); if(!viewer||viewer.type!=='PLAYER')return res.status(401).json({error:'Entre como jogador para editar seus Emblems.'});
+  const emblemId=Number(req.params.id);if(!Number.isInteger(emblemId)||emblemId<=0)return res.status(400).json({error:'Emblem inválido.'});
+  const featured=req.body?.featured!==false && String(req.body?.featured)!=='0';
+  try{
+    const own=(await pool.query(`SELECT stage_number FROM player_emblems WHERE player_id=$1 AND emblem_id=$2`,[viewer.id,emblemId])).rows[0];
+    if(!own)return res.status(403).json({error:'Você ainda não conquistou este Emblem.'});
+    if(featured){const count=(await pool.query(`SELECT COUNT(*)::int AS total FROM player_emblems WHERE player_id=$1 AND featured=1 AND emblem_id<>$2`,[viewer.id,emblemId])).rows[0]?.total||0;if(Number(count)>=5)return res.status(400).json({error:'Você já possui 5 Emblems em destaque. Remova um antes de adicionar outro.'});}
+    await pool.query(`UPDATE player_emblems SET featured=$1,updated_at=NOW() WHERE player_id=$2 AND emblem_id=$3`,[featured?1:0,viewer.id,emblemId]);
+    res.json({ok:true,featured});
+  }catch(e){console.error(e);res.status(500).json({error:'Não foi possível atualizar o destaque do Emblem.'});}
+});
+
+app.get('/api/players/:id/emblems', async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Jogador inválido.'});
+  try{const p=(await pool.query(`SELECT id,public_profile,active FROM players WHERE id=$1 AND public_profile=1 AND active=1`,[id])).rows[0];if(!p)return res.status(404).json({error:'Jogador não encontrado ou perfil privado.'});res.json(await getPlayerEmblems(id,{publicOnly:true}));}
+  catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os Emblems do jogador.'});}
+});
+
+app.get('/api/admin/emblems', requireAdmin, async (req,res)=>{
+  try{
+    const emblems=await getEmblemRecords({includeInactive:true});
+    for(const e of emblems)e.owners=Number((await pool.query(`SELECT COUNT(*)::int AS total FROM player_emblems WHERE emblem_id=$1`,[e.id])).rows[0]?.total||0);
+    res.json({emblems});
+  }catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os Emblems administrativos.'});}
+});
+
+app.post('/api/admin/emblems', requireAdmin, async (req,res)=>{
+  try{const e=normalizeEmblemInput(req.body);const client=await pool.connect();try{await client.query('BEGIN');const ins=await client.query(`INSERT INTO emblems(name,description,icon,category,rarity,origin,secret,auto_award,active,created_by_admin_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW()) RETURNING *`,[e.name,e.description,e.icon,e.category,e.rarity,e.origin,e.secret,e.auto_award,e.active,req.admin?.id||null]);for(const st of e.stages)await client.query(`INSERT INTO emblem_stages(emblem_id,stage_number,name,description,requirements,sort_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,NOW(),NOW())`,[ins.rows[0].id,st.stage_number,st.name,st.description,JSON.stringify(st.requirements),st.sort_order]);await client.query('COMMIT');res.json({ok:true,emblem:{...ins.rows[0],id:Number(ins.rows[0].id)}});}catch(x){await client.query('ROLLBACK');throw x;}finally{client.release();}}
+  catch(e){console.error(e);res.status(e.statusCode||500).json({error:e.code==='23505'?'Já existe um Emblem com esse nome.':(e.message||'Erro ao criar Emblem.')});}
+});
+
+app.put('/api/admin/emblems/:id', requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Emblem inválido.'});
+  try{const e=normalizeEmblemInput(req.body);const client=await pool.connect();try{await client.query('BEGIN');const up=await client.query(`UPDATE emblems SET name=$1,description=$2,icon=$3,category=$4,rarity=$5,origin=$6,secret=$7,auto_award=$8,active=$9,updated_at=NOW() WHERE id=$10 RETURNING *`,[e.name,e.description,e.icon,e.category,e.rarity,e.origin,e.secret,e.auto_award,e.active,id]);if(!up.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Emblem não encontrado.'});}await client.query(`DELETE FROM emblem_stages WHERE emblem_id=$1`,[id]);for(const st of e.stages)await client.query(`INSERT INTO emblem_stages(emblem_id,stage_number,name,description,requirements,sort_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,NOW(),NOW())`,[id,st.stage_number,st.name,st.description,JSON.stringify(st.requirements),st.sort_order]);await client.query('COMMIT');res.json({ok:true});}catch(x){await client.query('ROLLBACK');throw x;}finally{client.release();}}
+  catch(e){console.error(e);res.status(e.statusCode||500).json({error:e.code==='23505'?'Já existe um Emblem com esse nome.':(e.message||'Erro ao salvar Emblem.')});}
+});
+
+app.delete('/api/admin/emblems/:id', requireAdmin, async (req,res)=>{const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Emblem inválido.'});try{const r=await pool.query(`UPDATE emblems SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id,name`,[id]);if(!r.rows[0])return res.status(404).json({error:'Emblem não encontrado.'});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Não foi possível desativar o Emblem.'});}});
+
+app.post('/api/admin/emblems/:id/grant', requireAdmin, async(req,res)=>{const emblemId=Number(req.params.id),playerId=Number(req.body?.player_id),stage=Math.max(1,Math.min(4,Number(req.body?.stage_number||1)));if(!Number.isInteger(emblemId)||emblemId<=0||!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:'Emblem ou jogador inválido.'});try{const [e,p]=await Promise.all([pool.query(`SELECT id,name FROM emblems WHERE id=$1 AND active=1`,[emblemId]),pool.query(`SELECT id,nick FROM players WHERE id=$1 AND active=1`,[playerId])]);if(!e.rows[0])return res.status(404).json({error:'Emblem não encontrado.'});if(!p.rows[0])return res.status(404).json({error:'Jogador não encontrado.'});await pool.query(`INSERT INTO player_emblems(player_id,emblem_id,stage_number,source,featured,awarded_at,updated_at,notes) VALUES($1,$2,$3,'MANUAL',0,NOW(),NOW(),$4) ON CONFLICT(player_id,emblem_id) DO UPDATE SET stage_number=GREATEST(player_emblems.stage_number,EXCLUDED.stage_number),source='MANUAL',updated_at=NOW(),notes=EXCLUDED.notes`,[playerId,emblemId,stage,`Concedido pela Administração • ${req.admin?.display_name||'Admin'}`]);res.json({ok:true});}catch(x){console.error(x);res.status(500).json({error:'Não foi possível conceder o Emblem.'});}});
+
+app.delete('/api/admin/emblems/:id/grant/:playerId', requireAdmin, async(req,res)=>{const emblemId=Number(req.params.id),playerId=Number(req.params.playerId);if(!Number.isInteger(emblemId)||emblemId<=0||!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:'Emblem ou jogador inválido.'});try{await pool.query(`DELETE FROM player_emblems WHERE player_id=$1 AND emblem_id=$2`,[playerId,emblemId]);res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Não foi possível revogar o Emblem.'});}});
 
 app.get("/api/me/cards", async (req,res)=>{
   const viewer=await resolveViewer(req);
@@ -3392,6 +3587,7 @@ app.get("/api/players/:id", async (req, res) => {
 
     const completed=missions.filter(m=>m.status==="Concluída").length;
     const totalRewards=missions.filter(m=>m.status==="Concluída").reduce((sum,m)=>sum+m.reward_yuls,0);
+    const emblemData=await getPlayerEmblems(id,{publicOnly:true});
 
     res.json({
       player:{...publicPlayer(player),roles},
@@ -3400,6 +3596,7 @@ app.get("/api/players/:id", async (req, res) => {
         recent:missions,
         rewards_on_page:totalRewards
       },
+      emblems:emblemData,
       ranking_position: Number(player.ranking || 0) > 0
         ? Number(rankingResult.rows[0].position)+1
         : 0
