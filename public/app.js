@@ -1527,6 +1527,8 @@ function hasAdminPermission(key){ return state.adminPermissions?.[key] === true 
 function setAdminPermissionVisibility(){
   const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog","#cardBulkSheetModal"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
+  const security=qs('#adminSecurityPanel'); if(security) security.style.display=hasAdminPermission('settings')?'':'none';
+  const bulkCenter=qs('#adminBulkCenter'); if(bulkCenter) bulkCenter.style.display=(hasAdminPermission('players')||hasAdminPermission('cards'))?'':'none';
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
 }
@@ -1915,11 +1917,54 @@ qs("#grantAllyCardBtn")?.addEventListener("click",async()=>{const id=state.selec
 qs("#adminAllyClear")?.addEventListener("click",clearAdminAllyForm);
 qs("#adminAllyForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminAllyId").value;const body={username:qs("#adminAllyUsername").value,display_name:qs("#adminAllyDisplayName").value,password:qs("#adminAllyPassword").value,origin_kingdom:qs("#adminAllyKingdom").value,origin_house:qs("#adminAllyHouse").value,patent:qs("#adminAllyPatent").value,role:qs("#adminAllyRole").value,description:qs("#adminAllyDescription").value,active:qs("#adminAllyActive").checked};const err=qs("#adminAllyError");err.textContent="Salvando...";try{await adminApi(id?`/api/admin/allies/${id}`:"/api/admin/allies",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminAllyForm();await loadAdminAllies();err.textContent="Aliado salvo.";}catch(ex){err.textContent=ex.message;}});
 
+async function loadAdminSystemHealth(){
+  const text=qs('#adminSystemHealthText');
+  const card=qs('#adminSystemHealthCard');
+  if(text) text.textContent='Verificando conexão...';
+  try{
+    const d=await adminApi('/api/admin/health');
+    if(text) text.textContent=`Banco conectado • ${Number(d.latency_ms||0)} ms • versão ${escapeHtml(d.version||'')}`;
+    card?.classList.remove('security-error');
+    card?.classList.add('security-ok');
+  }catch(e){
+    if(text) text.textContent=`Falha na conexão: ${e.message||'erro desconhecido'}`;
+    card?.classList.remove('security-ok');
+    card?.classList.add('security-error');
+  }
+}
+async function downloadAdminBackup(){
+  const b=qs('#adminBackupDownloadBtn');if(b){b.disabled=true;b.dataset.oldText=b.textContent;b.textContent='⏳ Gerando backup...';}
+  try{
+    const options={credentials:'same-origin',headers:{}};const key=state.adminKey||getStoredAdminKey();if(key)options.headers['x-admin-key']=key;
+    const r=await fetch('/api/admin/backup/export.json',options);
+    if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar o backup.');}
+    const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`portal-spade-backup-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(e){alert(e.message||'Não foi possível gerar o backup.');}
+  finally{if(b){b.disabled=false;b.textContent=b.dataset.oldText||'📥 Baixar backup';}}
+}
+function openPlayerBulkFromCenter(){qs('#bulkUpdatePlayersBtn')?.click();}
+function openCardBulkFromCenter(){qs('#importCardsSheetBtn')?.click();}
+function setupAdminSecurityAndBulk(){
+  const bind=(id,fn)=>{const el=qs(id);if(el)el.onclick=fn;};
+  bind('#adminSystemHealthRefresh',loadAdminSystemHealth);
+  bind('#adminBackupDownloadBtn',downloadAdminBackup);
+  bind('#bulkCenterPlayersExport',()=>qs('#exportPlayersBtn')?.click());
+  bind('#bulkCenterPlayersImport',openPlayerBulkFromCenter);
+  bind('#bulkCenterCardsExport',()=>qs('#downloadCardsSheetBtn')?.click());
+  bind('#bulkCenterCardsImport',openCardBulkFromCenter);
+  const playerExport=qs('#bulkCenterPlayersExport'),playerImport=qs('#bulkCenterPlayersImport');
+  const cardExport=qs('#bulkCenterCardsExport'),cardImport=qs('#bulkCenterCardsImport');
+  [playerExport,playerImport].forEach(el=>{if(el)el.style.display=hasAdminPermission('players')?'':'none';});
+  [cardExport,cardImport].forEach(el=>{if(el)el.style.display=hasAdminPermission('cards')?'':'none';});
+}
+
 async function initAdmin(){
   closePlayerImport();
   if(hasAdminPermission("rankings")) loadAdminRankingBattles();
   if(!state.admin)return;
   setAdminPermissionVisibility();
+  setupAdminSecurityAndBulk();
+  if(hasAdminPermission('settings')) loadAdminSystemHealth();
   try{
     if(hasAdminPermission("dashboard")){ const ov=await adminApi("/api/admin/overview"); renderAdminStats(ov); }
     if(hasAdminPermission("settings")) await loadAdminSettings();
