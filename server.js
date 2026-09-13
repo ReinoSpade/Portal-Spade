@@ -2504,6 +2504,18 @@ function mergeLiveActivities(scheduleRows=[],eventRows=[],missionRows=[]){
 }
 
 
+app.get("/api/articles/:id", async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Artigo inválido."});
+  try{
+    const admin=await resolveAdmin(req);
+    const r=await pool.query(`SELECT id,title,subtitle,author,category,excerpt,body,image_url,date,published FROM articles WHERE id=$1 ${admin?'':'AND published=1'} LIMIT 1`,[id]);
+    const a=r.rows[0];
+    if(!a)return res.status(404).json({error:"Artigo não encontrado."});
+    res.json({article:{...a,id:Number(a.id),published:Boolean(a.published)}});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar o artigo."});}
+});
+
 app.get("/api/missions", async (req,res)=>{
   const viewer=await resolveViewer(req);
   if(!viewer) return res.status(401).json({error:"Faça login para visualizar as missões."});
@@ -2777,38 +2789,108 @@ app.get("/api/patents/:id", async (req,res)=>{
 });
 
 app.get("/api/search", async (req,res)=>{
-  const q=String(req.query.q||"").trim().slice(0,80);
-  if(q.length<2)return res.json({query:q,results:[]});
-  const like=`%${q.replace(/[%_]/g,"\\$&")}%`;
-  const ilike=(idx)=>`(name ILIKE $${idx} OR title ILIKE $${idx} OR description ILIKE $${idx})`;
-  try{
-    const playerId=readPlayerToken(req);
-    const isAdmin=!!(await resolveAdmin(req));
-    const cardsAllowed=!!playerId||!!(await resolveAlly(req))||isAdmin;
-    const queries=[
-      pool.query(`SELECT id,nick,house,patent FROM players WHERE public_profile=1 AND active=1 AND (nick ILIKE $1 OR house ILIKE $1 OR patent ILIKE $1) ORDER BY nick ASC LIMIT 8`,[like]),
-      pool.query(`SELECT id,name,emblem FROM houses WHERE active=1 AND (name ILIKE $1 OR description ILIKE $1 OR motto ILIKE $1) ORDER BY name ASC LIMIT 8`,[like]),
-      pool.query(`SELECT id,title,event_type,status,start_date,end_date FROM events WHERE published=1 AND (title ILIKE $1 OR description ILIKE $1 OR event_type ILIKE $1) ORDER BY CASE status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,start_date DESC,id DESC LIMIT 8`,[like]),
-      (playerId || (await resolveAlly(req))) ? pool.query(`SELECT id,mission_type,start_at,end_at,status,description FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND (mission_type ILIKE $1 OR description ILIKE $1 OR instructions ILIKE $1) ORDER BY start_at DESC,id DESC LIMIT 8`,[like]) : Promise.resolve({rows:[]}),
-      pool.query(`SELECT id,title,activity_type,activity_date,start_time,end_time,status FROM schedule_activities WHERE published=1 AND (title ILIKE $1 OR activity_type ILIKE $1 OR description ILIKE $1) ORDER BY activity_date DESC,start_time DESC NULLS LAST,id DESC LIMIT 8`,[like]),
-      pool.query(`SELECT id,title,subtitle,category,excerpt,date FROM articles WHERE published=1 AND (title ILIKE $1 OR subtitle ILIKE $1 OR category ILIKE $1 OR excerpt ILIKE $1 OR body ILIKE $1) ORDER BY date DESC,id DESC LIMIT 8`,[like]),
-      pool.query(`SELECT id,title,category,description FROM library_items WHERE published=1 AND (title ILIKE $1 OR category ILIKE $1 OR description ILIKE $1 OR content ILIKE $1) ORDER BY sort_order ASC,title ASC LIMIT 8`,[like])
-    ];
-    if(cardsAllowed){
-      queries.push(pool.query(`SELECT id,name_jp,name_pt,category,origin,power_value,damage_value,damage_type FROM cards WHERE active=1 AND (name_jp ILIKE $1 OR name_pt ILIKE $1 OR category ILIKE $1 OR origin ILIKE $1) ORDER BY name_pt ASC LIMIT 8`,[like]));
+  const raw=String(req.query.q||"").trim().slice(0,120);
+  if(raw.length<2)return res.json({query:raw,results:[],groups:[],cards_visible:false});
+  const tokens=[...new Set(raw.toLocaleLowerCase('pt-BR').split(/[^\p{L}\p{N}#]+/u).map(x=>x.trim()).filter(x=>x.length>=2))].slice(0,8);
+  if(!tokens.length)return res.json({query:raw,results:[],groups:[],cards_visible:false});
+
+  const adminUser=await resolveAdmin(req);
+  const viewer=await resolveViewer(req);
+  const isAdmin=!!adminUser;
+  const loggedIn=!!viewer;
+  const canSeeCards=loggedIn||isAdmin;
+  const canSeeStatuses=loggedIn||isAdmin;
+  const escapeLike=v=>String(v).replace(/[\\%_]/g,m=>`\\${m}`);
+  const buildSearch=(fields)=>{
+    const params=[];const clauses=[];
+    for(const token of tokens){
+      params.push(`%${escapeLike(token)}%`);const idx=params.length;
+      clauses.push(`(${fields.map(f=>`${f} ILIKE $${idx} ESCAPE '\\\\'`).join(' OR ')})`);
     }
-    const out=await Promise.all(queries);
-    const [players,houses,events,missions,schedule,articles,library,cards]=out;
-    const results=[];
-    players.rows.forEach(x=>results.push({kind:'player',icon:'👤',title:x.nick,meta:[x.house,x.patent].filter(Boolean).join(' • '),page:'jogadores',id:Number(x.id)}));
-    houses.rows.forEach(x=>results.push({kind:'house',icon:x.emblem||'🏰',title:x.name,meta:'Casa de Spade',page:'casas',id:Number(x.id)}));
-    events.rows.forEach(x=>results.push({kind:'event',icon:'🎪',title:x.title,meta:`${x.event_type||'Evento'} • ${x.status||''}`.replace(/ • $/,''),page:'eventos',id:Number(x.id)}));
-    missions.rows.forEach(x=>results.push({kind:'mission',icon:'⚔️',title:`Missão de ${x.mission_type||'Missão'}`,meta:`${x.status||''}${x.start_at?` • ${new Date(x.start_at).toLocaleDateString('pt-BR')}`:''}`.replace(/^ • | • $/g,''),page:'missoes',id:Number(x.id)}));
-    schedule.rows.forEach(x=>results.push({kind:'schedule',icon:'📅',title:x.title,meta:`${x.activity_type||'Atividade'} • ${x.activity_date||''}`.replace(/ • $/,''),page:'cronograma',id:Number(x.id)}));
-    articles.rows.forEach(x=>results.push({kind:'article',icon:'📰',title:x.title,meta:`${x.category||'Jornal'} • ${x.date||''}`.replace(/ • $/,''),page:'jornal',id:Number(x.id)}));
-    library.rows.forEach(x=>results.push({kind:'library',icon:x.icon||'📚',title:x.title,meta:x.category||'Biblioteca',page:'biblioteca',id:Number(x.id)}));
-    if(cards){cards.rows.forEach(x=>results.push({kind:'card',icon:'🃏',title:x.name_pt||x.name_jp,meta:`${x.name_jp && x.name_pt?x.name_jp+' • ':''}${x.category||'Card'}${x.origin?` • ${x.origin}`:''}`,page:'cards',id:Number(x.id)}));}
-    res.json({query:q,results:results.slice(0,40),cards_visible:cardsAllowed});
+    return {where:clauses.join(' AND '),params};
+  };
+  const exactMatch=raw.match(/^#?(\d+)$/);
+  const exactId=exactMatch?Number(exactMatch[1]):null;
+  const results=[];
+  const seen=new Set();
+  const add=(kind,row,map)=>{if(!row)return;const key=`${kind}:${row.id}`;if(seen.has(key))return;seen.add(key);results.push({kind,id:Number(row.id),...map(row)});};
+  const excerpt=(...vals)=>{const text=vals.map(v=>String(v||'').trim()).find(Boolean)||'';return text.replace(/\s+/g,' ').slice(0,180);};
+
+  try{
+    const pq=buildSearch(['nick','number','identifier','house','patent']);
+    const hq=buildSearch(['name','description','motto']);
+    const eq=buildSearch(['title','description','event_type','rules']);
+    const mq=buildSearch(['mission_type','description','instructions']);
+    const sq=buildSearch(['title','activity_type','description','location']);
+    const aq=buildSearch(['title','subtitle','author','category','excerpt','body']);
+    const lq=buildSearch(['title','category','description','content']);
+    const rq=buildSearch(['name','description','rank_code','scope','requirements','benefits']);
+    const patq=buildSearch(['name','description']);
+    const stq=buildSearch(['p.nick','p.house','ps.message']);
+    const nq=buildSearch(['title','category','excerpt','body']);
+
+    const base=[
+      pool.query(`SELECT id,nick,number,identifier,house,patent FROM players WHERE active=1 AND ${isAdmin?'TRUE':'public_profile=1'} AND ${pq.where} ORDER BY lower(nick) ASC LIMIT 10`,pq.params),
+      pool.query(`SELECT id,name,emblem,description,motto FROM houses WHERE active=1 AND ${hq.where} ORDER BY lower(name) ASC LIMIT 8`,hq.params),
+      pool.query(`SELECT id,title,event_type,status,start_date,end_date,description,rules FROM events WHERE published=1 AND ${eq.where} ORDER BY CASE status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,start_date DESC,id DESC LIMIT 8`,eq.params),
+      pool.query(`SELECT id,mission_type,start_at,end_at,status,description,instructions FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND ${mq.where} ORDER BY start_at DESC,id DESC LIMIT 8`,mq.params),
+      pool.query(`SELECT id,title,activity_type,activity_date,end_date,start_time,end_time,status,description,location FROM schedule_activities WHERE published=1 AND ${sq.where} ORDER BY activity_date DESC,start_time DESC NULLS LAST,id DESC LIMIT 8`,sq.params),
+      pool.query(`SELECT id,title,subtitle,author,category,excerpt,body,date FROM articles WHERE published=1 AND ${aq.where} ORDER BY date DESC,id DESC LIMIT 8`,aq.params),
+      pool.query(`SELECT id,title,category,description,content,icon FROM library_items WHERE published=1 AND ${lq.where} ORDER BY sort_order ASC,title ASC,id DESC LIMIT 8`,lq.params),
+      pool.query(`SELECT id,name,description,rank_code,scope FROM roles WHERE active=1 AND ${rq.where} ORDER BY CASE rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,name ASC LIMIT 8`,rq.params),
+      pool.query(`SELECT id,name,description,sort_order FROM patents WHERE ${patq.where} ORDER BY sort_order ASC,name ASC LIMIT 8`,patq.params),
+      canSeeStatuses?pool.query(`SELECT ps.id,ps.player_id,ps.status_date,ps.message,p.nick,p.house FROM player_statuses ps JOIN players p ON p.id=ps.player_id WHERE COALESCE(p.active,1)=1 AND ${stq.where} ORDER BY ps.updated_at DESC,ps.id DESC LIMIT 8`,stq.params):Promise.resolve({rows:[]}),
+      pool.query(`SELECT id,title,category,excerpt,body,date FROM news WHERE published=1 AND ${nq.where} ORDER BY id DESC LIMIT 8`,nq.params)
+    ];
+    const [players,houses,events,missions,schedule,articles,libraries,roles,patents,statuses,news]=await Promise.all(base);
+
+    let cards=[];
+    if(canSeeCards){
+      if(exactId!==null){
+        cards=(await pool.query(`SELECT id,name,name_pt,name_jp,category,type,origin,power_value,damage_value,damage_type,description FROM cards WHERE active=1 AND id=$1 LIMIT 1`,[exactId])).rows;
+      }else{
+        const cq=buildSearch(['name','name_pt','name_jp','category','type','origin','description']);
+        cards=(await pool.query(`SELECT id,name,name_pt,name_jp,category,type,origin,power_value,damage_value,damage_type,description FROM cards WHERE active=1 AND ${cq.where} ORDER BY lower(COALESCE(NULLIF(name_pt,''),name)) ASC LIMIT 10`,cq.params)).rows;
+      }
+    }
+
+    if(exactId!==null){
+      const exactQueries=[
+        pool.query(`SELECT id,nick,number,identifier,house,patent FROM players WHERE active=1 AND ${isAdmin?'TRUE':'public_profile=1'} AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,name,emblem,description,motto FROM houses WHERE active=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,title,event_type,status,start_date,end_date,description,rules FROM events WHERE published=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,mission_type,start_at,end_at,status,description,instructions FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,title,activity_type,activity_date,end_date,start_time,end_time,status,description,location FROM schedule_activities WHERE published=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,title,subtitle,author,category,excerpt,body,date FROM articles WHERE published=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,title,category,description,content,icon FROM library_items WHERE published=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,name,description,rank_code,scope FROM roles WHERE active=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,name,description,sort_order FROM patents WHERE id=$1 LIMIT 1`,[exactId]),
+        canSeeStatuses?pool.query(`SELECT ps.id,ps.player_id,ps.status_date,ps.message,p.nick,p.house FROM player_statuses ps JOIN players p ON p.id=ps.player_id WHERE COALESCE(p.active,1)=1 AND ps.id=$1 LIMIT 1`,[exactId]):Promise.resolve({rows:[]}),
+        pool.query(`SELECT id,title,category,excerpt,body,date FROM news WHERE published=1 AND id=$1 LIMIT 1`,[exactId])
+      ];
+      const ex=await Promise.all(exactQueries);
+      const rows=[ex[0].rows[0],ex[1].rows[0],ex[2].rows[0],ex[3].rows[0],ex[4].rows[0],ex[5].rows[0],ex[6].rows[0],ex[7].rows[0],ex[8].rows[0],ex[9].rows[0],ex[10].rows[0]];
+      players.rows.push(...(rows[0]?[rows[0]]:[]));houses.rows.push(...(rows[1]?[rows[1]]:[]));events.rows.push(...(rows[2]?[rows[2]]:[]));missions.rows.push(...(rows[3]?[rows[3]]:[]));schedule.rows.push(...(rows[4]?[rows[4]]:[]));articles.rows.push(...(rows[5]?[rows[5]]:[]));libraries.rows.push(...(rows[6]?[rows[6]]:[]));roles.rows.push(...(rows[7]?[rows[7]]:[]));patents.rows.push(...(rows[8]?[rows[8]]:[]));statuses.rows.push(...(rows[9]?[rows[9]]:[]));news.rows.push(...(rows[10]?[rows[10]]:[]));
+    }
+
+    players.rows.forEach(x=>add('player',x,x=>({icon:'👤',title:x.nick,meta:[x.house,x.patent].filter(Boolean).join(' • '),snippet:excerpt(x.identifier,x.number),page:'jogadores'})));
+    houses.rows.forEach(x=>add('house',x,x=>({icon:x.emblem||'🏰',title:x.name,meta:'Casa de Spade',snippet:excerpt(x.description,x.motto),page:'casas'})));
+    events.rows.forEach(x=>add('event',x,x=>({icon:'🎪',title:x.title,meta:`${x.event_type||'Evento'} • ${x.status||''}`.replace(/ • $/,''),snippet:excerpt(x.description,x.rules),page:'eventos'})));
+    missions.rows.forEach(x=>add('mission',x,x=>({icon:'⚔️',title:`Missão de ${x.mission_type||'Missão'}`,meta:`${x.status||''}${x.start_at?` • ${new Date(x.start_at).toLocaleDateString('pt-BR')}`:''}`.replace(/^ • | • $/g,''),snippet:excerpt(x.description,x.instructions),page:'missoes'})));
+    schedule.rows.forEach(x=>add('schedule',x,x=>({icon:'📅',title:x.title,meta:`${x.activity_type||'Atividade'} • ${x.activity_date||''}`.replace(/ • $/,''),snippet:excerpt(x.description,x.location),page:'cronograma'})));
+    articles.rows.forEach(x=>add('article',x,x=>({icon:'📰',title:x.title,meta:`${x.category||'Jornal'} • ${x.date||''}`.replace(/ • $/,''),snippet:excerpt(x.subtitle,x.excerpt,x.body),page:'jornal'})));
+    news.rows.forEach(x=>add('news',x,x=>({icon:'🗞️',title:x.title,meta:`${x.category||'Notícia'} • ${x.date||''}`.replace(/ • $/,''),snippet:excerpt(x.excerpt,x.body),page:'home'})));
+    libraries.rows.forEach(x=>add('library',x,x=>({icon:x.icon||'📚',title:x.title,meta:x.category||'Biblioteca',snippet:excerpt(x.description,x.content),page:'biblioteca'})));
+    roles.rows.forEach(x=>add('role',x,x=>({icon:'👑',title:x.name,meta:`Cargo${x.rank_code?` • Rank ${x.rank_code}`:''}`,snippet:excerpt(x.description,x.scope),page:'hierarquia'})));
+    patents.rows.forEach(x=>add('patent',x,x=>({icon:'🎖️',title:x.name,meta:'Patente',snippet:excerpt(x.description),page:'hierarquia'})));
+    statuses.rows.forEach(x=>add('status',x,x=>({icon:'📢',title:x.nick,meta:`Status • ${x.status_date||''}${x.house?` • ${x.house}`:''}`,snippet:excerpt(x.message),page:'status',player_id:Number(x.player_id)})));
+    cards.forEach(x=>add('card',x,x=>({icon:'🃏',title:x.name_pt||x.name||x.name_jp,meta:`#${Number(x.id)} • ${x.category||x.type||'Card'}${x.origin?` • ${x.origin}`:''}`,snippet:excerpt(x.description),page:'cards'})));
+
+    const order=['player','card','library','house','mission','event','schedule','article','news','status','role','patent'];
+    const labels={player:'Jogadores',card:'Cards',library:'Biblioteca',house:'Casas',mission:'Missões',event:'Eventos',schedule:'Cronograma',article:'Jornal',news:'Notícias',status:'Status',role:'Cargos',patent:'Patentes'};
+    results.sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind)||String(a.title).localeCompare(String(b.title),'pt-BR'));
+    const limited=results.slice(0,60);const counts={};for(const r of limited)counts[r.kind]=(counts[r.kind]||0)+1;
+    res.json({query:raw,results:limited,groups:order.filter(k=>counts[k]).map(k=>({kind:k,label:labels[k],count:counts[k]})),cards_visible:canSeeCards});
   }catch(e){console.error('Erro em /api/search:',e);res.status(500).json({error:'Erro ao pesquisar no Portal.'});}
 });
 
