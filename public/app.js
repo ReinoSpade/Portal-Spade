@@ -1292,14 +1292,19 @@ function renderPlayerCardItem(c){
   </article>`;
 }
 function renderPlayerCards(cards){
-  const grid=qs("#playerCardsGrid"),summary=qs("#playerCardsSummary");
+  const grid=qs("#playerCardsGrid"),summary=qs("#playerCardsSummary"),stats=qs("#playerCardsStats");
   if(!grid)return;
-  const filtered=(cards||[]).filter(c=>{
+  const allCards=cards||[];
+  const totalPower=allCards.reduce((sum,c)=>sum+Number(c.power_value||0),0);
+  const totalCategories=cardCategoryList(allCards).length;
+  const totalUnits=allCards.reduce((sum,c)=>sum+Math.max(1,Number(c.quantity||1)),0);
+  if(stats) stats.innerHTML=`<span><small>CARDS</small><b>${totalUnits}</b></span><span><small>PODER</small><b>${totalPower}</b></span><span><small>CATEGORIAS</small><b>${totalCategories}</b></span>`;
+  const filtered=allCards.filter(c=>{
     if(state.cardFilter && c.category!==state.cardFilter)return false;
     const term=String(state.cardSearch||"").trim().toLowerCase();
     return !term || `${c.name_pt||c.name} ${c.name_jp||""} ${c.category} ${c.element||""} ${c.origin||""} ${c.description||""} ${c.acquisition_name||""}`.toLowerCase().includes(term);
   });
-  if(summary)summary.textContent=`${filtered.length} cards no inventário`;
+  if(summary)summary.textContent=filtered.length===allCards.length?`${totalUnits} ${totalUnits===1?'card':'cards'} no inventário`:`${filtered.length} ${filtered.length===1?'card':'cards'} encontrados`;
   if(!filtered.length){
     grid.innerHTML=`<div class="cards-empty"><div style="font:28px Georgia;color:#c6a45d">♠</div><b>${(cards||[]).length?"Nenhum card corresponde ao filtro.":"Seu inventário ainda está vazio."}</b><p>${(cards||[]).length?"Tente outra categoria ou pesquisa.":"Os cards serão adicionados pela administração do RPG."}</p></div>`;
     return;
@@ -2247,14 +2252,15 @@ function renderAdminPlayerCardsPanel(p){
     ? inventory.map(c=>`<div class="admin-card-row">
         <div>
           <b>#${Number(c.id)} • ${escapeHtml(c.name)}</b>
-          <small>${escapeHtml(c.category)}${c.cost?` • ${escapeHtml(c.cost)}`:""} • Poder ${Number(c.power_value||0)} • ${escapeHtml(acquisitionLabel(c))}</small>
+          <small>#${Number(c.id)} • ${escapeHtml(c.category)}${c.cost?` • ${escapeHtml(c.cost)}`:""} • Poder ${Number(c.power_value||0)} • ${Number(c.quantity||1)} unidade • ${escapeHtml(acquisitionLabel(c))}</small>
         </div>
         <div class="admin-card-row-actions"><button type="button" class="outline dark-outline small" data-admin-card-view="${c.id}">👁</button><button type="button" class="card-remove-btn" data-admin-card-remove="${c.id}">Retirar</button></div>
       </div>`).join("")
     : `<div class="admin-history-empty">Este jogador ainda não possui cards.</div>`;
 
   return `<div>
-    <p class="admin-editor-note">Cada card é único no inventário. Ao adicionar, registre a origem: missão, evento, loja ou patente.</p>
+    <p class="admin-editor-note">Cada card é único no inventário. O catálogo oficial permanece separado da posse: o mesmo Card pode pertencer a vários jogadores e aliados.</p>
+    <div class="player-cards-stats admin-inventory-stats"><span><small>CARDS</small><b>${inventory.length}</b></span><span><small>PODER</small><b>${inventory.reduce((sum,c)=>sum+Number(c.power_value||0),0)}</b></span><span><small>CATEGORIAS</small><b>${cardCategoryList(inventory).length}</b></span></div>
     <div class="admin-card-add">
       <select id="adminCardSelect">${options||`<option value="">Nenhum card ativo cadastrado</option>`}</select>
       <select id="adminCardMode"><option value="add">Adicionar card</option></select>
@@ -2683,12 +2689,18 @@ function renderCardDetailBody(data,isAdmin){
   const c=data.card||data;
   const links=data.library_links||c.library_links||[];
   const linkSection=links.length?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">📚 BIBLIOTECA</p><h3>Regras relacionadas</h3></div><strong>${links.length}</strong></div><div class="card-library-link-list">${links.map(l=>`<button type="button" class="card-library-link" data-card-library-open="${Number(l.library_item_id)}" data-card-library-section="${escapeHtml(l.section_title||'')}" data-card-library-child="${escapeHtml(l.child_title||'')}"><span>📖</span><span><b>${escapeHtml(l.library_title||'Material da Biblioteca')}</b><small>${escapeHtml(l.path_label||[l.section_title,l.child_title].filter(Boolean).join(' › ')||'Abrir material')}</small></span><i>→</i></button>`).join('')}</div>${isAdmin&&hasAdminPermission('cards_write')?`<div class="editor-actions" style="margin-top:10px"><button type="button" class="outline dark-outline small" data-card-library-manage="${Number(c.id)}">⚙ Gerenciar vínculos</button></div>`:''}</section>`:`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">📚 BIBLIOTECA</p><h3>Regras relacionadas</h3></div></div><div class="card-detail-empty">Este Card ainda não possui uma regra da Biblioteca vinculada.</div>${isAdmin&&hasAdminPermission('cards_write')?`<div class="editor-actions" style="margin-top:10px"><button type="button" class="outline dark-outline small" data-card-library-manage="${Number(c.id)}">＋ Vincular à Biblioteca</button></div>`:''}</section>`;
-  const holderRows=isAdmin?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">POSSE DO CARD</p><h3>Jogadores</h3></div><strong>${Number(data.players?.length||0)}</strong></div>${data.players?.length?`<div class="card-holder-list">${data.players.map(p=>`<div class="card-holder-row"><div><b>${escapeHtml(p.nick)}</b><small>#${Number(p.id)} • ${escapeHtml(p.house||"Sem Casa")}${p.patent?` • ${escapeHtml(p.patent)}`:""}</small></div><span>${Number(p.quantity||1)} un.</span></div>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum jogador possui este Card.</div>`}</section><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">ALIADOS</p><h3>Contas de aliado</h3></div><strong>${Number(data.allies?.length||0)}</strong></div>${data.allies?.length?`<div class="card-holder-list">${data.allies.map(a=>`<div class="card-holder-row"><div><b>${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)}</small></div><span>Aliado</span></div>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum aliado possui este Card.</div>`}</section>`:"";
-  return `<div class="card-detail-hero"><div class="card-detail-icon">${c.element_type==="ELEMENTAL"?escapeHtml(c.element||"✦"):"✦"}</div><div><div class="card-detail-tags"><span>${escapeHtml(c.category||"Outros")}</span><span>${c.element_type==="ELEMENTAL"?"ELEMENTAL":"NÃO ELEMENTAL"}</span><span>${escapeHtml(c.status||"ATIVO")}</span></div><h3>${escapeHtml(c.name_pt||c.name)}</h3>${c.name_jp?`<p>${escapeHtml(c.name_jp)}</p>`:""}</div></div><div class="card-detail-stats"><div><small>Nº interno</small><b>#${Number(c.id)}</b></div><div><small>Custo</small><b>${escapeHtml(c.cost||"—")}</b><span>${escapeHtml(cardDetailMetaLabel(c.cost_type))}</span></div><div><small>Poder</small><b>${Number(c.power_value||0)}</b></div><div><small>Dano</small><b>${escapeHtml(cardDetailDamageLabel(c))}</b></div><div><small>Origem</small><b>${escapeHtml(c.origin||"Exclusivo")}</b></div></div><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">DESCRIÇÃO</p><h3>Efeito do Card</h3></div></div><div class="card-detail-description">${escapeHtml(c.description||"Descrição não cadastrada.").replace(/\n/g,"<br>")}</div></section>${linkSection}${holderRows}`;
+  const holderRows=isAdmin?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">POSSE DO CARD</p><h3>Jogadores</h3></div><strong>${Number(data.players?.length||0)}</strong></div>${data.players?.length?`<div class="card-holder-list">${data.players.map(p=>`<button type="button" class="card-holder-row card-holder-button" data-card-holder-player="${Number(p.id)}"><div><b>${escapeHtml(p.nick)}</b><small>#${Number(p.id)} • ${escapeHtml(p.house||"Sem Casa")}${p.patent?` • ${escapeHtml(p.patent)}`:""}</small></div><span>${Number(p.quantity||1)} un. →</span></button>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum jogador possui este Card.</div>`}</section><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">ALIADOS</p><h3>Contas de aliado</h3></div><strong>${Number(data.allies?.length||0)}</strong></div>${data.allies?.length?`<div class="card-holder-list">${data.allies.map(a=>`<div class="card-holder-row"><div><b>${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)}</small></div><span>Aliado</span></div>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum aliado possui este Card.</div>`}</section>`:"";
+  return `${possession}<div class="card-detail-hero"><div class="card-detail-icon">${c.element_type==="ELEMENTAL"?escapeHtml(c.element||"✦"):"✦"}</div><div><div class="card-detail-tags"><span>${escapeHtml(c.category||"Outros")}</span><span>${c.element_type==="ELEMENTAL"?"ELEMENTAL":"NÃO ELEMENTAL"}</span><span>${escapeHtml(c.status||"ATIVO")}</span></div><h3>${escapeHtml(c.name_pt||c.name)}</h3>${c.name_jp?`<p>${escapeHtml(c.name_jp)}</p>`:""}</div></div><div class="card-detail-stats"><div><small>Nº interno</small><b>#${Number(c.id)}</b></div><div><small>Custo</small><b>${escapeHtml(c.cost||"—")}</b><span>${escapeHtml(cardDetailMetaLabel(c.cost_type))}</span></div><div><small>Poder</small><b>${Number(c.power_value||0)}</b></div><div><small>Dano</small><b>${escapeHtml(cardDetailDamageLabel(c))}</b></div><div><small>Origem</small><b>${escapeHtml(c.origin||"Exclusivo")}</b></div></div><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">DESCRIÇÃO</p><h3>Efeito do Card</h3></div></div><div class="card-detail-description">${escapeHtml(c.description||"Descrição não cadastrada.").replace(/\n/g,"<br>")}</div></section>${linkSection}${holderRows}`;
 }
 function bindCardDetailLibraryButtons(){
   qsa('[data-card-library-open]').forEach(b=>b.onclick=()=>openLibraryFromCard({library_item_id:Number(b.dataset.cardLibraryOpen),section_title:b.dataset.cardLibrarySection||'',child_title:b.dataset.cardLibraryChild||''}));
   qsa('[data-card-library-manage]').forEach(b=>b.onclick=()=>openCardLibraryManager(Number(b.dataset.cardLibraryManage)));
+  qsa('[data-card-holder-player]').forEach(b=>b.onclick=async()=>{
+    const playerId=Number(b.dataset.cardHolderPlayer||0);
+    if(!playerId||!state.admin)return;
+    closeCardDetailModal();
+    await selectAdminPlayer(playerId);
+  });
 }
 async function openCardDetailModal(id,isAdmin=true){
   const modal=qs("#cardDetailModal");if(!modal)return;
