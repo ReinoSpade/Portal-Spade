@@ -1901,3 +1901,15 @@ body.library-explorer-open{overflow:hidden}
 .central-status-item p{margin:0;color:#e4e4e5;font-size:10px;line-height:1.5;white-space:pre-wrap}
 @media (max-width:900px){.central-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.central-ranking-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.central-player-identity{padding:14px;flex-direction:column}.central-player-badges{justify-content:flex-start}.central-player-info-grid{grid-template-columns:1fr}.central-stat-grid{gap:8px}.central-stat-card{padding:11px}.central-stat-card b{font-size:17px}.central-ranking-grid{grid-template-columns:1fr 1fr}.central-info-card{padding:12px}.admin-tabs{overflow-x:auto;scrollbar-width:none}.admin-tabs::-webkit-scrollbar{display:none}}
+
+/* V70 — Busca Global Inteligente */
+.global-search-results{max-height:min(72vh,620px)!important;overflow:auto!important}
+.global-search-group{border-bottom:1px solid #eee8dd}.global-search-group:last-child{border-bottom:0}
+.global-search-group-title{display:flex;align-items:center;justify-content:space-between;padding:9px 13px 7px;background:#fbfaf7;color:#8a6a35;font-size:8px;letter-spacing:.14em;text-transform:uppercase}
+.global-search-group-title span{display:grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#eee7db;color:#6d5b3c;font-size:8px;letter-spacing:0}
+.global-search-result{align-items:flex-start!important;min-height:60px}.global-search-copy em{display:block;margin-top:2px;color:#8b847a;font-size:9px;line-height:1.35;font-style:normal;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.global-search-arrow{margin-left:auto;color:#b28b4c;font-size:16px;padding-top:3px}
+.global-search-recent-list{display:grid}.global-search-recent{display:flex;width:100%;gap:10px;align-items:center;border:0;background:#fff;padding:11px 13px;text-align:left;cursor:pointer;color:#3d3932}.global-search-recent:hover{background:#f6f1e8}.global-search-recent span{width:26px;height:26px;border-radius:8px;background:#f1ece3;display:grid;place-items:center;color:#9a7a43}.global-search-recent b{font:600 12px Inter,sans-serif}
+.global-search-empty{display:grid;gap:6px}.global-search-empty strong{font:600 12px Inter,sans-serif;color:#4b463e}.global-search-empty small{font:10px Inter,sans-serif;color:#8a8379;line-height:1.45}
+.search-target-highlight{animation:searchTargetPulse 1.8s ease both}
+@keyframes searchTargetPulse{0%{box-shadow:0 0 0 0 rgba(198,164,93,.0)}20%{box-shadow:0 0 0 5px rgba(198,164,93,.24)}100%{box-shadow:0 0 0 0 rgba(198,164,93,0)}}
