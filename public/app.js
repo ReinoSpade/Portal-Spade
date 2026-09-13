@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardDetail:null,cardLibraryManager:{cardId:null,links:[],materials:[]}};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardCatalogStatus:"",selectedCardIds:new Set(),cardDistribution:{cardId:null,players:[],selectedPlayers:new Set(),house:"",search:"",mode:"add"},cardDetail:null,cardLibraryManager:{cardId:null,links:[],materials:[]}};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -2657,6 +2657,11 @@ qs("#cardBulkSheetFile")?.addEventListener("change",previewCardBulkSheet);
 qs("#cardBulkSheetConfirm")?.addEventListener("click",confirmCardBulkSheet);
 qs("#adminCardSearch")?.addEventListener("input",e=>{state.cardCatalogSearch=e.target.value;renderAdminCardCatalog();});
 qs("#adminCardCatalogFilter")?.addEventListener("change",e=>{state.cardCatalogCategory=e.target.value;renderAdminCardCatalog();});
+qs("#adminCardStatusFilter")?.addEventListener("change",e=>{state.cardCatalogStatus=e.target.value;renderAdminCardCatalog();});
+qs("#cardCatalogSelectVisible")?.addEventListener("click",selectVisibleCards);
+qs("#cardCatalogClearSelection")?.addEventListener("click",clearCardSelection);
+qs("#cardCatalogExportSelected")?.addEventListener("click",exportSelectedCards);
+qs("#cardCatalogBulkAction")?.addEventListener("click",runCardBulkAction);
 qs("#closeCardDetail")?.addEventListener("click",closeCardDetailModal);
 qs("#closeCardDetailFooter")?.addEventListener("click",closeCardDetailModal);
 qs("#cardDetailModal")?.addEventListener("click",e=>{if(e.target.id==="cardDetailModal")closeCardDetailModal();});
@@ -2710,6 +2715,8 @@ function populateCardSelects(){
     catalogCat.innerHTML=`<option value="">Todas as categorias</option>`+(state.cardCategories||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
     catalogCat.value=current;
   }
+  const statusFilter=qs('#adminCardStatusFilter');
+  if(statusFilter) statusFilter.value=state.cardCatalogStatus||"";
 }
 function resetCardForm(){
   const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value="Automático";populateCardSelects();
@@ -2719,21 +2726,116 @@ function editCardForm(id){
   const c=state.adminCards.find(x=>Number(x.id)===id);if(!c)return;
   qs("#cardId").value=c.id;if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value=String(c.id);qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardDamage").value=c.damage_value||0;qs("#cardDamageType").value=c.damage_type||"SEM_DANO";qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
 }
+function updateCardCatalogBulkBar(){
+  const bar=qs('#cardCatalogBulkBar'),count=qs('#cardCatalogSelectedCount');
+  if(!bar||!count)return;
+  const n=state.selectedCardIds?.size||0;
+  bar.hidden=n===0;
+  count.textContent=`${n} ${n===1?'Card selecionado':'Cards selecionados'}`;
+}
+function clearCardSelection(){state.selectedCardIds=new Set();renderAdminCardCatalog();}
+function selectVisibleCards(){
+  const visible=[...(state.adminCards||[])].filter(c=>{
+    const term=String(state.cardCatalogSearch||'').trim().toLowerCase();
+    const category=String(state.cardCatalogCategory||'');
+    const status=String(state.cardCatalogStatus||'');
+    if(category&&String(c.category||'')!==category)return false;
+    if(status&&String(c.status||'ATIVO')!==status)return false;
+    if(!term)return true;
+    return `${c.id} ${c.name_pt||c.name} ${c.name_jp||''} ${c.category||''} ${c.origin||''} ${c.element||''} ${c.description||''}`.toLowerCase().includes(term);
+  });
+  const set=new Set(state.selectedCardIds||[]);visible.forEach(c=>set.add(Number(c.id)));state.selectedCardIds=set;renderAdminCardCatalog();
+}
+async function exportSelectedCards(){
+  const ids=[...(state.selectedCardIds||[])].map(Number).filter(Boolean);
+  if(!ids.length)return alert('Selecione pelo menos um Card.');
+  try{
+    const key=state.adminKey||getStoredAdminKey();const r=await fetch(`/api/admin/cards/export.xlsx?ids=${encodeURIComponent(ids.join(','))}`,{headers:key?{'x-admin-key':key}:{},credentials:'same-origin'});
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||'Não foi possível exportar os Cards selecionados.');}
+    const blob=await r.blob(),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='cards-spade-selecionados.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);
+  }catch(e){alert(e.message)}
+}
+async function runCardBulkAction(){
+  const ids=[...(state.selectedCardIds||[])].map(Number).filter(Boolean);
+  if(!ids.length)return alert('Selecione pelo menos um Card.');
+  const modal=document.createElement('div');modal.className='bulk-modal-backdrop';modal.id='cardMassActionModal';
+  modal.innerHTML=`<div class="bulk-modal"><h3>⚙ Ação em massa nos Cards</h3><p>${ids.length} Card(s) selecionado(s).</p><div class="bulk-modal-grid"><select id="cardMassAction"><option value="ATIVAR">🟢 Ativar Cards</option><option value="INATIVAR">⛔ Inativar Cards</option><option value="CATEGORIA">🏷️ Alterar categoria</option></select><select id="cardMassCategory" style="display:none">${(state.cardCategories||[]).map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}</select></div><p class="bulk-card-help">Apenas o status ou a categoria dos Cards será alterado. O Nº interno permanece imutável.</p><div class="bulk-modal-actions"><button type="button" class="outline dark-outline" id="cardMassCancel">Cancelar</button><button type="button" class="gold" id="cardMassConfirm">Aplicar</button></div></div>`;
+  document.body.appendChild(modal);
+  const action=qs('#cardMassAction'),cat=qs('#cardMassCategory');action.onchange=()=>{cat.style.display=action.value==='CATEGORIA'?'':'none';};
+  qs('#cardMassCancel').onclick=()=>modal.remove();
+  qs('#cardMassConfirm').onclick=async()=>{
+    const a=action.value, category=cat.value;
+    if(a==='CATEGORIA'&&!category)return alert('Escolha uma categoria.');
+    const label=a==='ATIVAR'?'ativar':a==='INATIVAR'?'inativar':`mover para a categoria "${category}"`;
+    if(!confirm(`Confirmar ${label} ${ids.length} Card(s)?`))return;
+    qs('#cardMassConfirm').disabled=true;
+    try{const d=await adminApi('/api/admin/cards/bulk-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({card_ids:ids,action:a,category})});modal.remove();state.selectedCardIds=new Set();await loadAdminCards();alert(`${d.updated||0} Card(s) atualizado(s).`);}catch(e){qs('#cardMassConfirm').disabled=false;alert(e.message)}
+  };
+}
+async function openCardDistributionModal(cardId){
+  if(!hasAdminPermission('cards_assign'))return alert('Você não possui permissão para vincular Cards a jogadores.');
+  const card=(state.adminCards||[]).find(c=>Number(c.id)===Number(cardId));if(!card)return;
+  const modal=qs('#cardDistributionModal');if(!modal)return;
+  try{
+    const d=await adminApi('/api/admin/cards/distribution-targets');
+    state.cardDistribution={cardId:Number(cardId),players:d.players||[],selectedPlayers:new Set(),house:'',search:'',mode:'add'};
+    renderCardDistributionModal();modal.hidden=false;
+  }catch(e){alert(e.message)}
+}
+function cardDistributionFilteredPlayers(){
+  const d=state.cardDistribution||{players:[]},q=String(d.search||'').toLowerCase().trim(),house=String(d.house||'');
+  return (d.players||[]).filter(p=>(!house||String(p.house||'')===house)&&(!q||`${p.nick} ${p.number} ${p.house} ${p.patent}`.toLowerCase().includes(q)));
+}
+function renderCardDistributionModal(){
+  const modal=qs('#cardDistributionModal');if(!modal)return;const d=state.cardDistribution||{},card=(state.adminCards||[]).find(c=>Number(c.id)===Number(d.cardId));if(!card)return;
+  const houses=[...new Set((d.players||[]).map(p=>p.house).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR')),filtered=cardDistributionFilteredPlayers(),selected=d.selectedPlayers||new Set();
+  modal.innerHTML=`<div class="card-distribution-shell" role="dialog" aria-modal="true" aria-labelledby="cardDistributionTitle"><header class="card-distribution-head"><div><p class="eyebrow">🃏 DISTRIBUIÇÃO EM MASSA</p><h3 id="cardDistributionTitle">#${Number(card.id)} • ${escapeHtml(card.name_pt||card.name)}</h3><p>${Number(selected.size)} jogador(es) selecionado(s).</p></div><button type="button" class="icon-button" id="cardDistributionClose">×</button></header><main class="card-distribution-body"><div class="card-distribution-controls"><select id="cardDistributionMode"><option value="add" ${d.mode==='add'?'selected':''}>＋ Adicionar Card</option><option value="remove" ${d.mode==='remove'?'selected':''}>− Remover Card</option></select><select id="cardDistributionHouse"><option value="">Todas as Casas</option>${houses.map(h=>`<option value="${escapeHtml(h)}" ${d.house===h?'selected':''}>${escapeHtml(h)}</option>`).join('')}</select><input id="cardDistributionSearch" class="wide" placeholder="Pesquisar jogador, número, casa ou patente..." value="${escapeHtml(d.search||'')}"></div>${d.mode==='add'?`<div class="card-distribution-controls" style="margin-top:8px"><select id="cardDistributionSourceType"><option value="OUTRO">Outra origem</option><option value="MISSAO">🎯 Missão</option><option value="EVENTO">🎉 Evento</option><option value="LOJA">🛒 Loja</option><option value="PATENTE">🎖️ Patente</option></select><input id="cardDistributionSourceName" placeholder="Origem / observação" value="Distribuição administrativa em massa"></div>`:''}<div class="card-distribution-targets">${filtered.length?filtered.map(p=>`<label class="card-distribution-target"><input type="checkbox" data-card-distribution-player="${Number(p.id)}" ${selected.has(Number(p.id))?'checked':''}><span><b>${escapeHtml(p.nick)}</b><small>#${escapeHtml(p.number||String(p.id))} • ${escapeHtml(p.house||'Sem Casa')}${p.patent?` • ${escapeHtml(p.patent)}`:''}</small></span></label>`).join(''):`<div class="card-detail-empty">Nenhum jogador corresponde aos filtros.</div>`}</div><div class="card-distribution-summary"><b>${Number(selected.size)} selecionado(s)</b> • ${filtered.length} jogador(es) visíveis.<br><button type="button" class="outline dark-outline small" id="cardDistributionSelectVisible" style="margin-top:7px">☑ Selecionar visíveis</button><button type="button" class="outline dark-outline small" id="cardDistributionClear" style="margin-top:7px;margin-left:6px">Limpar seleção</button></div></main><footer class="card-distribution-foot"><span>${d.mode==='add'?'Os jogadores que já possuem o Card serão ignorados.':'Somente jogadores que possuem o Card serão alterados.'}</span><div class="card-distribution-foot-actions"><button type="button" class="outline dark-outline" id="cardDistributionCancel">Cancelar</button><button type="button" class="gold" id="cardDistributionConfirm">${d.mode==='add'?'Adicionar Card':'Remover Card'}</button></div></footer></div>`;
+  qs('#cardDistributionClose').onclick=closeCardDistributionModal;qs('#cardDistributionCancel').onclick=closeCardDistributionModal;
+  qs('#cardDistributionMode').onchange=e=>{state.cardDistribution.mode=e.target.value;renderCardDistributionModal();};
+  qs('#cardDistributionHouse').onchange=e=>{state.cardDistribution.house=e.target.value;renderCardDistributionModal();};
+  qs('#cardDistributionSearch').oninput=e=>{state.cardDistribution.search=e.target.value;renderCardDistributionModal();setTimeout(()=>{const input=qs('#cardDistributionSearch');if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}},0);};
+  qsa('[data-card-distribution-player]').forEach(cb=>cb.onchange=e=>{const id=Number(e.target.dataset.cardDistributionPlayer);if(e.target.checked)selected.add(id);else selected.delete(id);state.cardDistribution.selectedPlayers=selected;renderCardDistributionModal();});
+  qs('#cardDistributionSelectVisible').onclick=()=>{filtered.forEach(p=>selected.add(Number(p.id)));state.cardDistribution.selectedPlayers=selected;renderCardDistributionModal();};
+  qs('#cardDistributionClear').onclick=()=>{state.cardDistribution.selectedPlayers=new Set();renderCardDistributionModal();};
+  qs('#cardDistributionConfirm').onclick=submitCardDistribution;
+}
+function closeCardDistributionModal(){const modal=qs('#cardDistributionModal');if(modal){modal.hidden=true;modal.innerHTML='';}}
+async function submitCardDistribution(){
+  const d=state.cardDistribution||{},ids=[...(d.selectedPlayers||[])].map(Number).filter(Boolean);if(!ids.length)return alert('Selecione pelo menos um jogador.');
+  const sourceType=qs('#cardDistributionSourceType')?.value||'OUTRO',sourceName=qs('#cardDistributionSourceName')?.value.trim()||'Distribuição administrativa em massa';
+  const action=d.mode==='remove'?'remover':'adicionar';
+  if(!confirm(`Confirmar ${action} do Card #${Number(d.cardId)} para ${ids.length} jogador(es)?`))return;
+  const btn=qs('#cardDistributionConfirm');if(btn)btn.disabled=true;
+  try{
+    const payload={player_ids:ids,card_id:Number(d.cardId),mode:d.mode,acquisition_type:sourceType,acquisition_name:sourceName};
+    const r=await adminApi('/api/admin/cards/distribute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    closeCardDistributionModal();await loadAdminCards();if(state.selectedPlayer&&ids.includes(Number(state.selectedPlayer.id)))await selectAdminPlayer(state.selectedPlayer.id);
+    const skipped=(r.skipped||[]).slice(0,12).map(x=>`${x.nick}: ${x.reason}`).join('\n');
+    alert(`${r.changed?.length||0} jogador(es) alterado(s).${skipped?`\n\nIgnorados:\n${skipped}`:''}`);
+  }catch(e){if(btn)btn.disabled=false;alert(e.message)}
+}
+
 function renderAdminCardCatalog(){
   const list=qs("#adminCardCatalogList");if(!list)return;populateCardSelects();
   const term=String(state.cardCatalogSearch||"").trim().toLowerCase();
   const category=String(state.cardCatalogCategory||"");
+  const status=String(state.cardCatalogStatus||"");
   const cards=(state.adminCards||[]).filter(c=>{
     if(category && String(c.category||"")!==category)return false;
+    if(status && String(c.status||"ATIVO")!==status)return false;
     if(!term)return true;
     return `${c.id} ${c.name_pt||c.name} ${c.name_jp||""} ${c.category||""} ${c.origin||""} ${c.element||""} ${c.description||""}`.toLowerCase().includes(term);
   });
-  const canLink=hasAdminPermission('cards_write');
-  list.innerHTML=cards.map(c=>`<div class="card-catalog-item"><div class="card-catalog-main"><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${Number(c.library_links||0)?` • 📚 ${Number(c.library_links)} regra(s)`:''}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div><div class="card-catalog-actions"><button type="button" data-card-view="${c.id}">👁</button><button type="button" data-card-edit="${c.id}">✎</button>${canLink?`<button type="button" title="Vincular à Biblioteca" data-card-library="${c.id}">📚</button>`:""}<button type="button" class="delete" data-card-delete="${c.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum card corresponde aos filtros.</div>`;
+  const canLink=hasAdminPermission('cards_write'),canAssign=hasAdminPermission('cards_assign'),canEdit=hasAdminPermission('cards_write');
+  const canSelect=canEdit||canAssign;
+  list.innerHTML=cards.map(c=>`<div class="card-catalog-item ${state.selectedCardIds?.has(Number(c.id))?'card-catalog-item-selected':''}"><div class="card-catalog-left">${canSelect?`<input class="card-catalog-select" type="checkbox" data-card-check="${Number(c.id)}" ${state.selectedCardIds?.has(Number(c.id))?'checked':''} aria-label="Selecionar Card #${Number(c.id)}">`:''}<div class="card-catalog-main"><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${Number(c.library_links||0)?` • 📚 ${Number(c.library_links)} regra(s)`:''}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div></div><div class="card-catalog-actions"><button type="button" data-card-view="${c.id}">👁</button>${canEdit?`<button type="button" data-card-edit="${c.id}">✎</button>`:''}${canLink?`<button type="button" title="Vincular à Biblioteca" data-card-library="${c.id}">📚</button>`:''}${canAssign?`<button type="button" title="Distribuir para jogadores" data-card-distribute="${c.id}">👥</button>`:''}${canEdit?`<button type="button" class="delete" data-card-delete="${c.id}">×</button>`:''}</div></div>`).join("")||`<div class="admin-history-empty">Nenhum card corresponde aos filtros.</div>`;
+  qsa("[data-card-check]").forEach(b=>b.onchange=e=>{const id=Number(e.target.dataset.cardCheck),set=new Set(state.selectedCardIds||[]);if(e.target.checked)set.add(id);else set.delete(id);state.selectedCardIds=set;updateCardCatalogBulkBar();b.closest('.card-catalog-item')?.classList.toggle('card-catalog-item-selected',e.target.checked);});
   qsa("[data-card-view]").forEach(b=>b.onclick=()=>openCardDetailModal(Number(b.dataset.cardView),true));
   qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));
   qsa("[data-card-library]").forEach(b=>b.onclick=()=>openCardLibraryManager(Number(b.dataset.cardLibrary)));
+  qsa("[data-card-distribute]").forEach(b=>b.onclick=()=>openCardDistributionModal(Number(b.dataset.cardDistribute)));
   qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
+  updateCardCatalogBulkBar();
 }
 
 function cardDetailMetaLabel(type){return ({MANA:"♦️ Mana",VIDA:"❤️ Vida",SEM_CUSTO:"Sem custo"})[type]||type||"Sem custo";}
