@@ -2,7 +2,7 @@ function displayPlayerName(player){
   return String(player?.nick||"").trim() || "Jogador";
 }
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardCatalogStatus:"",selectedCardIds:new Set(),cardDistribution:{cardId:null,players:[],selectedPlayers:new Set(),house:"",search:"",mode:"add"},cardDetail:null,cardLibraryManager:{cardId:null,links:[],materials:[]}};
+const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],adminSimulatorTrainings:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardCatalogStatus:"",selectedCardIds:new Set(),cardDistribution:{cardId:null,players:[],selectedPlayers:new Set(),house:"",search:"",mode:"add"},cardDetail:null,cardLibraryManager:{cardId:null,links:[],materials:[]},simulator:{trainings:[],training:null,playerCards:[],opponentCards:[],battle:null,loading:false}};
 
 const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
@@ -17,7 +17,7 @@ const AMBIENT_TRACKS={
   journal:"/assets/audio/spade-journal.ogg",
   market:"/assets/audio/spade-market.ogg"
 };
-const PAGE_THEME={home:"home",guia:"guide",grimorio:"grimoire",biblioteca:"grimoire",jornal:"journal",comunicados:"journal",cards:"battle",missoes:"battle",eventos:"battle",cronograma:"battle",ranking:"battle",casas:"home",jogadores:"home",status:"home",cargos:"home",hierarquia:"home",admin:"home","admin-login":"home"};
+const PAGE_THEME={home:"home",guia:"guide",grimorio:"grimoire",biblioteca:"grimoire",jornal:"journal",comunicados:"journal",cards:"battle",simulador:"battle",missoes:"battle",eventos:"battle",cronograma:"battle",ranking:"battle",casas:"home",jogadores:"home",status:"home",cargos:"home",hierarquia:"home",admin:"home","admin-login":"home"};
 function ambientReadStorage(){
   try{
     state.ambient.effects=localStorage.getItem("spade-effects")!=="0";
@@ -163,6 +163,7 @@ function initGlobalSearch(){
 function go(page){
   const previous=state.page;
   if(page==="grimorio" && (!state.me || state.me.account_type==="ALLY" || !String(state.me.grimoire||"").trim())){ if(previous!==page) go("dashboard"); return; }
+  if(page==="simulador" && (!state.me || state.me.account_type==="ALLY")){ if(!state.me) go("login"); else go("dashboard"); return; }
   runPageTransition();
   state.page=page;
   setAmbientTheme(page);
@@ -191,6 +192,7 @@ function go(page){
   if(page==="dashboard"){ if(state.me) loadPlayerDashboardData(); else refreshDashboard(); }
   if(page==="grimorio"){ if(state.me) loadMyGrimoire(); else go("login"); }
   if(page==="cards"){ if(state.me) loadPlayerCards(); else { state.page="login"; return go("login"); } }
+  if(page==="simulador"){ if(state.me && state.me.account_type!=="ALLY") loadSimulatorPage(); }
   if(page==="admin"){ if(state.admin) initAdmin(); else go("admin-login"); }
   if(page==="admin-login") refreshAdminSession();
 }
@@ -1458,6 +1460,152 @@ function renderAllyDashboard(){
   loadAllyCards();
 }
 
+
+const SIM_DIFF_LABEL={FACIL:'Fácil',NORMAL:'Normal',DIFICIL:'Difícil',MESTRE:'Mestre'};
+const SIM_PERSONALITY_LABEL={AGRESSIVO:'Agressivo',DEFENSIVO:'Defensivo',ESTRATEGICO:'Estratégico',IMPREVISIVEL:'Imprevisível',EXPERIMENTAL:'Experimental'};
+function simCardCategory(c){return String(c?.category||c?.type||'Outros').trim();}
+function simCardName(c){return String(c?.name_pt||c?.name||'Card');}
+function simCardCost(c){if(String(c?.cost_type||'SEM_CUSTO')==='SEM_CUSTO')return 0;const m=String(c?.cost||'').match(/\d+/);return m?Number(m[0]):0;}
+function simCardDerivedDamage(c){let d=Number(c?.damage_value||0);if(d>0)return d;const m=String(c?.cost||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const cat=simCardCategory(c).toLowerCase();if(/ataque|ofensiva|técnica|paralisia|falha|barreira/.test(cat))return Number(m[2]||0);}return 0;}
+function simCardDuration(c){const text=`${c?.name||''} ${c?.description||''}`;const m=text.match(/(\d+)\s*(?:rounds?|turnos?)/i);return m?Math.max(1,Number(m[1])):1;}
+function simIs(c,kind){const cat=simCardCategory(c).toLowerCase();const name=`${c?.name||''} ${c?.name_pt||''}`.toLowerCase();if(kind==='failure')return cat.includes('falha');if(kind==='flee')return cat.includes('fuga')||cat.includes('camuflag');if(kind==='defense')return cat.includes('barreira')||cat.includes('ataque/defesa')||cat.includes('réplica')||simIs(c,'flee');if(kind==='offensive')return cat.includes('magia ofensiva')||cat==='ofensiva';if(kind==='paralysis')return cat.includes('paralisia');if(kind==='technique')return cat.includes('técnica');if(kind==='activation')return cat.includes('ativação');if(kind==='reflection')return name.includes('refletivo')||name.includes('refletiva');if(kind==='illusion')return cat.includes('ilusão');return false;}
+function simPlayable(card,side){const cost=simCardCost(card);return String(card.cost_type||'SEM_CUSTO')==='VIDA'?side.hp>cost:String(card.cost_type||'SEM_CUSTO')==='MANA'?side.mana>=cost:true;}
+function simPayCost(card,side){const cost=simCardCost(card);if(cost<=0)return {ok:true,cost:0};if(String(card.cost_type||'SEM_CUSTO')==='VIDA'){if(side.hp<=cost)return {ok:false,cost};side.hp-=cost;return {ok:true,cost};}if(String(card.cost_type||'SEM_CUSTO')==='MANA'){if(side.mana<cost)return {ok:false,cost};side.mana-=cost;return {ok:true,cost};}return {ok:true,cost:0};}
+function simMakeSide(name,hp,mana,cards,isPlayer){return {name,hp:Number(hp),maxHp:Number(hp),mana:Number(mana),maxMana:Number(mana),cards:cards||[],isPlayer,paralyzed:0,defense:null,effects:[],activations:[],damageBoost:0,techImmune:false,usedCategories:new Set(),usedCards:new Set()};}
+function simRefreshEffectsStart(side,log){const next=[];for(const e of side.effects||[]){side.hp=Math.max(0,side.hp-Number(e.damage||0));log.push(`${side.isPlayer?'👤':'🤖'} ${escapeHtml(side.name)} sofreu ${Number(e.damage||0)} de dano contínuo de ${escapeHtml(e.name)}.`);const remaining=Number(e.remaining||1)-1;if(remaining>0)next.push({...e,remaining});}side.effects=next;if(side.defense){side.defense.remaining-=1;if(side.defense.remaining<=0)side.defense=null;}}
+function simApplyContinuous(target,card){const duration=simCardDuration(card);target.effects.push({name:simCardName(card),damage:simCardDerivedDamage(card),remaining:Math.max(duration,1)});}
+function simAddParalysis(target,card){target.paralyzed=Math.max(target.paralyzed,simCardDuration(card));}
+function simHasDefense(side){return !!side.defense;}
+function simSetDefense(side,card){side.defense={name:simCardName(card),remaining:Math.max(1,simCardDuration(card)),blocks:true};}
+function simCandidateScore(card,side,opp,battle){let score=Math.random()*2;const dmg=simCardDerivedDamage(card),cost=simCardCost(card);if(simIs(card,'offensive')||simIs(card,'technique'))score+=dmg*0.65;if(simIs(card,'defense'))score+=(side.hp<side.maxHp*0.45?35:10);if(simIs(card,'paralysis'))score+=(opp.hp>side.maxHp*0.35?24:10);if(simIs(card,'failure'))score+=opp.hp>side.hp?8:2;if(simIs(card,'activation'))score+=6;if(opp.defense&& (simIs(card,'failure')||simIs(card,'reflection')))score+=20;if(side.hp<side.maxHp*0.3&&simIs(card,'flee'))score+=45;score-=cost*0.05;switch(battle.training.personality){case 'AGRESSIVO':score+=(simIs(card,'offensive')||simIs(card,'technique')?28:0);break;case 'DEFENSIVO':score+=(simIs(card,'defense')||simIs(card,'flee')?28:0);break;case 'ESTRATEGICO':score+=(simIs(card,'paralysis')||simIs(card,'failure')||simIs(card,'activation')?16:0);break;case 'EXPERIMENTAL':score+=10;break;}return score;}
+function simPickAI(side,opp,battle){const playable=side.cards.filter(c=>Number(c.status!=='INATIVO')&&simPlayable(c,side));if(!playable.length)return null;let scored=playable.map(c=>({card:c,score:simCandidateScore(c,side,opp,battle)})).sort((a,b)=>b.score-a.score);if(battle.training.personality==='IMPREVISIVEL'){return playable[Math.floor(Math.random()*playable.length)];}const pool=battle.training.difficulty==='FACIL'?scored.slice(-Math.min(3,scored.length)):battle.training.difficulty==='DIFICIL'?scored.slice(0,Math.min(4,scored.length)):battle.training.difficulty==='MESTRE'?scored.slice(0,Math.min(2,scored.length)):scored.slice(0,Math.min(5,scored.length));return pool[Math.floor(Math.random()*pool.length)].card;}
+function simResolvePair(playerCard,oppCard,battle){const p=battle.player,o=battle.opponent,log=[];const pCancel={v:false},oCancel={v:false};if(playerCard){p.usedCategories.add(simCardCategory(playerCard));p.usedCards.add(Number(playerCard.id));}if(oppCard){o.usedCategories.add(simCardCategory(oppCard));o.usedCards.add(Number(oppCard.id));}
+  const pPay=playerCard?simPayCost(playerCard,p):{ok:true,cost:0},oPay=oppCard?simPayCost(oppCard,o):{ok:true,cost:0};
+  if(playerCard&&!pPay.ok) {log.push(`❌ ${p.name} não tinha recurso suficiente para ${simCardName(playerCard)}.`);playerCard=null;}
+  if(oppCard&&!oPay.ok) {log.push(`❌ ${o.name} não tinha recurso suficiente para ${simCardName(oppCard)}.`);oppCard=null;}
+  if(playerCard&&simIs(playerCard,'failure')&&oppCard&&!simIs(oppCard,'flee')&&!simIs(oppCard,'activation'))pCancel.v=true;
+  if(oppCard&&simIs(oppCard,'failure')&&playerCard&&!simIs(playerCard,'flee')&&!simIs(playerCard,'activation'))oCancel.v=true;
+  if(playerCard)log.push(`👤 ${p.name}: #${playerCard.id} • ${simCardName(playerCard)} • ${simCardCategory(playerCard)}`);else log.push(`👤 ${p.name}: passa o round.`);
+  if(oppCard)log.push(`🤖 ${o.name}: #${oppCard.id} • ${simCardName(oppCard)} • ${simCardCategory(oppCard)}`);else log.push(`🤖 ${o.name}: passa o round.`);
+  const pDamage=playerCard?Math.max(0,simCardDerivedDamage(playerCard)+p.damageBoost):0,oDamage=oppCard?Math.max(0,simCardDerivedDamage(oppCard)+o.damageBoost):0;
+  if(playerCard&&simIs(playerCard,'activation')){p.activations.push(simCardName(playerCard));const m=String(playerCard.description||'').match(/\+(\d+)\s*(?:de\s*)?Dano/i);if(m)p.damageBoost+=Number(m[1]);if(/imune\s+a\s+t[ée]cnicas/i.test(playerCard.description||''))p.techImmune=true;log.push(`✨ ${p.name} ativou ${simCardName(playerCard)}. O efeito da ativação é acompanhado pelo simulador quando reconhecível.`);}
+  if(oppCard&&simIs(oppCard,'activation')){o.activations.push(simCardName(oppCard));const m=String(oppCard.description||'').match(/\+(\d+)\s*(?:de\s*)?Dano/i);if(m)o.damageBoost+=Number(m[1]);if(/imune\s+a\s+t[ée]cnicas/i.test(oppCard.description||''))o.techImmune=true;log.push(`✨ ${o.name} ativou ${simCardName(oppCard)}.`);}
+  if(playerCard&&simIs(playerCard,'defense')&&!simIs(playerCard,'flee'))simSetDefense(p,playerCard);
+  if(oppCard&&simIs(oppCard,'defense')&&!simIs(oppCard,'flee'))simSetDefense(o,oppCard);
+  if(playerCard&&simIs(playerCard,'flee'))simSetDefense(p,playerCard);
+  if(oppCard&&simIs(oppCard,'flee'))simSetDefense(o,oppCard);
+  if(playerCard&&simIs(playerCard,'reflection')&&!oCancel.v)o._reflectNext=true;
+  if(oppCard&&simIs(oppCard,'reflection')&&!pCancel.v)p._reflectNext=true;
+  if(playerCard&&!pCancel.v&&simIs(playerCard,'paralysis')&&oppCard){if(simIs(oppCard,'offensive')){const pc=simCardCost(playerCard),oc=simCardCost(oppCard);if(pc>=oc){simAddParalysis(o,playerCard);log.push(`⛓️ ${o.name} foi paralisado por ${simCardDuration(playerCard)} round(s).`);}else{if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-oDamage);log.push(`💥 ${p.name} sofreu ${oDamage} de dano.`);}else log.push(`🛡️ ${p.name} foi protegido por ${p.defense.name}.`);}}else if(simIs(oppCard,'technique')&&simCardDuration(playerCard)>=2){simAddParalysis(o,playerCard);log.push(`⛓️ ${o.name} foi paralisado; a Paralisia de 2 Rounds não sofre dano da Técnica.`);}else simAddParalysis(o,playerCard);}
+  if(oppCard&&!oCancel.v&&simIs(oppCard,'paralysis')&&playerCard){if(simIs(playerCard,'offensive')){const oc=simCardCost(oppCard),pc=simCardCost(playerCard);if(oc>=pc){simAddParalysis(p,oppCard);log.push(`⛓️ ${p.name} foi paralisado por ${simCardDuration(oppCard)} round(s).`);}else if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-pDamage);log.push(`💥 ${o.name} sofreu ${pDamage} de dano.`);}else log.push(`🛡️ ${o.name} foi protegido por ${o.defense.name}.`);}else if(simIs(playerCard,'technique')&&simCardDuration(oppCard)>=2){simAddParalysis(p,oppCard);log.push(`⛓️ ${p.name} foi paralisado; a Paralisia de 2 Rounds não sofre dano.`);}else simAddParalysis(p,oppCard);}
+  const pAttacks=playerCard&&!pCancel.v&&!simIs(playerCard,'defense')&&!simIs(playerCard,'flee')&&!simIs(playerCard,'paralysis')&&!simIs(playerCard,'activation')&&!simIs(playerCard,'failure');
+  const oAttacks=oppCard&&!oCancel.v&&!simIs(oppCard,'defense')&&!simIs(oppCard,'flee')&&!simIs(oppCard,'paralysis')&&!simIs(oppCard,'activation')&&!simIs(oppCard,'failure');
+  if(pAttacks&&oAttacks&&simIs(playerCard,'offensive')&&simIs(oppCard,'offensive')){const pc=simCardCost(playerCard),oc=simCardCost(oppCard);if(pc>oc){if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-pDamage);log.push(`⚔️ Magia Ofensiva de ${p.name} prevaleceu pelo custo ${pc} > ${oc}. ${o.name} sofreu ${pDamage}.`);}else log.push(`🛡️ ${o.name} absorveu o dano com ${o.defense.name}.`);}else if(oc>pc){if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-oDamage);log.push(`⚔️ Magia Ofensiva de ${o.name} prevaleceu pelo custo ${oc} > ${pc}. ${p.name} sofreu ${oDamage}.`);}else log.push(`🛡️ ${p.name} absorveu o dano com ${p.defense.name}.`);}else log.push('⚔️ Os custos de Mana foram iguais: as duas Magias Ofensivas foram anuladas.');}
+  else {
+    if(pAttacks&&oAttacks){if(o._reflectNext&&!simIs(playerCard,'activation')){if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-pDamage);log.push(`↩️ ${p.name} recebeu de volta ${pDamage} de dano.`);}}else if(p._reflectNext&&!simIs(oppCard,'activation')){if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-oDamage);log.push(`↩️ ${o.name} recebeu de volta ${oDamage} de dano.`);}}else{if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-pDamage);if(pDamage)log.push(`💥 ${o.name} sofreu ${pDamage} de dano.`);}else if(pDamage)log.push(`🛡️ ${o.name} bloqueou o dano de ${p.name}.`);if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-oDamage);if(oDamage)log.push(`💥 ${p.name} sofreu ${oDamage} de dano.`);}else if(oDamage)log.push(`🛡️ ${p.name} bloqueou o dano de ${o.name}.`);}}
+    else if(pAttacks){if(simIs(playerCard,'technique')&&o.techImmune){log.push(`⚡ ${o.name} está imune a Técnicas.`);}else if(!simHasDefense(o)){if(simCardDamageType(playerCard)==='DANO_CONTINUO')simApplyContinuous(o,playerCard);else{o.hp=Math.max(0,o.hp-pDamage);if(pDamage)log.push(`💥 ${o.name} sofreu ${pDamage} de dano.`);}}else if(pDamage)log.push(`🛡️ ${o.name} bloqueou o dano.`);}
+    else if(oAttacks){if(simIs(oppCard,'technique')&&p.techImmune){log.push(`⚡ ${p.name} está imune a Técnicas.`);}else if(!simHasDefense(p)){if(simCardDamageType(oppCard)==='DANO_CONTINUO')simApplyContinuous(p,oppCard);else{p.hp=Math.max(0,p.hp-oDamage);if(oDamage)log.push(`💥 ${p.name} sofreu ${oDamage} de dano.`);}}else if(oDamage)log.push(`🛡️ ${p.name} bloqueou o dano.`);}
+  }
+  return log;
+}
+function simCardDamageType(c){return String(c?.damage_type||'SEM_DANO');}
+function simGoalStatus(training,battle){const o=training.objective||{type:'WIN',value:0};const t=o.type;let achieved=false;if(t==='USE_CATEGORY')achieved=battle.player.usedCategories.has(String(o.value));else if(t==='USE_CARD')achieved=battle.player.usedCards.has(Number(o.value));else if(t==='FINISH_MANA_AT_LEAST')achieved=battle.player.mana>=Number(o.value||0)&&(battle.over||battle.result!=='EM_ANDAMENTO');else if(t==='SURVIVE_ROUNDS')achieved=battle.player.hp>0&&battle.round>=Number(o.value||0);else achieved=battle.result==='VITORIA';return {type:t,value:o.value,achieved,label:o.label||'Objetivo'};}
+function simulatorStorageKey(id){return `spade-simulator-${id}`;}
+function saveSimulatorResult(training,battle){try{const key=simulatorStorageKey(training.id),old=JSON.parse(localStorage.getItem(key)||'{}');const result={bestRounds:old.bestRounds||null,wins:Number(old.wins||0),attempts:Number(old.attempts||0),lastResult:battle.result,completedAt:new Date().toISOString()};result.attempts+=1;if(battle.result==='VITORIA')result.wins+=1;if(battle.result==='VITORIA'&&(!result.bestRounds||battle.round<result.bestRounds))result.bestRounds=battle.round;localStorage.setItem(key,JSON.stringify(result));}catch{}}
+function simulatorProgress(id){try{return JSON.parse(localStorage.getItem(simulatorStorageKey(id))||'{}')}catch{return {}}}
+function simFormatTrainingRules(r){const parts=[];if(r.allowed_origins?.length)parts.push(`Origem: ${r.allowed_origins.join(', ')}`);if(r.allowed_categories?.length)parts.push(`Categoria: ${r.allowed_categories.join(', ')}`);if(r.allowed_card_ids?.length)parts.push(`Cards: #${r.allowed_card_ids.join(', #')}`);if(r.blocked_card_ids?.length)parts.push(`Proibidos: #${r.blocked_card_ids.join(', #')}`);return parts.join(' • ')||'Todos os Cards ativos';}
+async function loadSimulatorPage(){const root=qs('#simulatorRoot');if(!root)return;root.innerHTML='<div class="simulator-loading panel">⚔️ Preparando a arena...</div>';try{const d=await api('/api/simulator/trainings');state.simulator.trainings=d.trainings||[];renderSimulatorTrainingList();}catch(e){root.innerHTML=`<div class="panel simulator-error">${escapeHtml(e.message||'Não foi possível carregar os treinamentos.')}</div>`;}}
+function renderSimulatorTrainingList(){const root=qs('#simulatorRoot');if(!root)return;const items=(state.simulator.trainings||[]).map(t=>{const p=simulatorProgress(t.id);return `<button class="sim-training-card" type="button" data-sim-training="${t.id}"><div class="sim-training-icon">⚔️</div><div class="sim-training-copy"><span class="tag">${escapeHtml(t.name)}</span><h3>${escapeHtml(t.description||'Treinamento de combate')}</h3><p>${escapeHtml(simFormatTrainingRules(t.card_rules))}</p><small>🤖 ${escapeHtml(t.opponent_name)} • ${escapeHtml(SIM_DIFF_LABEL[t.difficulty]||t.difficulty)} • ${escapeHtml(SIM_PERSONALITY_LABEL[t.personality]||t.personality)}</small>${p.bestRounds?`<strong>🏆 Melhor: ${p.bestRounds} round(s) • ${p.wins||0} vitória(s)</strong>`:''}</div></button>`}).join('');root.innerHTML=`<div class="simulator-intro-grid"><div class="panel"><p class="eyebrow">COMO FUNCIONA</p><h2>Treine sem arriscar seu personagem.</h2><p>O simulador usa seus Cards reais, mas nenhuma jogada altera HP, Mana, Cards ou rankings oficiais.</p></div><div class="simulator-rule-note"><span>📚</span><div><b>Regras do Databook</b><small>O motor resolve automaticamente interações conhecidas e identifica situações que ainda dependem da descrição específica do Card.</small></div></div></div><div class="sim-training-head"><div><p class="eyebrow">TREINAMENTOS</p><h2>Escolha um cenário</h2></div></div><div class="sim-training-grid">${items||'<div class="panel">Nenhum treinamento público disponível.</div>'}</div>`;qsa('[data-sim-training]').forEach(b=>b.onclick=()=>startSimulator(Number(b.dataset.simTraining)));}
+async function startSimulator(trainingId){const root=qs('#simulatorRoot');if(!root)return;root.innerHTML='<div class="simulator-loading panel">⏳ Carregando seu inventário e preparando o oponente...</div>';try{const [td,pc]=await Promise.all([api(`/api/simulator/trainings/${trainingId}`),api(`/api/me/simulator/cards?training_id=${trainingId}`)]);const t=td.training;const playerCards=pc.cards||[];const opponentCards=t.opponent_cards||[];if(!playerCards.length)throw new Error('Você não possui nenhum Card ativo elegível para este treinamento.');if(!opponentCards.length)throw new Error('Este treinamento ainda não possui Cards disponíveis para o oponente fictício.');const player=simMakeSide(state.me.nick,t.player_hp,t.player_mana,playerCards,true);const opponent=simMakeSide(t.opponent_name,t.opponent_hp,t.opponent_mana,opponentCards,false);state.simulator.training=t;state.simulator.playerCards=playerCards;state.simulator.opponentCards=opponentCards;state.simulator.battle={training:t,player,opponent,round:1,log:[],selectedCardId:null,selectedBonusCardId:null,awaitingSecondAction:false,over:false,result:'EM_ANDAMENTO'};renderSimulatorArena();}catch(e){root.innerHTML=`<div class="panel simulator-error"><h3>Não foi possível iniciar</h3><p>${escapeHtml(e.message||'Erro desconhecido.')}</p><button class="outline dark-outline" type="button" id="simBackTraining">← Escolher outro treinamento</button></div>`;qs('#simBackTraining')?.addEventListener('click',renderSimulatorTrainingList);}}
+function renderSimulatorArena(){
+  const root=qs('#simulatorRoot'),b=state.simulator.battle,t=state.simulator.training;
+  if(!root||!b||!t)return;
+  const player=b.player,opp=b.opponent;
+  const grouped=new Map();
+  for(const c of player.cards){const k=simCardCategory(c);if(!grouped.has(k))grouped.set(k,[]);grouped.get(k).push(c);}
+  const cardButtons=[...grouped.entries()].map(([cat,cards])=>`<div class="sim-card-group"><span class="sim-card-group-title">${escapeHtml(cat)}</span><div class="sim-card-choices">${cards.map(c=>{
+    const selected=b.selectedCardId===Number(c.id)||b.selectedBonusCardId===Number(c.id);
+    const disabled=b.over||(!b.awaitingSecondAction&&player.paralyzed>0)||!simPlayable(c,player)||(b.awaitingSecondAction&&Number(c.id)===Number(b.selectedCardId));
+    return `<button type="button" class="sim-card-choice ${selected?'selected':''}" data-sim-card="${Number(c.id)}" ${disabled?'disabled':''}><b>#${Number(c.id)} • ${escapeHtml(simCardName(c))}</b><small>${escapeHtml(c.cost||'Sem custo')} • ${simCardDerivedDamage(c)} dano</small>${c.quantity?`<em>×${Number(c.quantity)}</em>`:''}</button>`;
+  }).join('')}</div></div>`).join('');
+  const goal=simGoalStatus(t,b);
+  const canPlay=!b.over&&!player.paralyzed&&!!b.selectedCardId&&(!b.awaitingSecondAction||!!b.selectedBonusCardId);
+  const playLabel=b.awaitingSecondAction?'⚔️ Jogar as duas ações':'⚔️ Jogar Round';
+  root.innerHTML=`
+    <div class="simulator-topbar"><button class="outline dark-outline small" type="button" id="simBackBtn">← Treinamentos</button><div><p class="eyebrow">${escapeHtml(t.name)}</p><b>${escapeHtml(t.description||'')}</b></div><span class="sim-round-pill">ROUND ${b.round}${t.max_rounds?` / ${t.max_rounds}`:''}</span></div>
+    <div class="sim-arena">
+      <article class="sim-combatant player"><div class="sim-combatant-head"><div class="sim-avatar">♠</div><div><p class="eyebrow">VOCÊ</p><h2>${escapeHtml(player.name)}</h2></div></div><div class="sim-bars"><div><div class="sim-bar-label"><span>❤️ HP</span><b>${player.hp} / ${player.maxHp}</b></div><div class="sim-bar"><i style="width:${Math.max(0,Math.min(100,player.hp/player.maxHp*100))}%"></i></div></div><div><div class="sim-bar-label"><span>♦️ MANA</span><b>${player.mana} / ${player.maxMana}</b></div><div class="sim-bar mana"><i style="width:${player.maxMana?Math.max(0,Math.min(100,player.mana/player.maxMana*100)):0}%"></i></div></div></div><div class="sim-effects">${player.paralyzed?`<span>⛓️ Paralisado ${player.paralyzed}</span>`:''}${player.defense?`<span>🛡️ ${escapeHtml(player.defense.name)} ${player.defense.remaining}</span>`:''}${player.effects.map(e=>`<span>🔥 ${escapeHtml(e.name)} ${e.remaining}</span>`).join('')}${player.activations.length?`<span>✨ ${player.activations.length} ativação(ões)</span>`:''}</div></article>
+      <div class="sim-vs">VS</div>
+      <article class="sim-combatant opponent"><div class="sim-combatant-head"><div class="sim-avatar">🤖</div><div><p class="eyebrow">OPONENTE FICTÍCIO</p><h2>${escapeHtml(opp.name)}</h2></div></div><div class="sim-bars"><div><div class="sim-bar-label"><span>❤️ HP</span><b>${opp.hp} / ${opp.maxHp}</b></div><div class="sim-bar"><i style="width:${Math.max(0,Math.min(100,opp.hp/opp.maxHp*100))}%"></i></div></div><div><div class="sim-bar-label"><span>♦️ MANA</span><b>${opp.mana} / ${opp.maxMana}</b></div><div class="sim-bar mana"><i style="width:${opp.maxMana?Math.max(0,Math.min(100,opp.mana/opp.maxMana*100)):0}%"></i></div></div></div><div class="sim-effects">${opp.paralyzed?`<span>⛓️ Paralisado ${opp.paralyzed}</span>`:''}${opp.defense?`<span>🛡️ ${escapeHtml(opp.defense.name)} ${opp.defense.remaining}</span>`:''}${opp.effects.map(e=>`<span>🔥 ${escapeHtml(e.name)} ${e.remaining}</span>`).join('')}${opp.activations.length?`<span>✨ ${opp.activations.length} ativação(ões)</span>`:''}</div></article>
+    </div>
+    <div class="simulator-main-grid">
+      <section class="panel sim-play-panel"><div class="panel-head"><div><p class="eyebrow">SUA JOGADA</p><h3>${player.paralyzed?'Você está paralisado.':b.awaitingSecondAction?'Sua Ativação foi escolhida — escolha a segunda ação.':'Escolha um Card'}</h3></div><span>${escapeHtml(simFormatTrainingRules(t.card_rules))}</span></div>
+        ${player.paralyzed?'<div class="sim-paralyzed-note">⛓️ Você não pode realizar uma jogada neste round. Use “Passar Round” para avançar.</div>':cardButtons||'<div class="sim-paralyzed-note">Nenhum Card utilizável com os recursos atuais.</div>'}
+        <div class="sim-actions"><button class="gold" type="button" id="simPlayBtn" ${(!canPlay&&!player.paralyzed)?'disabled':''}>${player.paralyzed?'⏭️ Passar Round':playLabel}</button><button class="outline dark-outline" type="button" id="simRestartBtn">↻ Reiniciar</button></div>
+        <div class="sim-objective"><span>🎯</span><div><b>Objetivo</b><small>${escapeHtml(goal.label)}</small></div><strong class="${goal.achieved?'done':''}">${goal.achieved?'✅ Cumprido':'Em andamento'}</strong></div>
+      </section>
+      <section class="panel sim-log-panel"><div class="panel-head"><div><p class="eyebrow">📜 LOG</p><h3>Histórico da batalha</h3></div><span>${escapeHtml(SIM_DIFF_LABEL[t.difficulty]||t.difficulty)} • ${escapeHtml(SIM_PERSONALITY_LABEL[t.personality]||t.personality)}</span></div><div id="simulatorLog" class="simulator-log">${b.log.length?b.log.map((x,i)=>`<div class="sim-log-entry"><span>${String(i+1).padStart(2,'0')}</span><p>${x}</p></div>`).join(''):`<div class="sim-log-empty">Escolha seu primeiro Card para começar.</div>`}</div></section>
+    </div>
+    ${b.over?`<div class="sim-result panel"><p class="eyebrow">RESULTADO</p><h2>${b.result==='VITORIA'?'🏆 Vitória':b.result==='DERROTA'?'💀 Derrota':b.result==='LIMITE'?'⏳ Limite alcançado':'⚔️ Simulação encerrada'}</h2><p>${b.result==='VITORIA'?'Você venceu o oponente fictício.':'A simulação terminou.'} Round ${b.round}.</p><div class="sim-result-stats"><span>❤️ ${player.hp} HP</span><span>♦️ ${player.mana} Mana</span><span>🤖 ${opp.hp} HP</span></div><div class="sim-actions"><button class="gold" type="button" id="simRevancheBtn">🔄 Revanche</button><button class="outline dark-outline" type="button" id="simBackResultBtn">📚 Outros treinamentos</button></div></div>`:''}`;
+  qs('#simBackBtn')?.addEventListener('click',renderSimulatorTrainingList);
+  qs('#simBackResultBtn')?.addEventListener('click',renderSimulatorTrainingList);
+  qs('#simRestartBtn')?.addEventListener('click',()=>startSimulator(t.id));
+  qs('#simRevancheBtn')?.addEventListener('click',()=>startSimulator(t.id));
+  qsa('[data-sim-card]').forEach(btn=>btn.addEventListener('click',()=>{
+    if(b.over||player.paralyzed)return;
+    const c=player.cards.find(x=>Number(x.id)===Number(btn.dataset.simCard));
+    if(!c||!simPlayable(c,player))return;
+    if(b.awaitingSecondAction){if(Number(c.id)===Number(b.selectedCardId))return;b.selectedBonusCardId=Number(c.id);}
+    else {b.selectedCardId=Number(c.id);if(simIs(c,'activation')){b.awaitingSecondAction=true;b.selectedBonusCardId=null;}}
+    renderSimulatorArena();
+  }));
+  qs('#simPlayBtn')?.addEventListener('click',()=>runSimulatorRound());
+}
+async function runSimulatorRound(){
+  const b=state.simulator.battle;if(!b||b.over)return;
+  const p=b.player,o=b.opponent,round=b.round;
+  if(p.paralyzed){
+    b.log.push(`<b>ROUND ${round}</b>`);simRefreshEffectsStart(p,b.log);simRefreshEffectsStart(o,b.log);
+    b.log.push(`⛓️ ${escapeHtml(p.name)} está paralisado e não realizou uma ação.`);
+    const ai=o.paralyzed?null:simPickAI(o,p,b);
+    b.log.push(...simResolvePair(null,ai,b));
+    if(p.paralyzed>0)p.paralyzed=Math.max(0,p.paralyzed-1);if(o.paralyzed>0)o.paralyzed=Math.max(0,o.paralyzed-1);
+    if(p.hp<=0||o.hp<=0){finishSimulatorBattle(b);renderSimulatorArena();return;}
+    const goal=simGoalStatus(b.training,b);
+    if((goal.type==='SURVIVE_ROUNDS'&&b.round>=Number(goal.value||0))||((b.training.max_rounds&&round>=Number(b.training.max_rounds)))){
+      b.over=true;b.result=goal.achieved?'VITORIA_TREINO':'LIMITE';saveSimulatorResult(b.training,b);b.log.push(`<b>${goal.achieved?'🏆 Objetivo do treinamento concluído.':'⏳ Limite do treinamento alcançado.'}</b>`);
+    }else b.round+=1;
+    b.selectedCardId=null;b.selectedBonusCardId=null;b.awaitingSecondAction=false;renderSimulatorArena();return;
+  }
+  const first=p.cards.find(c=>Number(c.id)===Number(b.selectedCardId));if(!first||!simPlayable(first,p))return;
+  const playerSeq=[first];if(simIs(first,'activation')){if(!b.selectedBonusCardId)return;const second=p.cards.find(c=>Number(c.id)===Number(b.selectedBonusCardId));if(second&&second.id!==first.id&&simPlayable(second,p))playerSeq.push(second);else return;}
+  const aiFirst=o.paralyzed?null:simPickAI(o,p,b);const oppSeq=aiFirst?[aiFirst]:[];
+  if(aiFirst&&simIs(aiFirst,'activation')){const aiSecond=simPickAI(o,p,b);if(aiSecond&&Number(aiSecond.id)!==Number(aiFirst.id)&&simPlayable(aiSecond,o))oppSeq.push(aiSecond);}
+  b.log.push(`<b>ROUND ${round}</b>`);simRefreshEffectsStart(p,b.log);simRefreshEffectsStart(o,b.log);
+  if(p.hp<=0||o.hp<=0){finishSimulatorBattle(b);renderSimulatorArena();return;}
+  const max=Math.max(playerSeq.length,oppSeq.length);
+  for(let i=0;i<max;i++){b.log.push(...simResolvePair(playerSeq[i]||null,oppSeq[i]||null,b));if(p.hp<=0||o.hp<=0)break;}
+  if(p.paralyzed>0)p.paralyzed=Math.max(0,p.paralyzed-1);if(o.paralyzed>0)o.paralyzed=Math.max(0,o.paralyzed-1);
+  if(p.hp<=0||o.hp<=0){finishSimulatorBattle(b);renderSimulatorArena();return;}
+  b.awaitingSecondAction=false;b.selectedCardId=null;b.selectedBonusCardId=null;
+  const goal=simGoalStatus(b.training,b);
+  if(goal.type==='FINISH_MANA_AT_LEAST' && b.player.mana>=Number(goal.value||0)){b.over=true;b.result='VITORIA_TREINO';saveSimulatorResult(b.training,b);b.log.push('<b>🏆 Objetivo do treinamento concluído: Mana mínima atingida.</b>');}
+  else if(goal.type==='USE_CATEGORY' && goal.achieved){b.over=true;b.result='VITORIA_TREINO';saveSimulatorResult(b.training,b);b.log.push(`<b>🏆 Objetivo do treinamento concluído: ${escapeHtml(goal.label)}.</b>`);}
+  else if(goal.type==='USE_CARD' && goal.achieved){b.over=true;b.result='VITORIA_TREINO';saveSimulatorResult(b.training,b);b.log.push(`<b>🏆 Objetivo do treinamento concluído: ${escapeHtml(goal.label)}.</b>`);}
+  else if((goal.type==='SURVIVE_ROUNDS'&&b.round>=Number(goal.value||0))||((b.training.max_rounds&&round>=Number(b.training.max_rounds)))){
+    b.over=true;b.result=goal.achieved?'VITORIA_TREINO':(o.hp<=0?'VITORIA':'LIMITE');saveSimulatorResult(b.training,b);b.log.push(`<b>${goal.achieved?'🏆 Objetivo do treinamento concluído.':b.result==='VITORIA'?'🏆 Vitória alcançada.':'⏳ Limite do treinamento alcançado.'}</b>`);
+  }else b.round+=1;
+  renderSimulatorArena();
+}
+function finishSimulatorBattle(b){b.over=true;b.result=b.player.hp>0&&b.opponent.hp<=0?'VITORIA':b.player.hp<=0&&b.opponent.hp>0?'DERROTA':'EMPATE';saveSimulatorResult(b.training,b);b.log.push(`<b>${b.result==='VITORIA'?'🏆 Você venceu.':b.result==='DERROTA'?'💀 Você foi derrotado.':'⚔️ Combate encerrado.'}</b>`);}
+
+async function loadAdminSimulatorTrainings(){const list=qs('#adminSimulatorTrainingList');if(!list)return;try{const d=await adminApi('/api/admin/simulator/trainings');const rows=d.trainings||[];state.adminSimulatorTrainings=rows;list.innerHTML=rows.map(t=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>⚔️ ${escapeHtml(t.name)}</b><small>${escapeHtml(t.description||'')} • ${t.active?'ATIVO':'INATIVO'} • ${escapeHtml(simFormatTrainingRules(t.card_rules))}</small></div><div class="editorial-actions"><button type="button" data-sim-admin-edit="${t.id}">✎</button><button type="button" class="delete" data-sim-admin-delete="${t.id}">×</button></div></div></div>`).join('')||'<div class="admin-history-empty">Nenhum treinamento cadastrado.</div>';qsa('[data-sim-admin-edit]').forEach(b=>b.onclick=()=>editAdminSimulatorTraining(Number(b.dataset.simAdminEdit)));qsa('[data-sim-admin-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Desativar este treinamento?'))return;try{await adminApi(`/api/admin/simulator/trainings/${b.dataset.simAdminDelete}`,{method:'DELETE'});await loadAdminSimulatorTrainings();}catch(e){alert(e.message)}});}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
+function setSimAdminForm(t=null){qs('#simTrainingId').value=t?.id||'';qs('#simTrainingName').value=t?.name||'';qs('#simTrainingOpponent').value=t?.opponent_name||'Mago de Treinamento';qs('#simTrainingDifficulty').value=t?.difficulty||'NORMAL';qs('#simTrainingPersonality').value=t?.personality||'ESTRATEGICO';qs('#simTrainingPlayerHp').value=t?.player_hp??200;qs('#simTrainingPlayerMana').value=t?.player_mana??400;qs('#simTrainingOpponentHp').value=t?.opponent_hp??200;qs('#simTrainingOpponentMana').value=t?.opponent_mana??400;qs('#simTrainingAllowedOrigins').value=(t?.card_rules?.allowed_origins||[]).join(', ');qs('#simTrainingAllowedCategories').value=(t?.card_rules?.allowed_categories||[]).join(', ');qs('#simTrainingAllowedCards').value=(t?.card_rules?.allowed_card_ids||[]).join(', ');qs('#simTrainingBlockedCards').value=(t?.card_rules?.blocked_card_ids||[]).join(', ');qs('#simTrainingObjectiveType').value=t?.objective?.type||'WIN';qs('#simTrainingObjectiveValue').value=t?.objective?.value??'';qs('#simTrainingObjectiveLabel').value=t?.objective?.label||'';qs('#simTrainingMaxRounds').value=t?.max_rounds??'';qs('#simTrainingVisibility').value=t?.visibility||'PUBLICO';qs('#simTrainingDescription').value=t?.description||'';qs('#simTrainingActive').checked=Number(t?.active??1)===1;qs('#simTrainingSaveBtn').textContent=t?'Salvar treinamento':'Criar treinamento';qs('#simTrainingError').textContent=t?'Editando treinamento.':'';}
+function editAdminSimulatorTraining(id){const t=(state.adminSimulatorTrainings||[]).find(x=>Number(x.id)===id);if(t)setSimAdminForm(t);}
+function clearAdminSimulatorTraining(){setSimAdminForm(null);}
+function collectSimAdminForm(){const csv=s=>String(s||'').split(',').map(x=>x.trim()).filter(Boolean);const nums=s=>csv(s).filter(x=>/^\d+$/.test(x)).map(Number);let ov=qs('#simTrainingObjectiveType').value,value=qs('#simTrainingObjectiveValue').value.trim();if(['SURVIVE_ROUNDS','FINISH_MANA_AT_LEAST','USE_CARD'].includes(ov)&&/^\d+$/.test(value))value=Number(value);return {name:qs('#simTrainingName').value,description:qs('#simTrainingDescription').value,active:qs('#simTrainingActive').checked,visibility:qs('#simTrainingVisibility').value,opponent_name:qs('#simTrainingOpponent').value,difficulty:qs('#simTrainingDifficulty').value,personality:qs('#simTrainingPersonality').value,player_hp:Number(qs('#simTrainingPlayerHp').value),player_mana:Number(qs('#simTrainingPlayerMana').value),opponent_hp:Number(qs('#simTrainingOpponentHp').value),opponent_mana:Number(qs('#simTrainingOpponentMana').value),card_rules:{allowed_origins:csv(qs('#simTrainingAllowedOrigins').value),allowed_categories:csv(qs('#simTrainingAllowedCategories').value),allowed_card_ids:nums(qs('#simTrainingAllowedCards').value),blocked_card_ids:nums(qs('#simTrainingBlockedCards').value)},objective:{type:ov,value,label:qs('#simTrainingObjectiveLabel').value},max_rounds:qs('#simTrainingMaxRounds').value||null};}
+qs('#adminSimulatorTrainingForm')?.addEventListener('submit',async e=>{e.preventDefault();const id=Number(qs('#simTrainingId').value||0);const err=qs('#simTrainingError');try{const body=collectSimAdminForm();const path=id?`/api/admin/simulator/trainings/${id}`:'/api/admin/simulator/trainings';await adminApi(path,{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});clearAdminSimulatorTraining();await loadAdminSimulatorTrainings();err.textContent='Treinamento salvo.';}catch(ex){err.textContent=ex.message;}});qs('#simTrainingClearBtn')?.addEventListener('click',clearAdminSimulatorTraining);
+
 async function tryMe(){
   try{
     const d=await api("/api/me");state.me=d.player;setPlayerNav();
@@ -1482,6 +1630,8 @@ function updateContextNav(){
     el.classList.toggle("is-visible",!!visible);
     el.setAttribute("aria-hidden",String(!visible));
   });
+  const simulatorNav=qs("#simulatorNav");
+  if(simulatorNav){const visible=logged&&state.me?.account_type!=="ALLY";simulatorNav.style.display=visible?"":"none";simulatorNav.classList.toggle("is-visible",visible);simulatorNav.setAttribute("aria-hidden",String(!visible));}
   const adminNav=qs("#adminNav");
   if(adminNav){
     adminNav.classList.toggle("is-visible",!!state.admin);
@@ -1566,7 +1716,7 @@ async function adminApi(url,options={}){
 
 function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
 function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog","#cardBulkSheetModal"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
+  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog","#cardBulkSheetModal"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"],simulator_trainings:["#adminSimulatorPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const security=qs('#adminSecurityPanel'); if(security) security.style.display=hasAdminPermission('settings')?'':'none';
   const bulkCenter=qs('#adminBulkCenter'); if(bulkCenter) bulkCenter.style.display=(hasAdminPermission('players')||hasAdminPermission('cards')||hasAdminPermission('houses')||hasAdminPermission('hierarchy')||hasAdminPermission('missions')||hasAdminPermission('rankings'))?'':'none';
@@ -2029,6 +2179,7 @@ async function initAdmin(){
     if(hasAdminPermission("journal")) await loadAdminArticles();
     if(hasAdminPermission("library")) await loadAdminLibrary();
     if(hasAdminPermission("allies")) await loadAdminAllies();
+    if(hasAdminPermission("simulator_trainings")){ await loadAdminSimulatorTrainings(); }
     if(hasAdminPermission("audit")) await loadAdminAudit();
   }catch(e){console.error(e)}
 }
