@@ -33,7 +33,31 @@ const ADMIN_PERMISSION_DEFS = {
   community: "Comunidade / Status",
   rankings: "Rankings",
   notifications: "Notificações & Alertas",
-  allies: "Aliados Ocultos"
+  allies: "Aliados Ocultos",
+
+  // Permissões de ação: continuam separadas das permissões de módulo.
+  players_write: "Jogadores — criar/editar",
+  players_import: "Jogadores — importar por planilha",
+  players_delete: "Jogadores — excluir",
+  cards_write: "Cards — criar/editar",
+  cards_import: "Cards — importar por planilha",
+  cards_assign: "Cards — vincular a jogadores/aliados",
+  cards_delete: "Cards — excluir",
+  missions_write: "Missões — criar/editar",
+  missions_delete: "Missões — excluir",
+  events_write: "Eventos — criar/editar",
+  events_delete: "Eventos — excluir",
+  economy_write: "Economia — movimentar/aprovar",
+  houses_write: "Casas — criar/editar",
+  hierarchy_write: "Hierarquia — criar/editar",
+  journal_write: "Jornal — criar/editar",
+  announcements_write: "Comunicados — criar/editar",
+  library_write: "Biblioteca — criar/editar",
+  rankings_write: "Rankings — aprovar/rejeitar",
+  notifications_write: "Notificações — criar",
+  allies_write: "Aliados — criar/editar",
+  admin_users_write: "Administradores — criar/alterar/desativar",
+  backup_export: "Backup — exportar dados"
 };
 const ALL_ADMIN_PERMISSIONS = Object.fromEntries(Object.keys(ADMIN_PERMISSION_DEFS).map(k => [k, true]));
 
@@ -71,6 +95,68 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
+
+function adminActionPermissionForRequest(req) {
+  const rawPath = req.path || "";
+  const path = rawPath.startsWith("/api/admin") ? (rawPath.slice("/api/admin".length) || "/") : rawPath;
+  const method = String(req.method || "GET").toUpperCase();
+
+  // Leitura não exige permissão de ação adicional.
+  if (method === "GET" || path === "/me") return null;
+
+  if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users_write";
+  if (path.startsWith("/backup")) return "backup_export";
+
+  if (path.startsWith("/players")) {
+    if (path.includes("/cards")) return method === "DELETE" ? "cards_assign" : "cards_assign";
+    if (path.includes("/yuls")) return "economy_write";
+    if (path.includes("/missions")) return method === "DELETE" ? "missions_delete" : "missions_write";
+    if (path.includes("/bulk-sheet") || path.includes("/import") || path === "/bulk") return "players_import";
+    if (path === "/bulk") return "players_import";
+    if (method === "DELETE") return "players_delete";
+    return "players_write";
+  }
+
+  if (path.startsWith("/cards")) {
+    if (path.includes("/bulk-sheet")) return "cards_import";
+    if (path.includes("/distribute")) return "cards_assign";
+    if (method === "DELETE") return "cards_delete";
+    return "cards_write";
+  }
+
+  if (path.startsWith("/missions")) {
+    if (method === "DELETE") return "missions_delete";
+    return "missions_write";
+  }
+
+  if (path.startsWith("/events") || path.startsWith("/event-actions")) {
+    if (method === "DELETE") return "events_delete";
+    return "events_write";
+  }
+
+  if (path.startsWith("/houses")) {
+    return "houses_write";
+  }
+
+  if (path.startsWith("/hierarchy") || path.startsWith("/patents") || path.startsWith("/roles")) {
+    return "hierarchy_write";
+  }
+
+  if (path.startsWith("/articles") || path.startsWith("/editions") || path.startsWith("/news")) {
+    return "journal_write";
+  }
+
+  if (path.startsWith("/announcements")) return "announcements_write";
+  if (path.startsWith("/library")) return "library_write";
+  if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings_write";
+  if (path.startsWith("/notifications")) return "notifications_write";
+  if (path.startsWith("/allies")) return "allies_write";
+  if (path.startsWith("/economy")) return "economy_write";
+  if (path.startsWith("/settings")) return "settings";
+
+  return null;
+}
+
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
@@ -283,14 +369,15 @@ async function requireAdmin(req, res, next) {
     if (!admin) return res.status(401).json({ error: "Acesso administrativo negado." });
     if (admin.legacy) { req.admin = { ...admin, permissions: ALL_ADMIN_PERMISSIONS }; return next(); }
     const perm = adminPermissionForRequest(req);
-    if (!perm) {
-      const r = await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1", [admin.id]);
-      req.admin = { ...admin, permissions: r.rows[0]?.permissions || ALL_ADMIN_PERMISSIONS };
-      return next();
-    }
+    const actionPerm = adminActionPermissionForRequest(req);
     const r = await pool.query("SELECT permissions FROM admin_permissions WHERE admin_id=$1 LIMIT 1", [admin.id]);
     const permissions = r.rows[0]?.permissions || ALL_ADMIN_PERMISSIONS;
-    if (permissions[perm] !== true) return res.status(403).json({ error: `Seu acesso administrativo não possui permissão para: ${ADMIN_PERMISSION_DEFS[perm] || perm}.` });
+    if (perm && permissions[perm] !== true) {
+      return res.status(403).json({ error: `Seu acesso administrativo não possui permissão para: ${ADMIN_PERMISSION_DEFS[perm] || perm}.` });
+    }
+    if (actionPerm && permissions[actionPerm] !== true) {
+      return res.status(403).json({ error: `Seu acesso administrativo não possui permissão para: ${ADMIN_PERMISSION_DEFS[actionPerm] || actionPerm}.` });
+    }
     req.admin = { ...admin, permissions };
     next();
   } catch (e) {
