@@ -121,6 +121,7 @@ function adminActionPermissionForRequest(req) {
   }
 
   if (path.startsWith("/cards")) {
+    if (path.includes("/library-links")) return "cards_write";
     if (path.includes("/bulk-sheet")) return "cards_import";
     if (path.includes("/distribute")) return "cards_assign";
     if (method === "DELETE") return "cards_delete";
@@ -680,6 +681,20 @@ async function initDatabase() {
       notes TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS card_library_links (
+      id BIGSERIAL PRIMARY KEY,
+      card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      library_item_id BIGINT NOT NULL REFERENCES library_items(id) ON DELETE CASCADE,
+      section_title TEXT DEFAULT '',
+      child_title TEXT DEFAULT '',
+      path_label TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(card_id, library_item_id, section_title, child_title)
+    );
     CREATE TABLE IF NOT EXISTS ally_accounts (
       id BIGSERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
@@ -1162,6 +1177,8 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_player_cards_card ON player_cards(card_id);
     CREATE INDEX IF NOT EXISTS idx_player_card_history_player ON player_card_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_card_history_card ON player_card_history(card_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_card_library_links_card ON card_library_links(card_id, sort_order, id);
+    CREATE INDEX IF NOT EXISTS idx_card_library_links_library ON card_library_links(library_item_id, sort_order, id);
     CREATE INDEX IF NOT EXISTS idx_cards_type ON cards(type, sort_order, name);
     CREATE INDEX IF NOT EXISTS idx_cards_category ON cards(category, sort_order, name);
     CREATE INDEX IF NOT EXISTS idx_roles_rank ON roles(rank_code, sort_order, name);
@@ -2118,7 +2135,10 @@ app.get("/api/me/ally-cards", async (req,res)=>{
   try{
     const r=await pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
       FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1 ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,[viewer.id]);
-    res.json({cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Administrativo",status:c.status||"ATIVO",description:c.description||"",acquisition_type:c.acquisition_type||"ADMINISTRATIVO",acquisition_name:c.acquisition_name||"",acquired_at:c.acquired_at}))});
+    const ids=r.rows.map(x=>Number(x.id));
+    const lr=ids.length?await pool.query(`SELECT cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=ANY($1::bigint[]) AND li.published=1 ORDER BY cl.card_id,cl.sort_order,cl.id`,[ids]):{rows:[]};
+    const linkMap=new Map();for(const x of lr.rows){const k=Number(x.card_id);if(!linkMap.has(k))linkMap.set(k,[]);linkMap.get(k).push({library_item_id:Number(x.library_item_id),library_title:x.library_title,library_category:x.library_category,section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''});}
+    res.json({cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Administrativo",status:c.status||"ATIVO",description:c.description||"",acquisition_type:c.acquisition_type||"ADMINISTRATIVO",acquisition_name:c.acquisition_name||"",acquired_at:c.acquired_at,library_links:linkMap.get(Number(c.id))||[]}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus Cards de aliado."});}
 });
 
@@ -2137,10 +2157,13 @@ app.get("/api/me/cards", async (req,res)=>{
        ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,
       [id]
     );
+    const cardIds=r.rows.map(x=>Number(x.id));
+    const lr=cardIds.length?await pool.query(`SELECT cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=ANY($1::bigint[]) AND li.published=1 ORDER BY cl.card_id,cl.sort_order,cl.id`,[cardIds]):{rows:[]};
+    const linkMap=new Map();for(const x of lr.rows){const k=Number(x.card_id);if(!linkMap.has(k))linkMap.set(k,[]);linkMap.get(k).push({library_item_id:Number(x.library_item_id),library_title:x.library_title,library_category:x.library_category,section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''});}
     res.json({
       cards:r.rows.map(c=>({
         id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",
-        description:c.description||"",quantity:Number(c.quantity||1),
+        description:c.description||"",quantity:Number(c.quantity||1),library_links:linkMap.get(Number(c.id))||[],
         acquisition_type:c.acquisition_type||"OUTRO",
         acquisition_name:c.acquisition_name||"",
         acquisition_id:c.acquisition_id?Number(c.acquisition_id):null,
@@ -2253,6 +2276,21 @@ app.post("/api/admin/notifications", requireAdmin, async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao enviar notificações."});}
 });
 
+app.get("/api/cards/:id", async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Card inválido.'});
+  try{
+    const [cardR,linksR]=await Promise.all([
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active FROM cards c WHERE c.id=$1 AND c.active=1 AND c.status='ATIVO'`,[id]),
+      pool.query(`SELECT cl.id AS link_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label
+        FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=$1 AND li.published=1 ORDER BY cl.sort_order,cl.id`,[id])
+    ]);
+    if(!cardR.rows[0])return res.status(404).json({error:'Card não encontrado.'});
+    const c=cardR.rows[0];
+    res.json({card:{...c,id:Number(c.id),power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),sort_order:Number(c.sort_order||0),active:Number(c.active||1),library_links:linksR.rows.map(x=>({link_id:Number(x.link_id),library_item_id:Number(x.library_item_id),library_title:x.library_title,library_category:x.library_category,section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''}))}});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar o Card.'});}
+});
+
 app.get("/api/library", async (req,res)=>{
   try{
     const q=String(req.query.q||'').trim();
@@ -2267,6 +2305,16 @@ app.get("/api/library", async (req,res)=>{
     try{ await seedOfficialLibrary(); }catch(seedErr){ console.warn('Não foi possível sincronizar a Biblioteca oficial:', seedErr.message); }
 
     let r=await pool.query(`SELECT id,title,category,description,content,url,icon,sort_order,created_at,updated_at FROM library_items WHERE ${where.join(' AND ')} ORDER BY sort_order ASC,title ASC,id DESC`,params);
+    const libraryIds=r.rows.map(x=>Number(x.id)).filter(Number.isInteger);
+    const relatedCardsByLibrary=new Map();
+    if(libraryIds.length){
+      const lr=await pool.query(`SELECT cl.id AS link_id,cl.library_item_id,cl.card_id,cl.section_title,cl.child_title,cl.path_label,cl.sort_order,
+        c.name,c.name_pt,c.name_jp,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status
+        FROM card_library_links cl JOIN cards c ON c.id=cl.card_id
+        WHERE cl.library_item_id=ANY($1::bigint[]) AND c.active=1 AND c.status='ATIVO'
+        ORDER BY cl.library_item_id,cl.sort_order,cl.id`,[libraryIds]);
+      for(const x of lr.rows){const key=Number(x.library_item_id);if(!relatedCardsByLibrary.has(key))relatedCardsByLibrary.set(key,[]);relatedCardsByLibrary.get(key).push({link_id:Number(x.link_id),card_id:Number(x.card_id),name:x.name,name_pt:x.name_pt||x.name,name_jp:x.name_jp||'',category:x.category||'Outros',element_type:x.element_type||'NAO_ELEMENTAL',element:x.element||'',cost_type:x.cost_type||'SEM_CUSTO',cost:x.cost||'',power_value:Number(x.power_value||0),damage_value:Number(x.damage_value||0),damage_type:x.damage_type||'SEM_DANO',origin:x.origin||'Exclusivo',status:x.status||'ATIVO',section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''});}
+    }
 
     // Extra safety net: if the database is reachable but still has no public items,
     // return the official seed in memory so the public Library never appears empty.
@@ -2285,7 +2333,7 @@ app.get("/api/library", async (req,res)=>{
       }catch(fallbackErr){ console.warn('Fallback da Biblioteca indisponível:', fallbackErr.message); }
     }
 
-    res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0)}))});
+    res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0),related_cards:relatedCardsByLibrary.get(Number(x.id))||[]}))});
   }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca.'});}
 });
 
@@ -2293,7 +2341,7 @@ app.get("/api/admin/library", requireAdmin, async (req,res)=>{
   try{
     try{ await seedOfficialLibrary(); }catch(seedErr){ console.warn('Não foi possível sincronizar a Biblioteca oficial no painel:', seedErr.message); }
     const r=await pool.query(`SELECT * FROM library_items ORDER BY sort_order ASC,title ASC,id DESC`);
-    res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0),published:Number(x.published||0)}))});
+    res.json({items:r.rows.map(x=>({...x,id:Number(x.id),sort_order:Number(x.sort_order||0)}))});
   }catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar a Biblioteca administrativa.'});}
 });
 app.post("/api/admin/library", requireAdmin, async (req,res)=>{
@@ -3493,14 +3541,14 @@ app.post("/api/admin/card-categories", requireAdmin, async (req,res)=>{
 app.get("/api/admin/cards", requireAdmin, async (req,res)=>{
   try{
     const [r,cats]=await Promise.all([
-      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players
-                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id
+      pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,COUNT(DISTINCT pc.player_id)::int AS players,COUNT(DISTINCT cl.id)::int AS library_links
+                  FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id LEFT JOIN card_library_links cl ON cl.card_id=c.id
                   GROUP BY c.id ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`),
       pool.query(`SELECT name FROM card_categories WHERE active=1 ORDER BY sort_order,name COLLATE "C"`)
     ]);
     res.json({
       categories:cats.rows.map(x=>x.name),origins:CARD_ORIGINS,element_types:CARD_ELEMENT_TYPES,cost_types:CARD_COST_TYPES,damage_types:CARD_DAMAGE_TYPES,statuses:CARD_STATUSES,
-      cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_jp:c.name_jp||"",name_pt:c.name_pt||c.name,category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",description:c.description||"",sort_order:Number(c.sort_order||0),active:Number(c.active),players:Number(c.players||0)}))
+      cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_jp:c.name_jp||"",name_pt:c.name_pt||c.name,category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||"SEM_DANO",origin:c.origin||"Exclusivo",status:c.status||"ATIVO",description:c.description||"",sort_order:Number(c.sort_order||0),active:Number(c.active),players:Number(c.players||0),library_links:Number(c.library_links||0)}))
     });
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar banco de cards."});}
 });
@@ -3509,7 +3557,7 @@ app.get("/api/admin/cards/:id/details", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:"Card inválido."});
   try{
-    const [cardR,playersR,alliesR]=await Promise.all([
+    const [cardR,playersR,alliesR,libraryR]=await Promise.all([
       pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,c.sort_order,c.active,c.created_at,c.updated_at
                   FROM cards c WHERE c.id=$1`,[id]),
       pool.query(`SELECT p.id,p.nick,p.number,p.house,p.patent,pc.quantity,pc.acquisition_type,pc.acquisition_name,pc.acquired_at,pc.updated_at
@@ -3517,7 +3565,9 @@ app.get("/api/admin/cards/:id/details", requireAdmin, async (req,res)=>{
                   WHERE pc.card_id=$1 ORDER BY p.nick COLLATE "C",p.id`,[id]),
       pool.query(`SELECT a.id,a.display_name,a.username,ac.acquisition_type,ac.acquisition_name,ac.acquired_at
                   FROM ally_cards ac JOIN ally_accounts a ON a.id=ac.ally_id
-                  WHERE ac.card_id=$1 ORDER BY a.display_name COLLATE "C",a.id`,[id])
+                  WHERE ac.card_id=$1 ORDER BY a.display_name COLLATE "C",a.id`,[id]),
+      pool.query(`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,li.published,cl.section_title,cl.child_title,cl.path_label,cl.sort_order
+                  FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=$1 ORDER BY cl.sort_order,cl.id`,[id])
     ]);
     if(!cardR.rows[0])return res.status(404).json({error:"Card não encontrado."});
     const c=cardR.rows[0];
@@ -3525,12 +3575,29 @@ app.get("/api/admin/cards/:id/details", requireAdmin, async (req,res)=>{
       card:{...c,id:Number(c.id),power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),sort_order:Number(c.sort_order||0),active:Number(c.active??1)},
       players:playersR.rows.map(x=>({...x,id:Number(x.id),quantity:Number(x.quantity||1)})),
       allies:alliesR.rows.map(x=>({...x,id:Number(x.id)})),
+      library_links:libraryR.rows.map(x=>({...x,id:Number(x.id),card_id:Number(x.card_id),library_item_id:Number(x.library_item_id),sort_order:Number(x.sort_order||0),section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||'',library_title:x.library_title,library_category:x.library_category,published:Number(x.published||0)})),
       holders_total:playersR.rows.length+alliesR.rows.length
     });
   }catch(e){
     console.error(e);
     res.status(500).json({error:"Erro ao carregar a ficha do card."});
   }
+});
+
+app.get("/api/admin/cards/:id/library-links", requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Card inválido.'});
+  try{const r=await pool.query(`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,li.published,cl.section_title,cl.child_title,cl.path_label,cl.sort_order FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id WHERE cl.card_id=$1 ORDER BY cl.sort_order,cl.id`,[id]);res.json({links:r.rows.map(x=>({...x,id:Number(x.id),card_id:Number(x.card_id),library_item_id:Number(x.library_item_id),published:Number(x.published||0),sort_order:Number(x.sort_order||0),section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''}))});}
+  catch(e){console.error(e);res.status(500).json({error:'Erro ao carregar as regras vinculadas ao Card.'});}
+});
+app.post("/api/admin/cards/:id/library-links", requireAdmin, async (req,res)=>{
+  const cardId=Number(req.params.id),libraryItemId=Number(req.body?.library_item_id),sectionTitle=String(req.body?.section_title||'').trim(),childTitle=String(req.body?.child_title||'').trim(),pathLabel=String(req.body?.path_label||[sectionTitle,childTitle].filter(Boolean).join(' › ')).trim(),sortOrder=Number.isFinite(Number(req.body?.sort_order))?Math.round(Number(req.body.sort_order)):0;
+  if(!Number.isInteger(cardId)||cardId<=0)return res.status(400).json({error:'Card inválido.'});if(!Number.isInteger(libraryItemId)||libraryItemId<=0)return res.status(400).json({error:'Material da Biblioteca inválido.'});
+  try{const [card,lib]=await Promise.all([pool.query('SELECT id FROM cards WHERE id=$1',[cardId]),pool.query('SELECT id FROM library_items WHERE id=$1',[libraryItemId])]);if(!card.rows[0])return res.status(404).json({error:'Card não encontrado.'});if(!lib.rows[0])return res.status(404).json({error:'Material da Biblioteca não encontrado.'});const r=await pool.query(`INSERT INTO card_library_links(card_id,library_item_id,section_title,child_title,path_label,sort_order,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[cardId,libraryItemId,sectionTitle,childTitle,pathLabel,sortOrder,req.admin.id||null]);res.json({link:{...r.rows[0],id:Number(r.rows[0].id),card_id:Number(r.rows[0].card_id),library_item_id:Number(r.rows[0].library_item_id)}});}
+  catch(e){console.error(e);if(e.code==='23505')return res.status(400).json({error:'Esta regra já está vinculada ao Card.'});res.status(500).json({error:'Erro ao vincular regra da Biblioteca.'});}
+});
+app.delete("/api/admin/cards/:id/library-links/:linkId", requireAdmin, async (req,res)=>{
+  const cardId=Number(req.params.id),linkId=Number(req.params.linkId);if(!Number.isInteger(cardId)||!Number.isInteger(linkId)||cardId<=0||linkId<=0)return res.status(400).json({error:'Vínculo inválido.'});
+  try{const r=await pool.query('DELETE FROM card_library_links WHERE id=$1 AND card_id=$2 RETURNING id',[linkId,cardId]);if(!r.rows[0])return res.status(404).json({error:'Vínculo não encontrado.'});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Erro ao remover vínculo da Biblioteca.'});}
 });
 
 app.post("/api/admin/cards", requireAdmin, async (req,res)=>{
@@ -3607,7 +3674,7 @@ app.delete("/api/admin/cards/:id", requireAdmin, async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao desativar card."});}
 });
 
-const CARD_SHEET_NAMES = { cards: 'Cards', links: 'Vinculos', players: 'Jogadores', instructions: 'Instrucoes' };
+const CARD_SHEET_NAMES = { cards: 'Cards', links: 'Vinculos', players: 'Jogadores', libraryLinks: 'Biblioteca_Cards', instructions: 'Instrucoes' };
 
 function normalizeCardSpreadsheetName(v){
   return normalizeImportHeader(v || '').replace(/[^a-z0-9]+/g,'');
@@ -3833,14 +3900,31 @@ async function validateCardLinksSheet(rows){
   return {rows:clean,issues};
 }
 
+function parseCardLibraryLinksSheet(buffer,filename){
+  const wb=spreadsheetWorkbook(buffer,filename);const sheetName=wb.SheetNames.find(n=>['bibliotecacards','bibliotecalinks','cardsbiblioteca','regrasbiblioteca'].includes(normalizeCardSpreadsheetName(n)));if(!sheetName)return [];
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:'',raw:false});
+  return rows.map((row,index)=>({row:index+2,link_id:getSheetCell(row,'ID vínculo','ID vinculo','ID link','Link ID'),action:normalizeCardAction(getSheetCell(row,'Ação','Acao','Operação','Operacao')),control:getSheetCell(row,'Chave de controle','Chave controle','Controle'),card_id:getSheetCell(row,'Nº interno Card','N° interno Card','Numero interno Card','Card ID'),card_name:getSheetCell(row,'Card','Nome do card','Card Name'),library_item_id:getSheetCell(row,'ID Biblioteca','ID material','Biblioteca ID','Library ID'),library_title:getSheetCell(row,'Material','Material Biblioteca','Biblioteca','Library'),section_title:getSheetCell(row,'Seção','Secao','Seção Biblioteca','Section'),child_title:getSheetCell(row,'Subtópico','Subtopico','Subtópico Biblioteca','Child'),path_label:getSheetCell(row,'Referência','Referencia','Caminho','Path'),sort_order:getSheetCell(row,'Ordem','Sort Order')})).filter(r=>Object.values(r).some(v=>String(v||'').trim()!==''));
+}
+async function validateCardLibraryLinksSheet(rows){
+  if(!rows.length)return {rows:[],issues:[]};const [cardsR,libsR,currentR]=await Promise.all([pool.query(`SELECT id,name,name_pt,active FROM cards ORDER BY id`),pool.query(`SELECT id,title,category,published FROM library_items ORDER BY id`),pool.query(`SELECT id,card_id,library_item_id,section_title,child_title FROM card_library_links ORDER BY id`)]);
+  const cards=new Map(cardsR.rows.map(x=>[String(x.id),x])),libs=new Map(libsR.rows.map(x=>[String(x.id),x])),currentById=new Map(currentR.rows.map(x=>[String(x.id),x])),currentKeys=new Set(currentR.rows.map(x=>`${x.card_id}|${x.library_item_id}|${x.section_title||''}|${x.child_title||''}`)),seen=new Set(),clean=[],issues=[];const addIssue=(out,field,message)=>{out.errors.push({field,message});issues.push({row:out.row,field,message});};
+  for(const r of rows){const out={...r,card_id_num:null,library_item_id_num:null,link_id_num:null,ignored:false,errors:[],changes:[]};if(r.action==='__INVALID__'){addIssue(out,'action','Ação inválida. Use ADICIONAR, REMOVER ou deixe em branco.');clean.push(out);continue;}if(r.action===''){out.ignored=true;clean.push(out);continue;}
+    if(r.action==='ADICIONAR'){if(!/^\d+$/.test(String(r.card_id||'')))addIssue(out,'card_id','Nº interno Card é obrigatório e deve ser numérico.');else{out.card_id_num=Number(r.card_id);if(!cards.has(String(out.card_id_num)))addIssue(out,'card_id',`Card ${out.card_id_num} não encontrado.`);}if(String(r.control||'').trim()!==cardSpreadsheetControlKey(out.card_id_num||0))addIssue(out,'control','Chave de controle inválida ou ausente para o Card.');if(!/^\d+$/.test(String(r.library_item_id||'')))addIssue(out,'library_item_id','ID Biblioteca é obrigatório e deve ser numérico.');else{out.library_item_id_num=Number(r.library_item_id);if(!libs.has(String(out.library_item_id_num)))addIssue(out,'library_item_id',`Material da Biblioteca ${out.library_item_id_num} não encontrado.`);}const c=cards.get(String(out.card_id_num)),li=libs.get(String(out.library_item_id_num));if(c&&r.card_name&&normalizeCardIdentity(r.card_name)!==normalizeCardIdentity(c.name_pt||c.name))addIssue(out,'card_name',`O Card ${c.id} pertence a "${c.name_pt||c.name}", não a "${r.card_name}".`);if(li&&r.library_title&&normalizeCardIdentity(r.library_title)!==normalizeCardIdentity(li.title))addIssue(out,'library_title',`O material ${li.id} é "${li.title}", não "${r.library_title}".`);const key=`${out.card_id_num}|${out.library_item_id_num}|${String(r.section_title||'').trim()}|${String(r.child_title||'').trim()}`;if(currentKeys.has(key))addIssue(out,'action','Esta relação já existe.');if(seen.has(`ADD|${key}`))addIssue(out,'action','A mesma relação aparece mais de uma vez na planilha.');seen.add(`ADD|${key}`);out.path_label=String(r.path_label||[r.section_title,r.child_title].filter(Boolean).join(' › ')).trim();try{out.sort_order=parseSpreadsheetInt(r.sort_order,'Ordem',r.row,{allowBlank:true,min:0,max:2147483647})??0;}catch(e){addIssue(out,'sort_order',e.message);out.sort_order=0;}out.changes=[{label:'Vincular à Biblioteca',before:'—',after:out.path_label||'Material',card:c?.name_pt||c?.name||r.card_name||'',library:li?.title||r.library_title||''}];}
+    else if(r.action==='REMOVER'){if(!/^\d+$/.test(String(r.link_id||'')))addIssue(out,'link_id','ID vínculo é obrigatório para REMOVER.');else{out.link_id_num=Number(r.link_id);if(!currentById.has(String(out.link_id_num)))addIssue(out,'link_id',`Vínculo ${out.link_id_num} não encontrado.`);}const cur=currentById.get(String(out.link_id_num));if(cur){out.card_id_num=Number(cur.card_id);out.library_item_id_num=Number(cur.library_item_id);if(String(r.control||'').trim()!==cardSpreadsheetControlKey(out.card_id_num))addIssue(out,'control','Chave de controle inválida para o Card do vínculo.');if(r.card_id&&String(r.card_id)!==String(cur.card_id))addIssue(out,'card_id','O Nº interno Card não corresponde ao vínculo indicado.');if(r.library_item_id&&String(r.library_item_id)!==String(cur.library_item_id))addIssue(out,'library_item_id','O ID Biblioteca não corresponde ao vínculo indicado.');out.changes=[{label:'Remover vínculo',before:`#${cur.card_id} → ${cur.library_item_id}`,after:'—',card:cards.get(String(cur.card_id))?.name_pt||cards.get(String(cur.card_id))?.name||'',library:libs.get(String(cur.library_item_id))?.title||''}];}if(seen.has(`REM|${out.link_id_num}`))addIssue(out,'link_id','O mesmo vínculo aparece mais de uma vez para remoção.');seen.add(`REM|${out.link_id_num}`);}
+    clean.push(out);
+  }return {rows:clean,issues};
+}
+
 app.get('/api/admin/cards/export.xlsx', requireAdmin, async (req,res)=>{
   try{
-    const [cardsR,playersR,linksR]=await Promise.all([
+    const [cardsR,playersR,linksR,libraryLinksR]=await Promise.all([
       pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.origin,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.status,c.description,c.sort_order,c.active,COUNT(pc.player_id)::int AS players,c.created_at,c.updated_at
                   FROM cards c LEFT JOIN player_cards pc ON pc.card_id=c.id GROUP BY c.id ORDER BY c.id ASC`),
       pool.query(`SELECT id,nick,number,house,patent,active FROM players ORDER BY nick COLLATE "C" ASC`),
       pool.query(`SELECT pc.player_id,pc.card_id,p.nick,p.number,p.house,c.name,c.name_pt,COALESCE(c.category,c.type) AS category,pc.acquisition_type,pc.acquisition_name
-                  FROM player_cards pc JOIN players p ON p.id=pc.player_id JOIN cards c ON c.id=pc.card_id ORDER BY p.nick COLLATE "C",c.id ASC`)
+                  FROM player_cards pc JOIN players p ON p.id=pc.player_id JOIN cards c ON c.id=pc.card_id ORDER BY p.nick COLLATE "C",c.id ASC`),
+      pool.query(`SELECT cl.id,cl.card_id,cl.library_item_id,li.title AS library_title,li.category AS library_category,cl.section_title,cl.child_title,cl.path_label,cl.sort_order,c.name,c.name_pt
+                  FROM card_library_links cl JOIN library_items li ON li.id=cl.library_item_id JOIN cards c ON c.id=cl.card_id ORDER BY cl.card_id,cl.sort_order,cl.id`)
     ]);
     const wb=XLSX.utils.book_new();
     const cardData=cardsR.rows.map(c=>({
@@ -3854,6 +3938,8 @@ app.get('/api/admin/cards/export.xlsx', requireAdmin, async (req,res)=>{
     const wsPlayers=XLSX.utils.json_to_sheet(playerData);wsPlayers['!cols']=[{wch:12},{wch:18},{wch:28},{wch:24},{wch:28},{wch:13}];XLSX.utils.book_append_sheet(wb,wsPlayers,CARD_SHEET_NAMES.players);
     const linkData=linksR.rows.map(x=>({'Ação':'','ID jogador':Number(x.player_id),'Número jogador':String(x.number||''),'Jogador':x.nick||'','Nº interno Card':Number(x.card_id),'Card':x.name_pt||x.name,'Categoria':x.category||'Outros','Tipo de aquisição':x.acquisition_type||'OUTRO','Origem/observação':x.acquisition_name||''}));
     const wsLinks=XLSX.utils.json_to_sheet(linkData);wsLinks['!cols']=[{wch:13},{wch:12},{wch:18},{wch:28},{wch:17},{wch:36},{wch:20},{wch:20},{wch:42}];XLSX.utils.book_append_sheet(wb,wsLinks,CARD_SHEET_NAMES.links);
+    const libraryLinkData=libraryLinksR.rows.map(x=>({'ID vínculo':Number(x.id),'Ação':'','Chave de controle':cardSpreadsheetControlKey(x.card_id),'Nº interno Card':Number(x.card_id),'Card':x.name_pt||x.name,'ID Biblioteca':Number(x.library_item_id),'Material':x.library_title||'','Seção':x.section_title||'','Subtópico':x.child_title||'','Referência':x.path_label||[x.section_title,x.child_title].filter(Boolean).join(' › '),'Ordem':Number(x.sort_order||0)}));
+    const wsLibraryLinks=XLSX.utils.json_to_sheet(libraryLinkData);wsLibraryLinks['!cols']=[{wch:12},{wch:13},{wch:28},{wch:17},{wch:36},{wch:13},{wch:42},{wch:34},{wch:34},{wch:52},{wch:9}];XLSX.utils.book_append_sheet(wb,wsLibraryLinks,CARD_SHEET_NAMES.libraryLinks);
     const instructions=[
       ['PORTAL SPADE — GESTÃO DE CARDS POR PLANILHA',''],
       ['FLUXO DE CARDS','Na aba Cards, linhas com Nº interno preenchido atualizam o card correspondente. Linhas com Nº interno vazio criam novos cards.'],
@@ -3861,6 +3947,7 @@ app.get('/api/admin/cards/export.xlsx', requireAdmin, async (req,res)=>{
       ['CHAVE DE CONTROLE','Coluna técnica gerada pelo Portal. Nunca altere nem apague. Ela protege o vínculo entre o Nº interno e o card, mas permite alterar o nome do card.'],
       ['NÃO EXCLUI','A planilha não apaga cards que estejam ausentes. Para retirar um card de circulação, use Status = INATIVO.'],
       ['VÍNCULOS','Na aba Vinculos, use Ação = ADICIONAR ou REMOVER. Deixe a ação vazia para manter a linha sem alterações.'],
+      ['BIBLIOTECA_CARDS','Na aba Biblioteca_Cards, ADICIONAR cria a relação Card → regra da Biblioteca. Use ID Biblioteca + Seção/Subtópico. REMOVER usa o ID vínculo exportado pelo Portal.'],
       ['IDENTIFICAÇÃO DO JOGADOR','Use obrigatoriamente o ID jogador. Número, nick e casa são referências para conferência.'],
       ['IDENTIFICAÇÃO DO CARD','Use obrigatoriamente o Nº interno Card. Nome e categoria servem para conferência.'],
       ['CARDS ÚNICOS','Cada jogador pode possuir apenas uma unidade de cada card. Uma linha ADICIONAR para um card já possuído será bloqueada.'],
@@ -3879,12 +3966,14 @@ app.post('/api/admin/cards/bulk-sheet/preview', requireAdmin, importUpload.singl
     if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});
     const cardRows=parseCardCatalogSheet(req.file.buffer,req.file.originalname);
     const linkRows=parseCardLinksSheet(req.file.buffer,req.file.originalname);
-    const [cards,links]=await Promise.all([validateCardCatalogSheet(cardRows),validateCardLinksSheet(linkRows)]);
-    const validCards=cards.rows.filter(r=>!r.errors.length).length,validLinks=links.rows.filter(r=>!r.errors.length && !r.ignored).length;
+    const libraryLinkRows=parseCardLibraryLinksSheet(req.file.buffer,req.file.originalname);
+    const [cards,links,libraryLinks]=await Promise.all([validateCardCatalogSheet(cardRows),validateCardLinksSheet(linkRows),validateCardLibraryLinksSheet(libraryLinkRows)]);
+    const validCards=cards.rows.filter(r=>!r.errors.length).length,validLinks=links.rows.filter(r=>!r.errors.length && !r.ignored).length,validLibraryLinks=libraryLinks.rows.filter(r=>!r.errors.length && !r.ignored).length;
     const cardChanges=cards.rows.filter(r=>!r.errors.length&&(r.changes||[]).length).length;
     const linkChanges=links.rows.filter(r=>!r.errors.length&&!r.ignored).length;
-    const issues=[...cards.issues.map(x=>({...x,section:'Cards'})),...links.issues.map(x=>({...x,section:'Vinculos'}))];
-    res.json({filename:req.file.originalname,cards:{total:cards.rows.length,valid:validCards,invalid:cards.rows.length-validCards,changes:cardChanges,rows:cards.rows},links:{total:linkRows.length,valid:validLinks,invalid:linkRows.length-validLinks,changes:linkChanges,rows:links.rows},issues});
+    const libraryLinkChanges=libraryLinks.rows.filter(r=>!r.errors.length&&!r.ignored).length;
+    const issues=[...cards.issues.map(x=>({...x,section:'Cards'})),...links.issues.map(x=>({...x,section:'Vinculos'})),...libraryLinks.issues.map(x=>({...x,section:'Biblioteca_Cards'}))];
+    res.json({filename:req.file.originalname,cards:{total:cards.rows.length,valid:validCards,invalid:cards.rows.length-validCards,changes:cardChanges,rows:cards.rows},links:{total:linkRows.length,valid:validLinks,invalid:linkRows.length-validLinks,changes:linkChanges,rows:links.rows},library_links:{total:libraryLinkRows.length,valid:validLibraryLinks,invalid:libraryLinkRows.length-validLibraryLinks,changes:libraryLinkChanges,rows:libraryLinks.rows},issues});
   }catch(e){console.error('Cards bulk preview error:',e);res.status(e.statusCode||400).json({error:e.message||'Não foi possível processar a planilha de cards.'});}
 });
 
@@ -3893,8 +3982,9 @@ app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'
     if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});
     const cardRows=parseCardCatalogSheet(req.file.buffer,req.file.originalname);
     const linkRows=parseCardLinksSheet(req.file.buffer,req.file.originalname);
-    const [cards,links]=await Promise.all([validateCardCatalogSheet(cardRows),validateCardLinksSheet(linkRows)]);
-    const issues=[...cards.issues,...links.issues];
+    const libraryLinkRows=parseCardLibraryLinksSheet(req.file.buffer,req.file.originalname);
+    const [cards,links,libraryLinks]=await Promise.all([validateCardCatalogSheet(cardRows),validateCardLinksSheet(linkRows),validateCardLibraryLinksSheet(libraryLinkRows)]);
+    const issues=[...cards.issues,...links.issues,...libraryLinks.issues];
     if(issues.length)return res.status(400).json({error:'A operação foi bloqueada porque existem dados inválidos. Nenhuma alteração foi aplicada.',issues});
     const client=await pool.connect();
     let created=0,updated=0,added=0,removed=0;const touchedPlayers=new Set(),updatedCardIds=new Set();
@@ -3940,9 +4030,14 @@ app.post('/api/admin/cards/bulk-sheet', requireAdmin, importUpload.single('file'
           touchedPlayers.add(Number(pr.id));removed++;
         }
       }
+      for(const r of libraryLinks.rows.filter(x=>!x.ignored)){
+        if(r.action==='ADICIONAR') await client.query(`INSERT INTO card_library_links(card_id,library_item_id,section_title,child_title,path_label,sort_order,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,$7)`,[r.card_id_num,r.library_item_id_num,r.section_title||'',r.child_title||'',r.path_label||'',Number(r.sort_order||0),req.admin.id||null]);
+        else if(r.action==='REMOVER') await client.query('DELETE FROM card_library_links WHERE id=$1 AND card_id=$2',[r.link_id_num,r.card_id_num]);
+      }
       for(const playerId of touchedPlayers)await refreshPlayerCardPower(client,playerId);
       await client.query('COMMIT');
-      res.json({ok:true,created,updated,added,removed,playersAffected:touchedPlayers.size});
+      const libraryAdded=libraryLinks.rows.filter(x=>!x.ignored&&x.action==='ADICIONAR').length,libraryRemoved=libraryLinks.rows.filter(x=>!x.ignored&&x.action==='REMOVER').length;
+      res.json({ok:true,created,updated,added,removed,libraryAdded,libraryRemoved,playersAffected:touchedPlayers.size});
     }catch(e){await client.query('ROLLBACK');console.error('Cards bulk commit error:',e);res.status(e.statusCode||500).json({error:e.message||'Erro ao aplicar a planilha. Nenhuma alteração foi aplicada.'});}
     finally{client.release();}
   }catch(e){console.error('Cards bulk error:',e);res.status(e.statusCode||400).json({error:e.message||'Não foi possível aplicar a planilha de cards.'});}
