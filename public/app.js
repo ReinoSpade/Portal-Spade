@@ -1442,7 +1442,10 @@ function updateContextNav(){
     el.setAttribute("aria-hidden",String(!visible));
   });
   const adminNav=qs("#adminNav");
-  if(adminNav) adminNav.classList.toggle("is-visible",true);
+  if(adminNav){
+    adminNav.classList.toggle("is-visible",!!state.admin);
+    adminNav.setAttribute("aria-hidden",String(!state.admin));
+  }
   const login=qs("#loginNav");
   if(login) login.setAttribute("aria-label",logged?"Abrir meu painel":"Entrar no Reino");
   // Keep the navigation anchored at the beginning after dynamic login/logout changes.
@@ -1541,6 +1544,7 @@ function setAdminNav(){
   const b=qs("#adminNav");if(!b)return;
   b.textContent=state.admin?"👑 Administração":"👑 Administração";
   b.dataset.page=state.admin?"admin":"admin-login";
+  updateContextNav();
 }
 async function adminLogin(e){
   e.preventDefault();
@@ -2401,7 +2405,7 @@ async function launchMission(){
 
 async function deleteMission(missionId){
   if(!confirm("Excluir esta missão? Se ela estiver concluída, a contagem e a recompensa serão desfeitas."))return;
-  try{await adminApi(`/api/admin/missions/${missionId}`,{method:"DELETE"});await selectAdminPlayer(state.selectedPlayer.id);alert("Missão excluída.");if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}}catch(ex){alert(ex.message)}
+  try{await adminApi(`/api/admin/players/${state.selectedPlayer.id}/missions/${missionId}`,{method:"DELETE"});await selectAdminPlayer(state.selectedPlayer.id);alert("Missão excluída.");if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}}catch(ex){alert(ex.message)}
 }
 
 async function deleteSelectedPlayer(){
