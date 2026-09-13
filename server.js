@@ -114,8 +114,8 @@ function adminActionPermissionForRequest(req) {
     if (path.includes("/cards")) return method === "DELETE" ? "cards_assign" : "cards_assign";
     if (path.includes("/yuls")) return "economy_write";
     if (path.includes("/missions")) return method === "DELETE" ? "missions_delete" : "missions_write";
-    if (path.includes("/bulk-sheet") || path.includes("/import") || path === "/bulk") return "players_import";
-    if (path === "/bulk") return "players_import";
+    if (path.includes("/bulk-sheet") || path.includes("/import")) return "players_import";
+    if (path === "/bulk") return "players_write";
     if (method === "DELETE") return "players_delete";
     return "players_write";
   }
@@ -5411,6 +5411,14 @@ async function validatePlayerBulkSheetRows(rows){
 
 app.get("/api/admin/players/export.xlsx", requireAdmin, async (req,res)=>{
   try{
+    let filterSql=''; let filterIds=null;
+    if(req.query.ids){
+      const raw=String(req.query.ids).split(',').map(x=>x.trim()).filter(Boolean);
+      if(raw.length>5000 || raw.some(x=>!/^\d+$/.test(x))) return res.status(400).json({error:'Lista de IDs inválida para exportação.'});
+      filterIds=[...new Set(raw.map(Number))];
+      if(!filterIds.length) return res.status(400).json({error:'Nenhum jogador foi selecionado para exportação.'});
+      filterSql='WHERE p.id=ANY($1::bigint[])';
+    }
     const result=await pool.query(`
       SELECT p.*, COALESCE(pc.card_count,0)::int AS card_count,
              COALESCE(gp.grimoire_pages,0)::int AS grimoire_pages,
@@ -5422,8 +5430,9 @@ app.get("/api/admin/players/export.xlsx", requireAdmin, async (req,res)=>{
         SELECT pr.player_id,json_agg(r.name ORDER BY r.sort_order,r.name COLLATE "C") AS roles
         FROM player_roles pr JOIN roles r ON r.id=pr.role_id GROUP BY pr.player_id
       ) rj ON rj.player_id=p.id
+      ${filterSql}
       ORDER BY p.nick COLLATE "C" ASC
-    `);
+    `,filterIds?[filterIds]:[]);
     const data=result.rows.map(p=>({
       ID:Number(p.id),"Número interno":String(p.number||''),Nick:p.nick||'',Login:p.identifier||'',Casa:p.house||'',Patente:p.patent||'',Cargos:(p.roles||[]).join(' | '),
       Grimório:p.grimoire||'',"Nível Grimório":Number(p.grimoire_level||1),HP:Number(p.hp||0),Mana:Number(p.mana||0),Yuls:Number(p.yuls||0),Dracmas:Number(p.dracmas||0),EXP:Number(p.exp||0),Missões:Number(p.missions||0),Conquistas:Number(p.achievements||0),Ranking:Number(p.ranking||0),Força:Number(p.power||0),"Skill SC":Number(p.skill_sc||0),"Skill VT":Number(p.skill_vt||0),"Perfil público":Number(p.public_profile??1),"Acesso ativo":Number(p.active??1),"Qtd. Cards":Number(p.card_count||0),"Páginas do Grimório":Number(p.grimoire_pages||0),"Criado em":p.created_at?new Date(p.created_at).toISOString():'',"Atualizado em":p.updated_at?new Date(p.updated_at).toISOString():''
@@ -5445,6 +5454,17 @@ app.get("/api/admin/players/export.xlsx", requireAdmin, async (req,res)=>{
     ]);
     instructions['!cols']=[{wch:28},{wch:105}];
     XLSX.utils.book_append_sheet(wb,instructions,'Instruções');
+    const [refHouses,refPatents,refRoles]=await Promise.all([
+      pool.query(`SELECT id,name FROM houses ORDER BY name COLLATE "C"`),
+      pool.query(`SELECT id,name,sort_order FROM patents ORDER BY sort_order,name COLLATE "C"`),
+      pool.query(`SELECT id,name,rank_code,sort_order FROM roles WHERE active=1 ORDER BY sort_order,name COLLATE "C"`)
+    ]);
+    const houseWs=XLSX.utils.json_to_sheet(refHouses.rows.map(x=>({'ID':Number(x.id),'Casa':x.name||''})));
+    const patentWs=XLSX.utils.json_to_sheet(refPatents.rows.map(x=>({'ID':Number(x.id),'Patente':x.name||'','Ordem':Number(x.sort_order||0)})));
+    const roleWs=XLSX.utils.json_to_sheet(refRoles.rows.map(x=>({'ID':Number(x.id),'Cargo':x.name||'','Rank':x.rank_code||'','Ordem':Number(x.sort_order||0)})));
+    XLSX.utils.book_append_sheet(wb,houseWs,'Referência Casas');
+    XLSX.utils.book_append_sheet(wb,patentWs,'Referência Patentes');
+    XLSX.utils.book_append_sheet(wb,roleWs,'Referência Cargos');
     const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
     res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition','attachment; filename="jogadores-spade-atualizacao.xlsx"');
@@ -5631,7 +5651,7 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
   const action=String(b.action||"").trim();
 
   if(!ids.length)return res.status(400).json({error:"Selecione pelo menos um jogador."});
-  if(!["add_yuls","remove_yuls","set_house","set_patent","set_roles","set_missions","add_missions","set_power","set_public","set_active"].includes(action)){
+  if(!["add_yuls","remove_yuls","set_house","set_patent","set_roles","set_missions","add_missions","set_power","set_public","set_active","set_hp","set_mana","set_exp","add_exp","set_achievements","set_ranking","set_grimoire"].includes(action)){
     return res.status(400).json({error:"Ação inválida."});
   }
   if(action==="set_roles"){
@@ -5721,6 +5741,37 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
       }
     }
 
+    if(["set_hp","set_mana","set_achievements","set_ranking"].includes(action)){
+      const field={set_hp:"hp",set_mana:"mana",set_achievements:"achievements",set_ranking:"ranking"}[action];
+      const amount=Math.round(Number(b.amount));
+      if(!Number.isFinite(amount)||amount<0){await client.query("ROLLBACK");return res.status(400).json({error:"Informe um valor inteiro maior ou igual a zero."});}
+      for(const playerId of ids){
+        await client.query(`UPDATE players SET ${field}=$1,updated_at=NOW() WHERE id=$2`,[amount,playerId]);
+      }
+    }
+
+    if(action==="set_exp"||action==="add_exp"){
+      const amount=Math.round(Number(b.amount));
+      if(!Number.isFinite(amount)||amount<0){await client.query("ROLLBACK");return res.status(400).json({error:"Informe uma quantidade de EXP maior ou igual a zero."});}
+      for(const player of pr.rows){
+        const before=Number(player.exp||0);
+        const value=action==="add_exp"?before+amount:amount;
+        const delta=value-before;
+        await client.query("UPDATE players SET exp=$1,updated_at=NOW() WHERE id=$2",[value,player.id]);
+        if(delta!==0){
+          await client.query(`INSERT INTO exp_history(player_id,amount,source_code,source_detail,reason,exp_before,exp_after,level_before,level_after,upgraded,created_by_admin_id) VALUES($1,$2,'AJUSTE','AÇÃO_EM_MASSA','Ajuste administrativo em massa',$3,$4,$5,$6,0,$7)`,[player.id,delta,before,value,Number(player.grimoire_level||1),Number(player.grimoire_level||1),req.admin?.id||null]);
+        }
+      }
+    }
+
+    if(action==="set_grimoire"){
+      const name=String(b.grimoire||"").trim();
+      const level=Math.round(Number(b.grimoire_level));
+      if(!Number.isInteger(level)||level<1||level>999){await client.query("ROLLBACK");return res.status(400).json({error:"Nível do Grimório inválido. Use um inteiro entre 1 e 999."});}
+      if(!name){await client.query("ROLLBACK");return res.status(400).json({error:"Informe o nome do Grimório."});}
+      await client.query("UPDATE players SET grimoire=$1,grimoire_level=$2,updated_at=NOW() WHERE id=ANY($3::bigint[])",[name,level,ids]);
+    }
+
     if(action==="set_public"){
       const visible=Number(b.public_profile)?1:0;
       await client.query("UPDATE players SET public_profile=$1,updated_at=NOW() WHERE id=ANY($2::bigint[])",[visible,ids]);
@@ -5739,7 +5790,14 @@ app.post("/api/admin/players/bulk", requireAdmin, async (req,res)=>{
       set_roles:"Cargos definidos em massa pela administração.",
       set_missions:"Missões ajustadas em massa pela administração.",
       add_missions:"Missões adicionadas em massa pela administração.",
-      set_power:"Força ajustada em massa pela administração.",
+      set_power:"Força recalculada em massa com base nos Cards do jogador.",
+      set_hp:`HP definido em massa para ${Number(b.amount||0)}.`,
+      set_mana:`Mana definida em massa para ${Number(b.amount||0)}.`,
+      set_exp:`EXP definida em massa para ${Number(b.amount||0)}.`,
+      add_exp:`EXP adicionada em massa: ${Number(b.amount||0)}.`,
+      set_achievements:`Conquistas definidas em massa para ${Number(b.amount||0)}.`,
+      set_ranking:`Ranking definido em massa para ${Number(b.amount||0)}.`,
+      set_grimoire:`Grimório definido em massa: ${String(b.grimoire||"")} • nível ${Number(b.grimoire_level||1)}.`,
       set_public:Number(b.public_profile)?"Perfis tornados públicos em massa.":"Perfis ocultados em massa.",
       set_active:Number(b.active)?"Jogadores reativados em massa.":"Jogadores suspensos em massa."
     };
