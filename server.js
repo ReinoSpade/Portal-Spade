@@ -1095,6 +1095,7 @@ async function initDatabase() {
       secret INTEGER NOT NULL DEFAULT 0 CHECK (secret IN (0,1)),
       auto_award INTEGER NOT NULL DEFAULT 1 CHECK (auto_award IN (0,1)),
       active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      stage_mode TEXT NOT NULL DEFAULT 'FOUR' CHECK (stage_mode IN ('FOUR','ADVANCED_SUPREME')),
       created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -1138,6 +1139,10 @@ async function initDatabase() {
     ALTER TABLE players ADD COLUMN IF NOT EXISTS power INTEGER NOT NULL DEFAULT 0 CHECK (power >= 0);
     ALTER TABLE players ADD COLUMN IF NOT EXISTS skill_sc INTEGER NOT NULL DEFAULT 0 CHECK (skill_sc >= 0);
     ALTER TABLE players ADD COLUMN IF NOT EXISTS skill_vt INTEGER NOT NULL DEFAULT 0 CHECK (skill_vt >= 0);
+    ALTER TABLE emblems ADD COLUMN IF NOT EXISTS stage_mode TEXT NOT NULL DEFAULT 'FOUR';
+    UPDATE emblems SET stage_mode='FOUR' WHERE stage_mode IS NULL OR stage_mode='';
+    ALTER TABLE emblems DROP CONSTRAINT IF EXISTS emblems_stage_mode_check;
+    ALTER TABLE emblems ADD CONSTRAINT emblems_stage_mode_check CHECK (stage_mode IN ('FOUR','ADVANCED_SUPREME'));
     ALTER TABLE news ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
     ALTER TABLE editions ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
 
@@ -2300,7 +2305,9 @@ function validateSimulatorTrainingInput(body){
 
 
 const EMBLEM_STAGE_LABELS={1:'Inicial',2:'Mediano',3:'Avançado',4:'Supremo'};
+const EMBLEM_STAGE_COMMERCIAL_DEFAULTS={1:'Recruta',2:'Combatente',3:'Elite',4:'Lendário'};
 const EMBLEM_RARITY_LABELS={COMUM:'Comum',RARO:'Raro',EPICO:'Épico',LENDARIO:'Lendário',SUPREMO:'Supremo'};
+const EMBLEM_STAGE_MODES={FOUR:'FOUR',ADVANCED_SUPREME:'ADVANCED_SUPREME'};
 function normalizeEmblemRequirements(value){
   if(Array.isArray(value)) return {logic:'ALL',conditions:value};
   const v=value&&typeof value==='object'?value:{};
@@ -2308,16 +2315,17 @@ function normalizeEmblemRequirements(value){
 }
 function normalizeEmblemStage(stage,number){
   const n=Math.max(1,Math.min(4,Number(number||stage?.stage_number||1)));
-  return {stage_number:n,name:String(stage?.name||EMBLEM_STAGE_LABELS[n]).trim().slice(0,80)||EMBLEM_STAGE_LABELS[n],description:String(stage?.description||'').trim().slice(0,500),requirements:normalizeEmblemRequirements(stage?.requirements),sort_order:Number(stage?.sort_order||n)};
+  return {stage_number:n,name:String(stage?.name||EMBLEM_STAGE_COMMERCIAL_DEFAULTS[n]).trim().slice(0,80)||EMBLEM_STAGE_COMMERCIAL_DEFAULTS[n],description:String(stage?.description||'').trim().slice(0,500),requirements:normalizeEmblemRequirements(stage?.requirements),sort_order:Number(stage?.sort_order||n)};
 }
 function normalizeEmblemInput(body){
   const b=body||{}; const name=String(b.name||'').trim();
   if(name.length<2||name.length>100) throw Object.assign(new Error('Informe um nome de Emblem entre 2 e 100 caracteres.'),{statusCode:400});
   const pick=(v,allowed,def)=>allowed.includes(String(v||def).toUpperCase())?String(v||def).toUpperCase():def;
-  const stages=Array.isArray(b.stages)?b.stages:[];
-  const out=[];
-  for(let i=1;i<=4;i++) out.push(normalizeEmblemStage(stages[i-1]||{},i));
-  return {name,description:String(b.description||'').trim().slice(0,1000),icon:String(b.icon||'🏅').trim().slice(0,8)||'🏅',category:String(b.category||'Especial').trim().slice(0,60)||'Especial',rarity:pick(b.rarity,Object.keys(EMBLEM_RARITY_LABELS),'COMUM'),origin:String(b.origin||'Reino Spade').trim().slice(0,100)||'Reino Spade',secret:b.secret?1:0,auto_award:b.auto_award===false||String(b.auto_award)==='0'?0:1,active:b.active===false||String(b.active)==='0'?0:1,stages:out};
+  const stageMode=pick(b.stage_mode,Object.keys(EMBLEM_STAGE_MODES),'FOUR');
+  const stages=Array.isArray(b.stages)?b.stages:[]; const out=[];
+  const allowedStages=stageMode==='ADVANCED_SUPREME'?[3,4]:[1,2,3,4];
+  for(const i of allowedStages){const source=stages.find(x=>Number(x?.stage_number)===i)||stages[i-1]||{};out.push(normalizeEmblemStage(source,i));}
+  return {name,description:String(b.description||'').trim().slice(0,1000),icon:String(b.icon||'🏅').trim().slice(0,8)||'🏅',category:String(b.category||'Especial').trim().slice(0,60)||'Especial',rarity:pick(b.rarity,Object.keys(EMBLEM_RARITY_LABELS),'COMUM'),origin:String(b.origin||'Reino Spade').trim().slice(0,100)||'Reino Spade',secret:b.secret?1:0,auto_award:b.auto_award===false||String(b.auto_award)==='0'?0:1,active:b.active===false||String(b.active)==='0'?0:1,stage_mode:stageMode,stages:out};
 }
 async function emblemMetric(playerId,condition){
   const c=condition||{}; const type=String(c.type||'').toUpperCase(); const target=Math.max(0,Number(c.value||0));
@@ -2352,7 +2360,7 @@ async function getEmblemRecords({includeInactive=false}={}){
     pool.query(`SELECT * FROM emblems ${includeInactive?"":"WHERE active=1"} ORDER BY category COLLATE "C", name COLLATE "C", id`),
     pool.query(`SELECT * FROM emblem_stages ORDER BY emblem_id,stage_number`)
   ]);
-  const map=new Map(); for(const row of e.rows) map.set(Number(row.id),{...row,id:Number(row.id),secret:Boolean(row.secret),auto_award:Boolean(row.auto_award),active:Boolean(row.active),stages:[]});
+  const map=new Map(); for(const row of e.rows) map.set(Number(row.id),{...row,id:Number(row.id),secret:Boolean(row.secret),auto_award:Boolean(row.auto_award),active:Boolean(row.active),stage_mode:row.stage_mode==='ADVANCED_SUPREME'?'ADVANCED_SUPREME':'FOUR',stages:[]});
   for(const row of s.rows){const item=map.get(Number(row.emblem_id));if(item)item.stages.push({...normalizeEmblemStage(row,row.stage_number),id:Number(row.id)});}
   return [...map.values()];
 }
@@ -2381,7 +2389,7 @@ async function getPlayerEmblems(playerId,{sync=true,publicOnly=false}={}){
   const stagesMap=new Map(); for(const row of stageR.rows){const arr=stagesMap.get(Number(row.emblem_id))||[];arr.push(normalizeEmblemStage(row,row.stage_number));stagesMap.set(Number(row.emblem_id),arr);}
   const items=[];
   for(const e of emblemsR.rows){const id=Number(e.id),own=owned.get(id),unlocked=!!own; if(publicOnly&&e.secret&&!unlocked)continue; const stages=stagesMap.get(id)||[]; const current=unlocked?own.stage:0; const next=stages.find(st=>st.stage_number>current); let progress=null; if(next){const ev=await evaluateEmblemStage(playerId,next.requirements);progress={stage:next.stage_number,percent:ev.percent,conditions:ev.conditions};}
-    items.push({id,name:unlocked||!e.secret?e.name:'Emblem secreto',description:unlocked||!e.secret?e.description:'Continue sua jornada para descobrir este Emblem.',icon:e.icon,category:e.category,rarity:e.rarity,rarity_label:EMBLEM_RARITY_LABELS[e.rarity]||e.rarity,origin:e.origin,secret:Boolean(e.secret),auto_award:Boolean(e.auto_award),unlocked,current_stage:current,stage_label:current?EMBLEM_STAGE_LABELS[current]:'Bloqueado',featured:!!own?.featured,awarded_at:own?.awarded_at||null,stages:(unlocked||!e.secret)?stages.map(st=>({...st,name:st.name,stage_label:EMBLEM_STAGE_LABELS[st.stage_number],requirements:undefined})) : [],next_stage:next?{stage_number:next.stage_number,name:next.name,stage_label:EMBLEM_STAGE_LABELS[next.stage_number],description:next.description}:null,progress});
+    items.push({id,name:unlocked||!e.secret?e.name:'Emblem secreto',description:unlocked||!e.secret?e.description:'Continue sua jornada para descobrir este Emblem.',icon:e.icon,category:e.category,rarity:e.rarity,rarity_label:EMBLEM_RARITY_LABELS[e.rarity]||e.rarity,origin:e.origin,stage_mode:e.stage_mode==='ADVANCED_SUPREME'?'ADVANCED_SUPREME':'FOUR',secret:Boolean(e.secret),auto_award:Boolean(e.auto_award),unlocked,current_stage:current,stage_label:current?EMBLEM_STAGE_LABELS[current]:'Bloqueado',current_stage_name:current?(stages.find(st=>st.stage_number===current)?.name||EMBLEM_STAGE_COMMERCIAL_DEFAULTS[current]||''):'',featured:!!own?.featured,awarded_at:own?.awarded_at||null,stages:(unlocked||!e.secret)?stages.map(st=>({...st,name:st.name,stage_label:EMBLEM_STAGE_LABELS[st.stage_number],requirements:undefined})) : [],next_stage:next?{stage_number:next.stage_number,name:next.name,stage_label:EMBLEM_STAGE_LABELS[next.stage_number],description:next.description}:null,progress});
   }
   return {emblems:items,summary:{total:items.length,unlocked:items.filter(x=>x.unlocked).length,featured:items.filter(x=>x.featured).length}};
 }
@@ -2451,7 +2459,7 @@ app.delete('/api/admin/simulator/trainings/:id', requireAdmin, async (req,res)=>
 
 
 app.get('/api/emblems', async (req,res)=>{
-  try{const r=await pool.query(`SELECT id,name,description,icon,category,rarity,origin,secret,auto_award,active FROM emblems WHERE active=1 ORDER BY category COLLATE "C", name COLLATE "C", id`);res.json({emblems:r.rows.map(x=>({...x,id:Number(x.id),secret:Boolean(x.secret),auto_award:Boolean(x.auto_award),active:Boolean(x.active)}))});}
+  try{const r=await pool.query(`SELECT id,name,description,icon,category,rarity,origin,secret,auto_award,active,stage_mode FROM emblems WHERE active=1 ORDER BY category COLLATE "C", name COLLATE "C", id`);res.json({emblems:r.rows.map(x=>({...x,id:Number(x.id),secret:Boolean(x.secret),auto_award:Boolean(x.auto_award),active:Boolean(x.active),stage_mode:x.stage_mode==='ADVANCED_SUPREME'?'ADVANCED_SUPREME':'FOUR'}))});}
   catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os Emblems.'});}
 });
 
@@ -2488,19 +2496,19 @@ app.get('/api/admin/emblems', requireAdmin, async (req,res)=>{
 });
 
 app.post('/api/admin/emblems', requireAdmin, async (req,res)=>{
-  try{const e=normalizeEmblemInput(req.body);const client=await pool.connect();try{await client.query('BEGIN');const ins=await client.query(`INSERT INTO emblems(name,description,icon,category,rarity,origin,secret,auto_award,active,created_by_admin_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW()) RETURNING *`,[e.name,e.description,e.icon,e.category,e.rarity,e.origin,e.secret,e.auto_award,e.active,req.admin?.id||null]);for(const st of e.stages)await client.query(`INSERT INTO emblem_stages(emblem_id,stage_number,name,description,requirements,sort_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,NOW(),NOW())`,[ins.rows[0].id,st.stage_number,st.name,st.description,JSON.stringify(st.requirements),st.sort_order]);await client.query('COMMIT');res.json({ok:true,emblem:{...ins.rows[0],id:Number(ins.rows[0].id)}});}catch(x){await client.query('ROLLBACK');throw x;}finally{client.release();}}
+  try{const e=normalizeEmblemInput(req.body);const client=await pool.connect();try{await client.query('BEGIN');const ins=await client.query(`INSERT INTO emblems(name,description,icon,category,rarity,origin,secret,auto_award,active,stage_mode,created_by_admin_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW()) RETURNING *`,[e.name,e.description,e.icon,e.category,e.rarity,e.origin,e.secret,e.auto_award,e.active,e.stage_mode,req.admin?.id||null]);for(const st of e.stages)await client.query(`INSERT INTO emblem_stages(emblem_id,stage_number,name,description,requirements,sort_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,NOW(),NOW())`,[ins.rows[0].id,st.stage_number,st.name,st.description,JSON.stringify(st.requirements),st.sort_order]);await client.query('COMMIT');res.json({ok:true,emblem:{...ins.rows[0],id:Number(ins.rows[0].id)}});}catch(x){await client.query('ROLLBACK');throw x;}finally{client.release();}}
   catch(e){console.error(e);res.status(e.statusCode||500).json({error:e.code==='23505'?'Já existe um Emblem com esse nome.':(e.message||'Erro ao criar Emblem.')});}
 });
 
 app.put('/api/admin/emblems/:id', requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Emblem inválido.'});
-  try{const e=normalizeEmblemInput(req.body);const client=await pool.connect();try{await client.query('BEGIN');const up=await client.query(`UPDATE emblems SET name=$1,description=$2,icon=$3,category=$4,rarity=$5,origin=$6,secret=$7,auto_award=$8,active=$9,updated_at=NOW() WHERE id=$10 RETURNING *`,[e.name,e.description,e.icon,e.category,e.rarity,e.origin,e.secret,e.auto_award,e.active,id]);if(!up.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Emblem não encontrado.'});}await client.query(`DELETE FROM emblem_stages WHERE emblem_id=$1`,[id]);for(const st of e.stages)await client.query(`INSERT INTO emblem_stages(emblem_id,stage_number,name,description,requirements,sort_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,NOW(),NOW())`,[id,st.stage_number,st.name,st.description,JSON.stringify(st.requirements),st.sort_order]);await client.query('COMMIT');res.json({ok:true});}catch(x){await client.query('ROLLBACK');throw x;}finally{client.release();}}
+  try{const e=normalizeEmblemInput(req.body);const client=await pool.connect();try{await client.query('BEGIN');const up=await client.query(`UPDATE emblems SET name=$1,description=$2,icon=$3,category=$4,rarity=$5,origin=$6,secret=$7,auto_award=$8,active=$9,stage_mode=$10,updated_at=NOW() WHERE id=$11 RETURNING *`,[e.name,e.description,e.icon,e.category,e.rarity,e.origin,e.secret,e.auto_award,e.active,e.stage_mode,id]);if(!up.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Emblem não encontrado.'});}if(e.stage_mode==='ADVANCED_SUPREME'){const low=(await client.query(`SELECT COUNT(*)::int AS total FROM player_emblems WHERE emblem_id=$1 AND stage_number<3`,[id])).rows[0]?.total||0;if(Number(low)>0){await client.query('ROLLBACK');return res.status(400).json({error:'Este Emblem já possui jogadores nos níveis Inicial/Mediano. Não é possível convertê-lo para Especial; crie um novo Emblem Avançado + Supremo.'});}}await client.query(`DELETE FROM emblem_stages WHERE emblem_id=$1`,[id]);for(const st of e.stages)await client.query(`INSERT INTO emblem_stages(emblem_id,stage_number,name,description,requirements,sort_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,NOW(),NOW())`,[id,st.stage_number,st.name,st.description,JSON.stringify(st.requirements),st.sort_order]);await client.query('COMMIT');res.json({ok:true});}catch(x){await client.query('ROLLBACK');throw x;}finally{client.release();}}
   catch(e){console.error(e);res.status(e.statusCode||500).json({error:e.code==='23505'?'Já existe um Emblem com esse nome.':(e.message||'Erro ao salvar Emblem.')});}
 });
 
 app.delete('/api/admin/emblems/:id', requireAdmin, async (req,res)=>{const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Emblem inválido.'});try{const r=await pool.query(`UPDATE emblems SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id,name`,[id]);if(!r.rows[0])return res.status(404).json({error:'Emblem não encontrado.'});res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Não foi possível desativar o Emblem.'});}});
 
-app.post('/api/admin/emblems/:id/grant', requireAdmin, async(req,res)=>{const emblemId=Number(req.params.id),playerId=Number(req.body?.player_id),stage=Math.max(1,Math.min(4,Number(req.body?.stage_number||1)));if(!Number.isInteger(emblemId)||emblemId<=0||!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:'Emblem ou jogador inválido.'});try{const [e,p]=await Promise.all([pool.query(`SELECT id,name FROM emblems WHERE id=$1 AND active=1`,[emblemId]),pool.query(`SELECT id,nick FROM players WHERE id=$1 AND active=1`,[playerId])]);if(!e.rows[0])return res.status(404).json({error:'Emblem não encontrado.'});if(!p.rows[0])return res.status(404).json({error:'Jogador não encontrado.'});await pool.query(`INSERT INTO player_emblems(player_id,emblem_id,stage_number,source,featured,awarded_at,updated_at,notes) VALUES($1,$2,$3,'MANUAL',0,NOW(),NOW(),$4) ON CONFLICT(player_id,emblem_id) DO UPDATE SET stage_number=GREATEST(player_emblems.stage_number,EXCLUDED.stage_number),source='MANUAL',updated_at=NOW(),notes=EXCLUDED.notes`,[playerId,emblemId,stage,`Concedido pela Administração • ${req.admin?.display_name||'Admin'}`]);res.json({ok:true});}catch(x){console.error(x);res.status(500).json({error:'Não foi possível conceder o Emblem.'});}});
+app.post('/api/admin/emblems/:id/grant', requireAdmin, async(req,res)=>{const emblemId=Number(req.params.id),playerId=Number(req.body?.player_id),requestedStage=Number(req.body?.stage_number||1);if(!Number.isInteger(emblemId)||emblemId<=0||!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:'Emblem ou jogador inválido.'});try{const [e,p]=await Promise.all([pool.query(`SELECT id,name FROM emblems WHERE id=$1 AND active=1`,[emblemId]),pool.query(`SELECT id,nick FROM players WHERE id=$1 AND active=1`,[playerId])]);if(!e.rows[0])return res.status(404).json({error:'Emblem não encontrado.'});if(!p.rows[0])return res.status(404).json({error:'Jogador não encontrado.'});const mode=(await pool.query(`SELECT stage_mode FROM emblems WHERE id=$1`,[emblemId])).rows[0]?.stage_mode||'FOUR';const allowed=mode==='ADVANCED_SUPREME'?[3,4]:[1,2,3,4];if(!allowed.includes(requestedStage))return res.status(400).json({error:mode==='ADVANCED_SUPREME'?'Este Emblem possui apenas os níveis Avançado e Supremo.':'Estágio inválido.'});const stage=requestedStage;await pool.query(`INSERT INTO player_emblems(player_id,emblem_id,stage_number,source,featured,awarded_at,updated_at,notes) VALUES($1,$2,$3,'MANUAL',0,NOW(),NOW(),$4) ON CONFLICT(player_id,emblem_id) DO UPDATE SET stage_number=GREATEST(player_emblems.stage_number,EXCLUDED.stage_number),source='MANUAL',updated_at=NOW(),notes=EXCLUDED.notes`,[playerId,emblemId,stage,`Concedido pela Administração • ${req.admin?.display_name||'Admin'}`]);res.json({ok:true});}catch(x){console.error(x);res.status(500).json({error:'Não foi possível conceder o Emblem.'});}});
 
 app.delete('/api/admin/emblems/:id/grant/:playerId', requireAdmin, async(req,res)=>{const emblemId=Number(req.params.id),playerId=Number(req.params.playerId);if(!Number.isInteger(emblemId)||emblemId<=0||!Number.isInteger(playerId)||playerId<=0)return res.status(400).json({error:'Emblem ou jogador inválido.'});try{await pool.query(`DELETE FROM player_emblems WHERE player_id=$1 AND emblem_id=$2`,[playerId,emblemId]);res.json({ok:true});}catch(e){console.error(e);res.status(500).json({error:'Não foi possível revogar o Emblem.'});}});
 
