@@ -1786,7 +1786,7 @@ app.get("/api/status/:id/comments", async (req,res)=>{
     const r=await pool.query(`SELECT sc.id,sc.player_id,sc.message,sc.created_at,p.nick,p.house
       FROM status_comments sc JOIN players p ON p.id=sc.player_id
       WHERE sc.status_id=$1 ORDER BY sc.created_at ASC LIMIT 100`,[statusId]);
-    res.json({comments:r.rows.map(x=>({id:Number(x.id),player_id:Number(x.player_id),message:x.message,created_at:x.created_at,nick:x.nick,house:x.house||"",mine:Number(x.player_id)===Number(viewer)}))});
+    res.json({comments:r.rows.map(x=>({id:Number(x.id),player_id:Number(x.player_id),message:x.message,created_at:x.created_at,nick:x.nick,house:x.house||"",mine:Number(x.player_id)===Number(viewerId)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Não foi possível carregar os comentários."});}
 });
 
@@ -5756,15 +5756,16 @@ app.post("/api/admin/players/:id/missions", requireAdmin, async (req, res) => {
   } finally { client.release(); }
 });
 
-app.delete("/api/admin/missions/:id", requireAdmin, async (req, res) => {
-  const missionId=Number(req.params.id);
-  if(!Number.isInteger(missionId)||missionId<=0) return res.status(400).json({error:'Missão inválida.'});
+app.delete("/api/admin/players/:playerId/missions/:missionId", requireAdmin, async (req, res) => {
+  const playerId=Number(req.params.playerId);
+  const missionId=Number(req.params.missionId);
+  if(!Number.isInteger(playerId)||playerId<=0||!Number.isInteger(missionId)||missionId<=0) return res.status(400).json({error:'Missão inválida.'});
   const client=await pool.connect();
   try {
     await client.query('BEGIN');
-    const mr=await client.query('SELECT * FROM missions WHERE id=$1 FOR UPDATE',[missionId]);
+    const mr=await client.query('SELECT * FROM missions WHERE id=$1 AND player_id=$2 FOR UPDATE',[missionId,playerId]);
     const mission=mr.rows[0];
-    if(!mission){await client.query('ROLLBACK');return res.status(404).json({error:'Missão não encontrada.'});}
+    if(!mission){await client.query('ROLLBACK');return res.status(404).json({error:'Missão não encontrada para este jogador.'});}
     if(mission.status==='Concluída'){
       const pr=await client.query('SELECT * FROM players WHERE id=$1 FOR UPDATE',[mission.player_id]);
       const player=pr.rows[0];
@@ -5774,7 +5775,7 @@ app.delete("/api/admin/missions/:id", requireAdmin, async (req, res) => {
         await client.query('UPDATE players SET missions=$1,yuls=$2,updated_at=NOW() WHERE id=$3',[newMissionCount,newYuls,mission.player_id]);
       }
     }
-    await client.query('DELETE FROM missions WHERE id=$1',[missionId]);
+    await client.query('DELETE FROM missions WHERE id=$1 AND player_id=$2',[missionId,playerId]);
     await client.query('COMMIT');
     res.json({ok:true});
   } catch(e) {
