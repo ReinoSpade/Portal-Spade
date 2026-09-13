@@ -1,3865 +1,1292 @@
-function displayPlayerName(player){
-  return String(player?.nick||"").trim() || "Jogador";
-}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Portal Spade — Reino Spade</title>
+<meta name="description" content="Portal oficial do RPG — Reino Spade">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<!-- V53.1 — Ambiente Spade -->
+<div class="ambient-controls" id="spadeAmbientControls" aria-label="Controles de ambiente do Portal">
+  <div class="ambient-title"><span class="ambient-pulse"></span><b>♠ Ambiente Spade</b></div>
+  <div class="ambient-buttons">
+    <button type="button" class="ambient-btn" id="ambientEffectsBtn" aria-pressed="true">✨ Efeitos ON</button>
+    <button type="button" class="ambient-btn" id="ambientSoundBtn" aria-pressed="false">🔊 Som OFF</button>
+  </div>
+</div>
+<div class="page-transition" id="pageTransition" aria-hidden="true"><div class="transition-sigil">♠</div></div>
+<audio id="ambientAudio" preload="auto" loop></audio>
 
-const state={page:"home",me:null,grimoireData:null,grimoirePages:[],ambient:{effects:true,sound:false,theme:"home"},admin:false,adminUser:null,adminKey:null,adminPermissions:{},players:[],selectedPlayer:null,selectedPlayers:new Set(),playerImport:{file:null,preview:null},playerBulkSheet:{file:null,preview:null},cardBulkSheet:{file:null,preview:null},adminFilters:{house:"",patent:"",role:"",visibility:"",status:"",sort:"nick"},playerCards:[],adminCards:[],cardFilter:"",cardSearch:"",events:[],adminEvents:[],selectedEventId:null,schedule:[],adminSchedule:[],statusBoard:[],todayStatus:null,editorialOverview:null,missions:[],adminMissions:[],activeActivities:[],libraryItems:[],libraryTopic:"all",adminLibrary:[],rankingBattles:[],rankingPlayers:[],adminAudit:[],adminSimulatorTrainings:[],allies:[],selectedAllyId:null,allyCards:[],expRules:[],cardCatalogSearch:"",cardCatalogCategory:"",cardCatalogStatus:"",selectedCardIds:new Set(),cardDistribution:{cardId:null,players:[],selectedPlayers:new Set(),house:"",search:"",mode:"add"},cardDetail:null,cardLibraryManager:{cardId:null,links:[],materials:[]},simulator:{trainings:[],training:null,playerCards:[],opponentCards:[],battle:null,loading:false}};
+<a class="skip-link" href="#mainContent">Pular para o conteúdo</a>
 
-const qs=s=>document.querySelector(s);
-const qsa=s=>[...document.querySelectorAll(s)];
-const escapeHtml=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
-const money=v=>Number(v||0).toLocaleString("pt-BR");
-
-const AMBIENT_TRACKS={
-  home:"/assets/audio/spade-home.ogg",
-  guide:"/assets/audio/spade-guide.ogg",
-  grimoire:"/assets/audio/spade-grimoire.ogg",
-  battle:"/assets/audio/spade-battle.ogg",
-  journal:"/assets/audio/spade-journal.ogg",
-  market:"/assets/audio/spade-market.ogg"
-};
-const PAGE_THEME={home:"home",guia:"guide",grimorio:"grimoire",biblioteca:"grimoire",jornal:"journal",comunicados:"journal",cards:"battle",simulador:"battle",missoes:"battle",eventos:"battle",cronograma:"battle",ranking:"battle",casas:"home",jogadores:"home",status:"home",cargos:"home",hierarquia:"home",admin:"home","admin-login":"home"};
-function ambientReadStorage(){
-  try{
-    state.ambient.effects=localStorage.getItem("spade-effects")!=="0";
-    state.ambient.sound=localStorage.getItem("spade-sound")==="1";
-  }catch{}
-}
-function updateAmbientButtons(){
-  const eb=qs("#ambientEffectsBtn"),sb=qs("#ambientSoundBtn");
-  if(eb){eb.textContent=state.ambient.effects?"✨ Efeitos ON":"✨ Efeitos OFF";eb.setAttribute("aria-pressed",String(state.ambient.effects));}
-  if(sb){sb.textContent=state.ambient.sound?"🔊 Som ON":"🔊 Som OFF";sb.setAttribute("aria-pressed",String(state.ambient.sound));}
-  document.body.classList.toggle("magic-effects-off",!state.ambient.effects);
-}
-function setAmbientTheme(page){
-  state.ambient.theme=PAGE_THEME[page]||"home";
-  document.body.dataset.ambientTheme=state.ambient.theme;
-  if(state.ambient.sound) playAmbientTheme();
-}
-async function playAmbientTheme(){
-  const audio=qs("#ambientAudio");
-  if(!audio || !state.ambient.sound)return false;
-  const src=AMBIENT_TRACKS[state.ambient.theme]||AMBIENT_TRACKS.home;
-  try{
-    if(!audio.dataset.loadedTheme || audio.dataset.loadedTheme!==state.ambient.theme){
-      audio.src=src;
-      audio.dataset.loadedTheme=state.ambient.theme;
-      audio.load();
-    }
-    audio.loop=true;
-    audio.volume=.18;
-    audio.muted=false;
-    await audio.play();
-    return true;
-  }catch(e){
-    // The browser may reject media playback. The toggle itself still stays functional.
-    console.warn("Ambiente Spade: não foi possível tocar a trilha de áudio.",e);
-    return false;
-  }
-}
-function stopAmbientTheme(){
-  const audio=qs("#ambientAudio");
-  if(audio){audio.pause();audio.currentTime=0;audio.muted=true;}
-}
-function saveAmbientSettings(){
-  try{
-    localStorage.setItem("spade-effects",state.ambient.effects?"1":"0");
-    localStorage.setItem("spade-sound",state.ambient.sound?"1":"0");
-  }catch{}
-}
-function initSpadeAmbient(){
-  ambientReadStorage();
-  updateAmbientButtons();
-
-  // Delegação de eventos: continua funcionando mesmo que a interface seja re-renderizada.
-  document.addEventListener("click",async e=>{
-    const effects=e.target.closest("#ambientEffectsBtn");
-    const sound=e.target.closest("#ambientSoundBtn");
-    if(effects){
-      state.ambient.effects=!state.ambient.effects;
-      saveAmbientSettings();
-      updateAmbientButtons();
-      return;
-    }
-    if(sound){
-      const enabled=!state.ambient.sound;
-      state.ambient.sound=enabled;
-      saveAmbientSettings();
-      updateAmbientButtons();
-      if(enabled){
-        await playAmbientTheme();
-      }else{
-        stopAmbientTheme();
-      }
-    }
-  });
-}
-
-// Initialize the ambient controls before the rest of app.js so they remain functional
-// even if another unrelated section later encounters a missing element or runtime error.
-initSpadeAmbient();
-setAmbientTheme(state.page);
-
-function runPageTransition(){
-  const el=qs("#pageTransition"); if(!el||!state.ambient.effects||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
-  el.classList.remove("show");void el.offsetWidth;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),520);
-}
-
-
-let globalSearchTimer=null;
-let globalSearchAbort=null;
-const GLOBAL_SEARCH_HISTORY_KEY='spade-global-search-history';
-const GLOBAL_SEARCH_LABELS={player:'Jogadores',card:'Cards',library:'Biblioteca',house:'Casas',mission:'Missões',event:'Eventos',schedule:'Cronograma',article:'Jornal',news:'Notícias',status:'Status',role:'Cargos',patent:'Patentes'};
-const GLOBAL_SEARCH_ICONS={player:'👤',card:'🃏',library:'📚',house:'🏰',mission:'⚔️',event:'🎪',schedule:'📅',article:'📰',news:'🗞️',status:'📢',role:'👑',patent:'🎖️'};
-function getGlobalSearchHistory(){try{const a=JSON.parse(localStorage.getItem(GLOBAL_SEARCH_HISTORY_KEY)||'[]');return Array.isArray(a)?a.filter(x=>typeof x==='string').slice(0,5):[]}catch{return[]}}
-function saveGlobalSearchHistory(q){const term=String(q||'').trim();if(term.length<2)return;try{const next=[term,...getGlobalSearchHistory().filter(x=>x.toLocaleLowerCase('pt-BR')!==term.toLocaleLowerCase('pt-BR'))].slice(0,5);localStorage.setItem(GLOBAL_SEARCH_HISTORY_KEY,JSON.stringify(next));}catch{}}
-function closeGlobalSearch(){const box=qs("#globalSearchResults");if(box){box.hidden=true;box.innerHTML="";}const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle");if(panel)panel.hidden=true;if(toggle)toggle.setAttribute("aria-expanded","false");}
-function renderGlobalSearchRecent(){const box=qs('#globalSearchResults');if(!box)return;const history=getGlobalSearchHistory();if(!history.length){box.innerHTML='<div class="global-search-empty">Digite pelo menos 2 caracteres para pesquisar.</div>';box.hidden=false;return;}box.innerHTML=`<div class="global-search-head"><span>BUSCAS RECENTES</span><small>somente neste navegador</small></div><div class="global-search-recent-list">${history.map(q=>`<button type="button" class="global-search-recent" data-search-history="${escapeHtml(q)}"><span>↗</span><b>${escapeHtml(q)}</b></button>`).join('')}</div>`;box.hidden=false;qsa('[data-search-history]').forEach(b=>b.addEventListener('click',()=>{const input=qs('#globalSearchInput');if(input){input.value=b.dataset.searchHistory||'';performGlobalSearch(input.value,true);}}));}
-function openGlobalSearch(){const panel=qs("#globalSearchPanel"),toggle=qs("#globalSearchToggle"),input=qs("#globalSearchInput");if(!panel)return;panel.hidden=false;toggle?.setAttribute("aria-expanded","true");if(!(input?.value||'').trim())renderGlobalSearchRecent();setTimeout(()=>input?.focus(),0);}
-function searchResultIcon(kind){return GLOBAL_SEARCH_ICONS[kind]||'•';}
-function renderGlobalSearchResults(data){
-  const box=qs("#globalSearchResults"); if(!box)return;
-  const results=data?.results||[];
-  if(!results.length){box.innerHTML=`<div class="global-search-empty"><strong>Nenhum resultado para “${escapeHtml(data?.query||'')}”.</strong><small>Experimente menos palavras ou termos como “paralisia”, “Mattiel”, “Casa Mars” ou “#184”.</small></div>`;box.hidden=false;return;}
-  const groups=[];for(const g of (data.groups||[])){const items=results.filter(r=>r.kind===g.kind);if(items.length)groups.push({...g,items});}
-  box.innerHTML=`<div class="global-search-head"><span>RESULTADOS</span><small>${results.length} encontrado${results.length===1?'':'s'}</small></div>`+
-    groups.map(g=>`<section class="global-search-group"><div class="global-search-group-title"><b>${escapeHtml(g.label)}</b><span>${g.count}</span></div>${g.items.map(r=>`<button type="button" class="global-search-result" data-search-kind="${escapeHtml(r.kind)}" data-search-id="${Number(r.id)||0}" data-search-page="${escapeHtml(r.page||'home')}" data-search-player="${Number(r.player_id)||0}"><span class="global-search-icon">${escapeHtml(r.icon||searchResultIcon(r.kind))}</span><span class="global-search-copy"><b>${escapeHtml(r.title)}</b><small>${escapeHtml(GLOBAL_SEARCH_LABELS[r.kind]||'Portal')}${r.meta?` • ${escapeHtml(r.meta)}`:''}</small>${r.snippet?`<em>${escapeHtml(r.snippet)}</em>`:''}</span><span class="global-search-arrow">→</span></button>`).join('')}</section>`).join('');
-  box.hidden=false;
-}
-function scrollToLoadedSearchTarget(selector){let tries=0;const tick=()=>{const el=document.querySelector(selector);if(el){el.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});el.classList.add('search-target-highlight');setTimeout(()=>el.classList.remove('search-target-highlight'),1800);return;}if(++tries<25)setTimeout(tick,100)};tick();}
-async function openLibrarySearchResult(id){try{if(!state.libraryAllItems?.length)await loadLibrary();const item=(state.libraryAllItems||state.libraryItems||[]).find(x=>Number(x.id)===Number(id));if(!item){go('biblioteca');return;}const topicKey=Object.entries(LIBRARY_TOPICS).find(([_,t])=>t.category===item.category)?.[0]||'all';const topicItems=libraryItemsForTopic(state.libraryAllItems||state.libraryItems,topicKey);const itemIndex=topicItems.findIndex(x=>Number(x.id)===Number(id));go('biblioteca');openLibraryExplorer({level:'material',topicKey,itemIndex:Math.max(0,itemIndex),item});}catch(e){go('biblioteca');}}
-async function openArticleSearchResult(id){try{const d=await api(`/api/articles/${Number(id)}`);openPublicArticle(Number(id),[d.article]);}catch(e){go('jornal');}}
-function focusSearchTarget(kind,id){
-  const map={mission:`#mission-${id}`,schedule:`[data-schedule-id="${id}"]`,status:`[data-status-id="${id}"]`};const sel=map[kind];if(!sel)return;scrollToLoadedSearchTarget(sel);
-}
-async function performGlobalSearch(q,fromHistory=false){
-  const box=qs("#globalSearchResults");if(!box)return;const term=q.trim();if(globalSearchAbort)globalSearchAbort.abort();if(term.length<2){renderGlobalSearchRecent();return;}
-  globalSearchAbort=new AbortController();box.innerHTML='<div class="global-search-loading">Pesquisando no Reino...</div>';box.hidden=false;
-  try{const d=await api(`/api/search?q=${encodeURIComponent(term)}`,{signal:globalSearchAbort.signal});saveGlobalSearchHistory(term);renderGlobalSearchResults(d);}catch(e){if(e.name!=='AbortError'){box.innerHTML=`<div class="global-search-empty">${escapeHtml(e.message)}</div>`;box.hidden=false;}}
-}
-function initGlobalSearch(){
-  const input=qs("#globalSearchInput");if(!input)return;
-  qs("#globalSearchToggle")?.addEventListener("click",e=>{e.stopPropagation();const panel=qs("#globalSearchPanel");if(panel?.hidden)openGlobalSearch();else closeGlobalSearch();});
-  qs("#globalSearchClose")?.addEventListener("click",e=>{e.stopPropagation();input.blur();closeGlobalSearch();});
-  input.addEventListener('input',()=>{clearTimeout(globalSearchTimer);globalSearchTimer=setTimeout(()=>performGlobalSearch(input.value),180);});
-  input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.blur();closeGlobalSearch();return;}if(e.key==='Enter'){const first=qs('#globalSearchResults .global-search-result');if(first){e.preventDefault();first.click();}}});
-  document.addEventListener('click',e=>{if(!e.target.closest('#globalSearchWrap'))closeGlobalSearch();});
-  document.addEventListener('click',async e=>{const r=e.target.closest('[data-search-page]');if(!r)return;const kind=r.dataset.searchKind,id=Number(r.dataset.searchId||0);closeGlobalSearch();input.value='';
-    if(kind==='player'&&id)return openPublicPlayer(id);
-    if(kind==='house'&&id)return openHouse(id);
-    if(kind==='event'&&id)return openPublicEvent(id);
-    if(kind==='role'&&id)return openPublicRole(id);
-    if(kind==='patent'&&id)return openPublicPatent(id);
-    if(kind==='article'&&id)return openArticleSearchResult(id);
-    if(kind==='library'&&id)return openLibrarySearchResult(id);
-    if(kind==='card'&&id){go('cards');return openCardDetailModal(id,false);}
-    if(kind==='mission'&&id){go('missoes');focusSearchTarget(kind,id);return;}
-    if(kind==='schedule'&&id){go('cronograma');focusSearchTarget(kind,id);return;}
-    if(kind==='status'&&id){go('status');focusSearchTarget(kind,id);return;}
-    if(kind==='news')return go('home');
-    go(r.dataset.searchPage||'home');
-  });
-}
-
-function go(page){
-  const previous=state.page;
-  if(page==="grimorio" && (!state.me || state.me.account_type==="ALLY" || !String(state.me.grimoire||"").trim())){ if(previous!==page) go("dashboard"); return; }
-  if(page==="simulador" && (!state.me || state.me.account_type==="ALLY")){ if(!state.me) go("login"); else go("dashboard"); return; }
-  runPageTransition();
-  state.page=page;
-  setAmbientTheme(page);
-  qsa(".page").forEach(x=>x.classList.toggle("active",x.id===page));
-  qsa("nav button[data-page], .mobile-quick-nav button[data-page]").forEach(x=>{
-    const active=x.dataset.page===page;
-    x.classList.toggle("active",active);
-    if(active) x.setAttribute("aria-current","page"); else x.removeAttribute("aria-current");
-  });
-  qs("#nav")?.classList.remove("open");
-  qs("#globalSearchResults")?.setAttribute("hidden","");
-  if(previous!==page) window.scrollTo({top:0,behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
-  if(page==="home") loadHome();
-  if(page==="jornal") loadEditions();
-  if(page==="notificacoes") loadNotifications();
-  if(page==="comunicados") loadAnnouncements();
-  if(page==="status") { loadStatusBoard(); }
-  if(page==="eventos") loadEvents();
-  if(page==="missoes") loadMissions();
-  if(page==="cronograma") loadSchedule();
-  if(page==="jogadores") loadPlayers();
-  if(page==="casas") loadHouses();
-  if(page==="ranking") loadRanking();
-  if(page==="hierarquia") loadHierarchy();
-  if(page==="biblioteca") loadLibrary();
-  if(page==="dashboard"){ if(state.me) loadPlayerDashboardData(); else refreshDashboard(); }
-  if(page==="grimorio"){ if(state.me) loadMyGrimoire(); else go("login"); }
-  if(page==="cards"){ if(state.me) loadPlayerCards(); else { state.page="login"; return go("login"); } }
-  if(page==="simulador"){ if(state.me && state.me.account_type!=="ALLY") loadSimulatorPage(); }
-  if(page==="admin"){ if(state.admin) initAdmin(); else go("admin-login"); }
-  if(page==="admin-login") refreshAdminSession();
-}
-
-qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
-qs("#hamb").addEventListener("click",()=>{closeGlobalSearch();qs("#nav").classList.toggle("open")});
-qs("#mobileMenuBtn")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();const m=qs("#libraryReaderModal");if(m?.classList.contains("open")){m.classList.remove("open");document.body.classList.remove("library-reader-open");}closeLibraryExplorer();}});
-
-
-function initGuideNavigation(){
-  qsa('[data-guide-scroll]').forEach(btn=>btn.addEventListener('click',()=>{
-    const target=qs(`#${btn.dataset.guideScroll}`);
-    if(target) target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
-  }));
-}
-async function api(url,options={}){
-  options.credentials="same-origin";
-  const r=await fetch(url,options);let d={};
-  try{d=await r.json()}catch{}
-  if(!r.ok)throw new Error(d.error||"Ocorreu um erro.");
-  return d;
-}
-
-async function loadHome(){
-  try{
-    const d=await api("/api/home");let active={activities:[]};try{active=await api("/api/active-activities")}catch(_){/* feed ao vivo indisponível não bloqueia a Home */}state.data=d;state.activeActivities=active.activities||[];renderHomeAnnouncements(d.announcements||[]);renderHomeActiveActivities(state.activeActivities);
-    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
-    const e=d.editions[0];qs("#homeEditionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
-  }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
-}
-
-const LIBRARY_TOPICS={
-  all:{label:"Tudo",icon:"✦",category:"",description:"Todo o arquivo oficial de Spade."},
-  databook:{label:"Databook VT",icon:"⚔️",category:"DATABOOK • REGRAS",description:"Sistema de combate, mecânicas, interações e regras do Vale Tudo."},
-  admin:{label:"Administração",icon:"♛",category:"SISTEMA • ADMINISTRAÇÃO",description:"Cargos, hierarquia, requisitos e remuneração do Reino."},
-  orgs:{label:"Organizações",icon:"🐾",category:"SISTEMA • ORGANIZAÇÕES",description:"Mascotes, estágios, benefícios e requisitos de evolução."},
-  arena:{label:"Arena",icon:"⚖️",category:"SISTEMA • ARENA",description:"Regulamento dos Juízes, procedimentos e conduta nas competições."},
-  cards:{label:"Cards & Batalha",icon:"🃏",category:"SISTEMA • CARDS",description:"Manual de Batalha e referências de utilização dos cards."}
-};
-
-function currentLibraryTopic(){return LIBRARY_TOPICS[state.libraryTopic]||LIBRARY_TOPICS.all;}
-function libraryItemsForTopic(items,topicKey){const t=LIBRARY_TOPICS[topicKey]||LIBRARY_TOPICS.all;return (items||[]).filter(x=>!t.category||x.category===t.category);}
-function libraryTopicEntries(items){
-  const all=items||[];
-  return Object.entries(LIBRARY_TOPICS).filter(([k])=>k!=="all").map(([key,t])=>({key,t,count:all.filter(x=>x.category===t.category).length}));
-}
-function libraryNormalizeTitle(s){return String(s||"").replace(/\s+/g," ").replace(/\s*:\s*$/u,"").trim();}
-function libraryIsPrimaryHeading(line){
-  return /^(?:\d+\.\d+(?:\.\d+)?|RANK\s+[IVX]+\b|NÍVEL\s+\d+\b|CAPÍTULO\s+(?:[IVX]+|\d+)\b|ART\.?\s*\d+º?\b|ARTIGO\s+\d+º?\b)/iu.test(line);
-}
-function libraryIsSecondaryHeading(line){
-  if(!line || line.length>100) return false;
-  if(libraryIsPrimaryHeading(line)) return false;
-  return /^(?:Exemplos?|Prioridade|Observações?|Características|Tipos?|Elementos?|Confronto|Funcionamento|Definição|Regras|Requisitos|Benefícios|Melhoria|Efeitos?|Interações?|Forma|Estágio|Objetivo|Quando|Caso|Enquanto)\b.*:\s*$/iu.test(line);
-}
-function parseLibraryHierarchy(x){
-  const raw=String(x?.content||"").replace(/\r/g,"");
-  const lines=raw.split("\n");
-  const sections=[]; let current=null; let child=null; let intro=[]; let seq=0;
-  const addSection=(title)=>{current={id:`ls-${x.id}-${++seq}`,title:libraryNormalizeTitle(title),paragraphs:[],children:[]};sections.push(current);child=null;return current;};
-  const addChild=(title,kind="subtopic")=>{if(!current)return null;child={id:`lc-${x.id}-${++seq}`,title:libraryNormalizeTitle(title),kind,paragraphs:[],children:[]};current.children.push(child);return child;};
-  const addText=(target,text)=>{if(!text)return;(target||current||{paragraphs:intro}).paragraphs.push(text);};
-  for(const rawLine of lines){
-    const line=rawLine.trim();
-    if(!line) continue;
-    if(libraryIsPrimaryHeading(line)){addSection(line);continue;}
-    if(libraryIsSecondaryHeading(line)){addChild(line);continue;}
-    if(/^(?:•|[-–—])\s*/u.test(line)){
-      const text=line.replace(/^(?:•|[-–—])\s*/u,"").trim();
-      if(!current){intro.push(text);continue;}
-      const target=child||current;
-      target.children.push({id:`li-${x.id}-${++seq}`,title:text.length>78?`${text.slice(0,75)}…`:text,kind:"item",body:text,paragraphs:[]});
-      continue;
-    }
-    addText(child||current,line);
-  }
-  return {sections,intro};
-}
-function libraryNodeStats(node){
-  const children=node?.children||[];
-  return {
-    total:children.length,
-    leaf:children.filter(c=>c.kind==="item").length,
-    nested:children.filter(c=>c.kind!=="item").length
-  };
-}
-function libraryBreadcrumbLabel(node){
-  if(node?.level==='root')return 'Biblioteca';
-  if(node?.level==='topic')return (LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all).label;
-  if(node?.level==='material')return node.item.title;
-  if(node?.level==='section')return node.section.title;
-  return node?.item?.title||node?.section?.title||'Consulta';
-}
-function closeLibraryExplorer(){
-  const modal=qs('#libraryExplorerModal');
-  modal?.classList.remove('open');
-  document.body.classList.remove('library-explorer-open');
-}
-function ensureLibraryExplorer(){
-  let modal=qs('#libraryExplorerModal');
-  if(modal)return modal;
-  modal=document.createElement('div');
-  modal.id='libraryExplorerModal';
-  modal.className='library-explorer-modal';
-  document.body.appendChild(modal);
-  return modal;
-}
-function openLibraryExplorer(node){
-  const modal=ensureLibraryExplorer();
-  state.libraryExplorer=node;
-  renderLibraryExplorer();
-  modal.classList.add('open');
-  document.body.classList.add('library-explorer-open');
-}
-function libraryTopicCard(entry){
-  const {key,t,count}=entry;
-  return `<button type="button" class="library-v3-area-card" data-library-open-topic="${key}">
-    <div class="library-v3-card-icon">${t.icon}</div>
-    <div class="library-v3-card-copy"><span class="eyebrow">ÁREA ${String(count).padStart(2,'0')}</span><h3>${escapeHtml(t.label)}</h3><p>${escapeHtml(t.description)}</p></div>
-    <div class="library-v3-card-meta"><span>${count} ${count===1?'material':'materiais'}</span><b>Explorar →</b></div>
-  </button>`;
-}
-function libraryMaterialCard(item,index){
-  const outline=parseLibraryHierarchy(item);
-  const sectionCount=outline.sections.length;
-  return `<button type="button" class="library-explorer-card" data-library-material-index="${index}">
-    <div class="library-explorer-card-icon">${escapeHtml(item.icon||'📚')}</div>
-    <div class="library-explorer-card-main"><span class="tag">${escapeHtml(item.category||'BIBLIOTECA')}</span><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description||'Abra para explorar o conteúdo por seções e subtópicos.')}</p></div>
-    <div class="library-explorer-card-side"><strong>${sectionCount||'—'}</strong><small>${sectionCount===1?'seção':'seções'}</small><span>→</span></div>
-  </button>`;
-}
-function librarySectionCard(section,index){
-  const st=libraryNodeStats(section);
-  const summary=section.paragraphs?.[0]||'';
-  return `<button type="button" class="library-explorer-card library-section-card" data-library-section-index="${index}">
-    <div class="library-section-number">${String(index+1).padStart(2,'0')}</div>
-    <div class="library-explorer-card-main"><span class="tag">SEÇÃO</span><h3>${escapeHtml(section.title)}</h3><p>${escapeHtml(summary||'Explore os subtópicos desta seção.')}</p></div>
-    <div class="library-explorer-card-side"><strong>${st.total||'—'}</strong><small>${st.total===1?'item':'itens'}</small><span>→</span></div>
-  </button>`;
-}
-function libraryChildCard(child,index){
-  const body=child.body||(child.paragraphs||[]).join(' ');
-  return `<button type="button" class="library-explorer-child" data-library-child-index="${index}">
-    <span class="library-child-bullet">${child.kind==='item'?'•':'§'}</span>
-    <span><b>${escapeHtml(child.title)}</b><small>${escapeHtml(body||'Abrir subtópico')}</small></span>
-    <i>→</i>
-  </button>`;
-}
-function libraryRelatedCardsForNode(item,node){
-  const links=Array.isArray(item?.related_cards)?item.related_cards:[];
-  if(!links.length)return [];
-  if(node?.level==='material')return links;
-  if(node?.level==='section'){
-    const sectionTitle=String(node.section?.title||'').trim();
-    return links.filter(x=>String(x.section_title||'').trim()===sectionTitle);
-  }
-  if(node?.level==='child'){
-    const sectionTitle=String(node.section?.title||'').trim();
-    const childTitle=String(node.node?.title||node.child?.title||'').trim();
-    return links.filter(x=>String(x.section_title||'').trim()===sectionTitle&&String(x.child_title||'').trim()===childTitle);
-  }
-  return [];
-}
-function libraryRelatedCardsBlock(item,node){
-  const cards=libraryRelatedCardsForNode(item,node);
-  if(!cards.length)return '';
-  return `<section class="library-related-cards"><div class="library-related-cards-head"><div><p class="eyebrow">CARDS RELACIONADOS</p><h3>Cards desta regra</h3></div><strong>${cards.length}</strong></div><div class="library-related-card-list">${cards.map(c=>`<button type="button" class="library-related-card" data-library-card-id="${Number(c.card_id)}"><span>🃏</span><span><b>#${Number(c.card_id)} • ${escapeHtml(c.name_pt||c.name||'Card')}</b><small>${escapeHtml(c.category||'Outros')}${c.path_label?` • ${escapeHtml(c.path_label)}`:''}</small></span><i>→</i></button>`).join('')}</div></section>`;
-}
-function libraryRenderDetail(node){
-  const body=[];
-  if(node.item?.description) body.push(`<p class="library-detail-lead">${escapeHtml(node.item.description)}</p>`);
-  if(node.node?.paragraphs?.length) body.push(node.node.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join(''));
-  if(node.node?.children?.length) body.push(`<div class="library-detail-children">${node.node.children.map((c,i)=>libraryChildCard(c,i)).join('')}</div>`);
-  const full=(node.node?.kind==='item'&&node.node.body)?`<div class="library-detail-quote">${escapeHtml(node.node.body)}</div>`:'';
-  return body.join('')+full;
-}
-function renderLibraryExplorer(){
-  const modal=ensureLibraryExplorer();
-  const node=state.libraryExplorer||{level:'root'};
-  const items=state.libraryAllItems||state.libraryItems||[];
-  let title='Biblioteca de Spade',desc='Navegue por camadas até encontrar a regra exata que procura.',content='',crumbs=[{level:'root',label:'Biblioteca'}];
-  if(node.level==='root'){
-    const entries=libraryTopicEntries(items);
-    content=`<div class="library-explorer-grid">${entries.map(libraryTopicCard).join('')}</div>`;
-  }else if(node.level==='topic'){
-    const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const list=libraryItemsForTopic(items,node.topicKey);
-    title=t.label; desc=t.description; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label});
-    content=list.length?`<div class="library-explorer-grid materials">${list.map((item,i)=>libraryMaterialCard(item,i)).join('')}</div>`:`<div class="library-explorer-empty">Nenhum material disponível nesta área.</div>`;
-  }else if(node.level==='material'){
-    const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const list=libraryItemsForTopic(items,node.topicKey); const item=list[node.itemIndex];
-    if(!item)return openLibraryExplorer({level:'root'});
-    node.item=item; node.outline=parseLibraryHierarchy(item);
-    title=item.title; desc=item.description||'Explore o material seção por seção.'; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title});
-    const sections=node.outline.sections||[];
-    content=`<div class="library-explorer-intro"><div class="library-explorer-intro-icon">${escapeHtml(item.icon||'📚')}</div><div><span class="tag">${escapeHtml(item.category||'BIBLIOTECA')}</span><h3>Mapa do material</h3><p>${escapeHtml(item.description||'Use as seções abaixo para aprofundar a leitura.')}</p></div></div>`+
-      (sections.length?`<div class="library-explorer-list">${sections.map(librarySectionCard).join('')}</div>`:`<div class="library-detail-full">${buildLibraryReader(item).html}</div>`);
-    if(node.outline.intro?.length) content+=`<div class="library-material-intro-copy">${node.outline.intro.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</div>`;
-    content+=libraryRelatedCardsBlock(item,node);
-  }else if(node.level==='section'){
-    const t=LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all; const topicItems=libraryItemsForTopic(items,node.topicKey); const item=node.item||topicItems[node.itemIndex]; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex];
-    if(!section)return openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex});
-    node.section=section; title=section.title; desc=item.title; crumbs.push({level:'topic',topicKey:node.topicKey,label:t.label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title},{level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,label:section.title});
-    const st=libraryNodeStats(section);
-    content=`<div class="library-section-detail-head"><span class="library-section-number large">${String(node.sectionIndex+1).padStart(2,'0')}</span><div><span class="tag">SEÇÃO • ${st.total} ${st.total===1?'ITEM':'ITENS'}</span><h3>${escapeHtml(section.title)}</h3></div></div>`;
-    if(section.paragraphs?.length)content+=section.paragraphs.map(p=>`<p class="library-section-paragraph">${escapeHtml(p)}</p>`).join('');
-    if(section.children?.length)content+=`<div class="library-detail-children">${section.children.map((c,i)=>libraryChildCard(c,i)).join('')}</div>`;
-    content+=libraryRelatedCardsBlock(item,node);
-  }else if(node.level==='child'){
-    const topicItems=libraryItemsForTopic(items,node.topicKey); const item=node.item||topicItems[node.itemIndex]; const outline=node.outline||parseLibraryHierarchy(item); const section=outline.sections[node.sectionIndex]; const child=section?.children?.[node.childIndex];
-    if(!section||!child)return openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex});
-    node.section=section; node.node=child;
-    title=child.title; desc=`${item.title} • ${section.title}`; crumbs.push({level:'topic',topicKey:node.topicKey,label:(LIBRARY_TOPICS[node.topicKey]||LIBRARY_TOPICS.all).label},{level:'material',topicKey:node.topicKey,itemIndex:node.itemIndex,label:item.title},{level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,label:section.title},{level:'child',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,childIndex:node.childIndex,label:child.title});
-    content=`<div class="library-leaf-card"><span class="tag">${child.kind==='item'?'ITEM':'SUBTÓPICO'}</span><h3>${escapeHtml(child.title)}</h3>${child.body?`<div class="library-leaf-body">${escapeHtml(child.body)}</div>`:''}${child.paragraphs?.map(p=>`<p>${escapeHtml(p)}</p>`).join('')||''}</div>`;
-    content+=libraryRelatedCardsBlock(item,node);
-  }
-  const trail=crumbs.map((c,i)=>`<button type="button" class="library-breadcrumb ${i===crumbs.length-1?'current':''}" data-library-crumb='${escapeHtml(JSON.stringify(c))}'>${escapeHtml(c.label)}</button>`).join('<span>›</span>');
-  modal.innerHTML=`<div class="library-explorer-shell" role="dialog" aria-modal="true" aria-labelledby="libraryExplorerTitle">
-    <header class="library-explorer-top"><div><p class="eyebrow">EXPLORADOR DA BIBLIOTECA</p><h2 id="libraryExplorerTitle">${escapeHtml(title)}</h2><p>${escapeHtml(desc)}</p></div><button type="button" class="library-explorer-close" id="libraryExplorerClose" aria-label="Fechar biblioteca">×</button></header>
-    <div class="library-breadcrumbs">${trail}</div>
-    <main class="library-explorer-main">${content}</main>
-    <footer class="library-explorer-footer"><span>Biblioteca de Spade • consulta em camadas</span><button type="button" class="outline small" id="libraryExplorerBack">← Voltar</button></footer>
-  </div>`;
-  qs('#libraryExplorerClose')?.addEventListener('click',closeLibraryExplorer);
-  qsa('[data-library-crumb]').forEach(btn=>btn.addEventListener('click',()=>{const data=JSON.parse(btn.dataset.libraryCrumb||'{}');openLibraryExplorer(data.level==='root'?{level:'root'}:data.level==='topic'?{level:'topic',topicKey:data.topicKey}:data.level==='material'?{level:'material',topicKey:data.topicKey,itemIndex:data.itemIndex}:data.level==='section'?{level:'section',topicKey:data.topicKey,itemIndex:data.itemIndex,sectionIndex:data.sectionIndex}:data); }));
-  qs('#libraryExplorerBack')?.addEventListener('click',()=>{const n=state.libraryExplorer||{level:'root'};if(n.level==='root')return closeLibraryExplorer();if(n.level==='topic')return openLibraryExplorer({level:'root'});if(n.level==='material')return openLibraryExplorer({level:'topic',topicKey:n.topicKey});if(n.level==='section')return openLibraryExplorer({level:'material',topicKey:n.topicKey,itemIndex:n.itemIndex});if(n.level==='child')return openLibraryExplorer({level:'section',topicKey:n.topicKey,itemIndex:n.itemIndex,sectionIndex:n.sectionIndex});});
-  qsa('[data-library-open-topic]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'topic',topicKey:b.dataset.libraryOpenTopic}));
-  qsa('[data-library-material-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'material',topicKey:node.topicKey,itemIndex:Number(b.dataset.libraryMaterialIndex)}));
-  qsa('[data-library-section-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'section',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:Number(b.dataset.librarySectionIndex),item:node.item,outline:node.outline}));
-  qsa('[data-library-child-index]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'child',topicKey:node.topicKey,itemIndex:node.itemIndex,sectionIndex:node.sectionIndex,childIndex:Number(b.dataset.libraryChildIndex),item:node.item,outline:node.outline}));
-  qsa('[data-library-card-id]').forEach(b=>b.onclick=()=>openCardDetailModal(Number(b.dataset.libraryCardId),false));
-}
-function renderLibrary(items,q=""){
-  const el=qs('#libraryGrid'); if(!el)return;
-  const all=items||[]; state.libraryAllItems=all;
-  const query=String(q||'').trim();
-  if(query){
-    const lower=query.toLocaleLowerCase();
-    const results=[];
-    all.forEach((item,idx)=>{
-      const hay=[item.title,item.category,item.description,item.content].join(' ').toLocaleLowerCase();
-      if(hay.includes(lower))results.push({item,idx});
-    });
-    qs('#libraryTopicHint')?.replaceChildren(document.createTextNode(`${results.length} ${results.length===1?'resultado':'resultados'}`));
-    if(!results.length){el.innerHTML=`<div class="library-v3-empty"><span>⌕</span><h3>Nenhum resultado encontrado.</h3><p>Tente termos como “falha”, “paralisia”, “mana”, “barreira”, “cargo” ou “mascote”.</p></div>`;return;}
-    el.innerHTML=`<div class="library-v3-search-results">${results.map((r,i)=>`<button type="button" class="library-v3-result" data-library-search-index="${i}"><span class="library-result-icon">${escapeHtml(r.item.icon||'📚')}</span><span><small>${escapeHtml(r.item.category||'BIBLIOTECA')}</small><b>${escapeHtml(r.item.title)}</b><em>${escapeHtml(r.item.description||'')}</em></span><strong>→</strong></button>`).join('')}</div>`;
-    qsa('[data-library-search-index]').forEach((b,i)=>{const r=results[i];b.onclick=()=>{const key=Object.entries(LIBRARY_TOPICS).find(([_,t])=>t.category===r.item.category)?.[0]||'all';const topicItems=libraryItemsForTopic(state.libraryAllItems,key);const itemIndex=topicItems.findIndex(x=>x.id===r.item.id);openLibraryExplorer({level:key==='all'?'root':'material',topicKey:key,itemIndex:Math.max(itemIndex,0)});};});
-    return;
-  }
-  const entries=libraryTopicEntries(all);
-  qs('#libraryTopicHint')?.replaceChildren(document.createTextNode(`${entries.length} áreas do arquivo`));
-  el.innerHTML=`<div class="library-v3-area-grid">${entries.map(libraryTopicCard).join('')}</div>`;
-  qsa('[data-library-open-topic]').forEach(b=>b.onclick=()=>openLibraryExplorer({level:'topic',topicKey:b.dataset.libraryOpenTopic}));
-}
-async function loadLibrary(){
-  try{
-    // A Biblioteca é pequena o bastante para carregar o catálogo completo uma vez e
-    // fazer a busca localmente. Assim, ao abrir um resultado, o jogador nunca perde
-    // os irmãos do mesmo tópico ao voltar pela trilha de navegação.
-    const q=qs('#librarySearch')?.value.trim()||'';
-    const d=await api('/api/library');
-    state.libraryItems=d.items||[];
-    state.libraryAllItems=d.items||[];
-    renderLibrary(state.libraryAllItems,q);
-    const clear=qs('#librarySearchClear'); if(clear)clear.hidden=!q;
-  }catch(e){
-    const el=qs('#libraryGrid');
-    if(el)el.innerHTML=`<div class="library-v3-empty"><span>§</span><h3>Não foi possível carregar a Biblioteca.</h3><p>${escapeHtml(e.message)}</p></div>`;
-  }
-}
-
-async function loadAnnouncements(){
-  try{
-    const d=await api("/api/announcements");
-    state.announcements=d.announcements||[];
-    renderAnnouncements(state.announcements);
-  }catch(e){
-    const f=qs("#announcementFeature"),l=qs("#announcementList");
-    if(f)f.innerHTML=`<div class="announcement-feature"><h2>Erro ao carregar comunicados</h2><p>${escapeHtml(e.message)}</p></div>`;
-    if(l)l.innerHTML="";
-  }
-}
-
-function announcementClass(priority){
-  return priority==="URGENTE"?"urgent":priority==="IMPORTANTE"?"important":"info";
-}
-
-function renderAnnouncements(items){
-  const f=qs("#announcementFeature"),l=qs("#announcementList");
-  const featured=(items||[]).find(x=>x.featured)||items?.[0];
-
-  if(f){
-    f.innerHTML=featured
-      ? `<div class="announcement-feature">
-          <div class="announcement-meta">
-            <span class="announcement-priority ${announcementClass(featured.priority)}">${escapeHtml(featured.priority)}</span>
-            <span class="announcement-date">${escapeHtml(String(featured.date||""))}</span>
-          </div>
-          <h2>${escapeHtml(featured.title)}</h2>
-          <p>${escapeHtml(featured.body||"")}</p>
-          <small style="color:#777">${escapeHtml(featured.category||"INFORMATIVO")}</small>
-        </div>`
-      : "";
-  }
-
-  if(l){
-    const rest=(items||[]).filter(x=>!featured||x.id!==featured.id);
-    l.innerHTML=rest.length
-      ? rest.map(a=>`<article class="announcement-card ${a.featured?"featured":""}">
-          <div class="announcement-head">
-            <div>
-              <div class="announcement-meta">
-                <span class="announcement-priority ${announcementClass(a.priority)}">${escapeHtml(a.priority)}</span>
-                <span class="announcement-date">${escapeHtml(String(a.date||""))}</span>
-              </div>
-              <h3>${escapeHtml(a.title)}</h3>
-            </div>
-            <span class="tag">${escapeHtml(a.category||"INFORMATIVO")}</span>
-          </div>
-          <p class="announcement-body">${escapeHtml(a.body||"")}</p>
-        </article>`).join("")
-      : `<div class="panel"><p>Nenhum outro comunicado publicado.</p></div>`;
-  }
-}
-
-function renderHomeActiveActivities(items){
-  const el=qs("#homeActiveActivities");if(!el)return;
-  const arr=(items||[]).slice(0,6);
-  el.innerHTML=arr.length?`<div class="home-active-wrap"><div class="section-head"><div><p class="eyebrow">♠️ ATIVIDADE OFICIAL</p><h2>Acontecendo agora</h2></div><button class="outline dark-outline" data-page="cronograma">Ver cronograma</button></div><div class="home-active-grid">${arr.map(a=>{const icon=a.source==='MISSION'?'⚔️':a.source==='EVENT'?'🎪':'📅',label=a.source==='MISSION'?'MISSÃO':a.source==='EVENT'?'EVENTO':'CRONOGRAMA',end=a.end_label||a.end_time?String(a.end_time||a.end_label||''):'',action=a.source==='EVENT'?`<button class="gold small" data-home-open-event="${Number(a.event_id||a.id)}">Ver evento</button>`:a.source==='MISSION'?`<button class="gold small" data-page="missoes">Ver missão</button>`:`<button class="gold small" data-page="cronograma">Ver atividade</button>`;return `<article class="home-active-card"><span class="tag">${icon} ${label} • ACONTECENDO AGORA</span><h3>${escapeHtml(a.title)}</h3><p>${escapeHtml(a.description||a.activity_type||'Atividade oficial')}</p>${end?`<small>Encerramento: <b>${escapeHtml(end)}</b></small>`:''}${action}</article>`}).join('')}</div></div>`:"";
-  qsa('[data-home-open-event]').forEach(b=>b.onclick=()=>openPublicEvent(Number(b.dataset.homeOpenEvent)));
-}
-function renderHomeAnnouncements(items){
-  const el=qs("#homeAnnouncements");if(!el)return;
-  const arr=(items||[]).slice(0,3);
-  el.innerHTML=arr.length
-    ? `<div class="home-announcements-wrap">
-        <div class="section-head">
-          <div><p class="eyebrow">MURAL OFICIAL</p><h2>Comunicados</h2></div>
-          <button class="outline dark-outline" data-page="comunicados">Ver todos</button>
-        </div>
-        <div class="home-announcement-grid">${arr.map(a=>`<article class="home-announcement">
-          <div class="announcement-meta">
-            <span class="announcement-priority ${announcementClass(a.priority)}">${escapeHtml(a.priority)}</span>
-            <span class="announcement-date">${escapeHtml(String(a.date||""))}</span>
-          </div>
-          <h3>${escapeHtml(a.title)}</h3>
-          <p>${escapeHtml((a.body||"").slice(0,170))}${(a.body||"").length>170?"…":""}</p>
-        </article>`).join("")}</div>
-      </div>`
-    : "";
-}
-function eventTypeLabel(t){return {JOGO:"Evento de Jogo",ESPECIAL:"Evento Especial",TEMPORADA:"Evento de Temporada",LEGIAO:"Evento de Legião"}[t]||t}
-function eventStatusClass(s){return s==="ATIVO"?"active":s==="PLANEJADO"?"plan":s==="ENCERRADO"?"closed":""}
-function eventStatusLabel(s){return {ATIVO:"ATIVO",PLANEJADO:"PRÓXIMO",ENCERRADO:"ENCERRADO",CANCELADO:"CANCELADO"}[s]||s}
-
-function statusDateLabel(value){
-  const str=String(value||"").slice(0,10);
-  const [y,m,d]=str.split("-");
-  return y&&m&&d?`${d}/${m}/${y}`:"";
-}
-function statusDateHuman(value){
-  const str=String(value||"").slice(0,10);
-  const [y,m,d]=str.split("-");
-  if(!y)return "";
-  const dt=new Date(Number(y),Number(m)-1,Number(d));
-  const today=new Date();
-  today.setHours(0,0,0,0);
-  dt.setHours(0,0,0,0);
-  const diff=Math.round((today-dt)/86400000);
-  if(diff===0)return "Hoje";
-  if(diff===1)return "Ontem";
-  return statusDateLabel(value);
-}
-async function loadTodayStatus(){
-  if(!state.me)return;
-  try{
-    const d=await api("/api/me/status/today");
-    state.todayStatus=d.status||null;
-    const box=qs("#playerStatusMessage"),date=qs("#playerStatusDate");
-    if(box)box.value=state.todayStatus?.message||"";
-    if(date)date.textContent=state.todayStatus?"Status de hoje":"Ainda não publicado";
-    updateStatusCounter();
-  }catch(e){console.error(e)}
-}
-function updateStatusCounter(){
-  const box=qs("#playerStatusMessage"),count=qs("#playerStatusCount");
-  if(count)count.textContent=String((box?.value||"").length);
-}
-async function publishPlayerStatus(){
-  if(state.me?.account_type==="ALLY") return;
-  const box=qs("#playerStatusMessage"),err=qs("#playerStatusError");
-  const message=(box?.value||"").trim();
-  if(!message){if(err)err.textContent="Escreva uma mensagem antes de publicar.";return}
-  if(message.length>280){if(err)err.textContent="O status pode ter no máximo 280 caracteres.";return}
-  if(err)err.textContent="Publicando...";
-  try{
-    const d=await api("/api/me/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message})});
-    state.todayStatus=d.status||null;
-    if(err)err.textContent="Status publicado.";
-    qs("#playerStatusDate").textContent="Status de hoje";
-    await loadStatusBoard();
-    setTimeout(()=>{if(qs("#playerStatusError"))qs("#playerStatusError").textContent=""},1200);
-  }catch(e){if(err)err.textContent=e.message}
-}
-async function loadStatusBoard(){
-  const board=qs("#statusBoard");if(board)board.innerHTML=`<div class="panel"><p>Carregando mural...</p></div>`;
-  try{
-    const d=await api("/api/status-board?days=7");
-    state.statusBoard=d.statuses||[];
-    renderStatusBoard(state.statusBoard);
-  }catch(e){
-    if(board)board.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
-  }
-}
-function renderStatusBoard(items){
-  const board=qs("#statusBoard");if(!board)return;
-  board.innerHTML=items.length?items.map(x=>`<article class="status-post ${x.mine?"mine":""}" data-status-id="${Number(x.id)}">
-    <div class="status-avatar">♠</div>
-    <div class="status-body">
-      <div class="status-post-head"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")}${x.patent?` • ${escapeHtml(x.patent)}`:""}</small></div><time>${escapeHtml(statusDateHuman(x.status_date))}</time></div>
-      <p>${escapeHtml(x.message)}</p>
-      <div class="status-actions">
-        ${!state.me
-          ? `<span class="status-readonly">🔒 Entre no Reino para interagir</span><span>❤️ ${x.reaction_count||0}</span><span>💬 ${x.comment_count||0}</span>`
-          : state.me?.account_type==="ALLY"
-            ? `<span class="status-readonly">👁️ Somente leitura</span><span>❤️ ${x.reaction_count||0}</span><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 ${x.comment_count||0}</button>`
-            : `<button type="button" class="status-react ${x.reacted?"active":""}" data-status-react="${x.id}">❤️ <span>${x.reaction_count||0}</span></button><button type="button" class="status-comments-toggle" data-status-comments="${x.id}">💬 <span>${x.comment_count||0}</span></button>${x.mine?`<span class="status-own">Seu status</span>`:""}` }
-      </div>
-      <div class="status-comments" id="status-comments-${x.id}" hidden></div>
+<!-- V52.1 — Atmosfera mágica do RPG Black Clover -->
+<div class="magic-atmosphere" aria-hidden="true">
+  <span class="mana-mote m1"></span><span class="mana-mote m2"></span><span class="mana-mote m3"></span><span class="mana-mote m4"></span>
+  <span class="mana-mote m5"></span><span class="mana-mote m6"></span><span class="mana-mote m7"></span><span class="mana-mote m8"></span>
+  <span class="mana-mote m9"></span><span class="mana-mote m10"></span><span class="mana-mote m11"></span><span class="mana-mote m12"></span>
+  <span class="mana-mote m13"></span><span class="mana-mote m14"></span><span class="mana-mote m15"></span><span class="mana-mote m16"></span>
+</div>
+<div id="app">
+<header class="top">
+  <a class="logo" href="#home"><span>♠</span> THE KING <b>MAGAZINE</b></a>
+  <button class="hamb" id="hamb" aria-label="Abrir menu">☰</button>
+  <div class="global-search" id="globalSearchWrap">
+    <button type="button" class="global-search-toggle" id="globalSearchToggle" aria-expanded="false" aria-controls="globalSearchPanel" aria-label="Abrir pesquisa">🔎</button>
+    <div class="global-search-panel" id="globalSearchPanel" hidden>
+      <label class="sr-only" for="globalSearchInput">Pesquisar no Portal</label>
+      <input id="globalSearchInput" class="global-search-input" type="search" autocomplete="off" placeholder="Pesquisar no Portal..." aria-label="Pesquisar no Portal">
+      <button type="button" class="global-search-close" id="globalSearchClose" aria-label="Fechar pesquisa">×</button>
+      <div id="globalSearchResults" class="global-search-results" hidden></div>
     </div>
-  </article>`).join(""):`<div class="panel status-empty"><div>♠</div><h3>Nenhum status publicado</h3><p>Seja o primeiro a compartilhar algo com o Reino hoje.</p></div>`;
-}
-async function toggleStatusReaction(id,button){
-  try{const d=await api(`/api/status/${id}/react`,{method:"POST"});button.classList.toggle("active",!!d.reacted);const span=button.querySelector("span");if(span)span.textContent=d.count;}catch(e){alert(e.message)}
-}
-async function toggleStatusComments(id){
-  const box=qs(`#status-comments-${id}`);if(!box)return;
-  if(!box.hidden){box.hidden=true;return;}
-  box.hidden=false;box.innerHTML=`<div class="comments-loading">Carregando comentários...</div>`;
-  try{const d=await api(`/api/status/${id}/comments`);const comments=(d.comments||[]).map(c=>`<div class="status-comment"><b>${escapeHtml(c.nick)}</b><span>${escapeHtml(c.message)}</span></div>`).join("");const form=state.me?.account_type==="ALLY"?`<div class="status-readonly-note">👁️ Você está acompanhando este mural em modo observador.</div>`:`<form class="status-comment-form" data-comment-form="${id}"><input maxlength="280" placeholder="Comente neste status..."><button class="gold small" type="submit">Enviar</button></form>`;box.innerHTML=comments+form;
-  }catch(e){box.innerHTML=`<div class="comments-loading">${escapeHtml(e.message)}</div>`}
-}
-let scheduleMonth = new Date().toISOString().slice(0,7);
-let scheduleSelectedDate = new Date().toISOString().slice(0,10);
+  </div>
+  <nav id="nav" aria-label="Navegação principal">
+    <button data-page="home">Início</button><button data-page="guia">📖 Guia do Novato</button><button data-page="jornal">Jornal</button><button data-page="comunicados">Comunicados</button><button data-page="notificacoes" id="notificationsNav" class="player-only-nav" style="display:none">🔔 Avisos <span id="notificationBadge" class="notification-badge" style="display:none">0</span></button><button data-page="status">Status</button><button data-page="eventos">Eventos</button><button data-page="missoes" id="missionsNav">Missões</button><button data-page="cargos">Cargos & Ocupantes</button><button data-page="cronograma">Cronograma</button><button data-page="jogadores">Jogadores</button><button data-page="casas">Casas</button><button data-page="ranking">Rankings</button><button data-page="cards" id="cardsNav" class="player-only-nav" style="display:none">Cards</button><button data-page="simulador" id="simulatorNav" class="simulator-only-nav" style="display:none">⚔️ Simulador</button><button data-page="emblemas" id="emblemsNav" class="player-only-nav" style="display:none">🏅 Emblems</button><button data-page="grimorio" id="grimoireNav" class="player-only-nav" style="display:none">📖 Meu Grimório</button><button data-page="hierarquia">Hierarquia</button><button data-page="biblioteca">📚 Biblioteca</button>
+    <button data-page="admin-login" id="adminNav" class="admin-session-nav" style="display:none">👑 Administração</button><button data-page="login" id="loginNav">Entrar</button>
+  </nav>
+</header>
 
-async function loadSchedule(){
-  try{
-    const d=await api("/api/schedule");
-    state.schedule=d.activities||[];
-    populateScheduleTypeFilter(state.schedule);
-    const nowKey=new Date().toISOString().slice(0,10),nowMonth=nowKey.slice(0,7);
-    const availableMonths=[...new Set(state.schedule.map(x=>String(x.activity_date||'').slice(0,7)).filter(Boolean))];
-    if(!availableMonths.includes(scheduleMonth)) scheduleMonth=availableMonths.includes(nowMonth)?nowMonth:(availableMonths[availableMonths.length-1]||scheduleMonth);
-    scheduleSelectedDate = scheduleMonth===nowMonth?nowKey:scheduleMonth+'-01';
-    renderSchedule(state.schedule);
-    await loadScheduleChampions(scheduleMonth);
-  }catch(e){
-    const g=qs("#scheduleCalendar");if(g)g.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
-  }
-}
-function scheduleDateLabel(value){
-  if(!value)return "";
-  const str=String(value).slice(0,10),[y,m,d]=str.split("-");
-  return [d,m,y].join("/");
-}
-function scheduleTypeIcon(type){
-  return {"MISSÃO":"♍","EXAME_INTERMEDIARIO":"⚜️","EXAME_ADMISSAO":"🏵️","EXAME_SENIOR":"🔱","TORNEIO":"🏆","DIA_LIVRE":"🕊️","TORRE_GRIMORIOS":"🏯","EVENTO":"🎉","RANKING":"🅾️","FORJA":"⚒️","ATIVIDADE_ESPECIAL":"✦"}[type]||"✦";
-}
-function scheduleTypeLabel(type){
-  return {"MISSÃO":"Missão","EXAME_INTERMEDIARIO":"Exame Intermediário","EXAME_ADMISSAO":"Exame de Admissão","EXAME_SENIOR":"Exame Sênior","TORNEIO":"Torneio","DIA_LIVRE":"Dia Livre","TORRE_GRIMORIOS":"Torre de Grimórios","EVENTO":"Evento","RANKING":"Ranking","FORJA":"Forja","ATIVIDADE_ESPECIAL":"Atividade Especial"}[type]||type||"Atividade";
-}
-function scheduleStatusLabel(a, dayKey=null){
-  const s=String(a.status||'').toUpperCase();
-  const todayKey=new Date().toISOString().slice(0,10);
-  const end=String(a.end_date||a.activity_date||'').slice(0,10),start=String(a.activity_date||'').slice(0,10);
-  if(s==='CANCELADA') return 'Cancelada';
-  if(todayKey<start) return 'Agendada';
-  if(todayKey>end) return 'Concluída';
-  if(s==='EM_ANDAMENTO') return 'Em andamento';
-  if(s==='CONCLUIDA') return 'Concluída';
-  return 'Hoje';
-}
-function scheduleMonthDateKeys(year,monthIndex){
-  const first=new Date(year,monthIndex,1),last=new Date(year,monthIndex+1,0);
-  const mondayStart=(first.getDay()+6)%7, total=last.getDate();
-  const cells=[];
-  for(let i=0;i<mondayStart;i++)cells.push(null);
-  for(let d=1;d<=total;d++)cells.push(new Date(year,monthIndex,d));
-  while(cells.length%7)cells.push(null);
-  return cells;
-}
-function activityTouchesDay(a,key){
-  const start=String(a.activity_date||'').slice(0,10),end=String(a.end_date||a.activity_date||'').slice(0,10);
-  return key>=start&&key<=end;
-}
-function filteredScheduleItems(){
-  const term=String(qs('#scheduleSearch')?.value||'').toLowerCase().trim(),type=qs('#scheduleTypeFilter')?.value||'';
-  return (state.schedule||[]).filter(a=>{
-    if(type&&a.activity_type!==type)return false;
-    return !term||`${a.title} ${a.description} ${a.activity_type} ${a.location} ${a.result_text} ${a.cycle_label}`.toLowerCase().includes(term);
-  });
-}
-function renderSchedule(items){
-  const calendar=qs('#scheduleCalendar'); if(!calendar)return;
-  const [year,month]=scheduleMonth.split('-').map(Number),monthIndex=month-1;
-  const monthName=new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric'}).format(new Date(year,monthIndex,1));
-  qs('#scheduleMonthLabel').textContent=monthName.charAt(0).toUpperCase()+monthName.slice(1);
-  const visible=filteredScheduleItems();
-  const cells=scheduleMonthDateKeys(year,monthIndex);
-  const dayNames=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
-  const todayKey=new Date().toISOString().slice(0,10);
-  const counts={};
-  visible.forEach(a=>{
-    const start=new Date(String(a.activity_date).slice(0,10)+'T00:00:00'),end=new Date(String(a.end_date||a.activity_date).slice(0,10)+'T00:00:00');
-    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){const k=d.toISOString().slice(0,10);counts[k]=(counts[k]||0)+1;}
-  });
-  calendar.innerHTML=`<div class="schedule-calendar-head">${dayNames.map(x=>`<span>${x}</span>`).join('')}</div><div class="schedule-calendar-grid">${cells.map(d=>{
-    if(!d)return `<div class="schedule-day empty"></div>`;
-    const key=d.toISOString().slice(0,10),inMonth=key.slice(0,7)===scheduleMonth,dayItems=visible.filter(a=>activityTouchesDay(a,key));
-    return `<button class="schedule-day ${key===todayKey?'today':''} ${key===scheduleSelectedDate?'selected':''}" type="button" data-schedule-day="${key}">
-      <span class="schedule-day-number">${d.getDate()}</span>
-      <div class="schedule-day-items">${dayItems.slice(0,4).map(a=>`<span class="schedule-day-dot type-${String(a.activity_type||'').replace(/[^A-Za-z0-9]/g,'')}">${scheduleTypeIcon(a.activity_type)} <b>${escapeHtml(a.title)}</b></span>`).join('')}${dayItems.length>4?`<small>+${dayItems.length-4} atividades</small>`:''}</div>
-      ${counts[key]?`<em>${counts[key]}</em>`:''}
-    </button>`;
-  }).join('')}</div>`;
-  qsa('[data-schedule-day]').forEach(b=>b.onclick=()=>{scheduleSelectedDate=b.dataset.scheduleDay;renderSchedule(state.schedule);renderScheduleDay(state.schedule);});
-  renderScheduleDay(items);
-  renderScheduleNow(items);
-}
-function renderScheduleDay(items){
-  const panel=qs('#scheduleDayAgenda'),label=qs('#scheduleSelectedDateLabel'),count=qs('#scheduleSelectedDateCount');if(!panel||!label)return;
-  const list=filteredScheduleItems().filter(a=>activityTouchesDay(a,scheduleSelectedDate));
-  label.textContent=new Intl.DateTimeFormat('pt-BR',{dateStyle:'full'}).format(new Date(scheduleSelectedDate+'T12:00:00'));
-  if(count)count.textContent=`${list.length} ${list.length===1?'atividade':'atividades'}`;
-  panel.innerHTML=list.length?list.map(a=>`<article class="schedule-agenda-card ${scheduleStatusLabel(a)==='Em andamento'?'live':''}" data-schedule-id="${Number(a.id)}">
-    <div class="schedule-agenda-icon">${scheduleTypeIcon(a.activity_type)}</div>
-    <div class="schedule-agenda-main"><div class="schedule-card-meta"><span>${escapeHtml(scheduleTypeLabel(a.activity_type))}</span><span>${escapeHtml(scheduleStatusLabel(a))}</span>${a.cycle_label?`<span>${escapeHtml(a.cycle_label)}</span>`:''}</div><h4>${escapeHtml(a.title)}</h4><p>${escapeHtml(a.description||'')}</p><small>${scheduleDateLabel(a.activity_date)}${a.end_date&&String(a.end_date).slice(0,10)!==String(a.activity_date).slice(0,10)?` → ${scheduleDateLabel(a.end_date)}`:''}${a.location?` • ${escapeHtml(a.location)}`:''}</small>${a.result_text?`<div class="schedule-result"><b>Resultado</b><span>${escapeHtml(a.result_text)}</span></div>`:''}</div>
-  </article>`).join(''):`<div class="schedule-empty"><span>♠</span><div><b>Nenhuma atividade registrada neste dia.</b><p>Escolha outro dia ou altere os filtros.</p></div></div>`;
-}
-function renderScheduleNow(items){
-  const box=qs('#scheduleNowSummary');if(!box)return;
-  const today=new Date().toISOString().slice(0,10),active=(items||[]).filter(a=>activityTouchesDay(a,today)&&['Hoje','Em andamento'].includes(scheduleStatusLabel(a)));
-  const monthTotal=(items||[]).filter(a=>String(a.activity_date).slice(0,7)===scheduleMonth||String(a.end_date||a.activity_date).slice(0,7)===scheduleMonth).length;
-  box.innerHTML=`<p class="eyebrow">VISÃO DO MÊS</p><h3>${monthTotal} atividades registradas</h3><p>${active.length?`Hoje o Reino tem <b>${active.length}</b> atividade(s) em sua agenda.`:'A agenda de hoje não possui atividades marcadas em andamento.'}</p>`;
-}
-async function loadScheduleChampions(period){
-  const el=qs('#scheduleChampionsPanel');if(!el)return;
-  try{const d=await api(`/api/schedule-champions?period=${encodeURIComponent(period)}`);const arr=d.champions||[];el.innerHTML=`<div class="panel-head"><div><p class="eyebrow">🏆 CAMPEÕES DO PERÍODO</p><h3>${period==='2026-08'?'Agosto de 2026':'Destaques registrados'}</h3></div><span>${arr.length} conquistas</span></div>${arr.length?`<div class="champion-collection-grid">${arr.map(c=>`<article class="champion-collectible"><span class="champion-seal">♠</span><div><small>${escapeHtml(c.category)}</small><h4>${escapeHtml(c.title)}</h4><b>🏆 ${escapeHtml(c.winner_nick)}</b><p>${escapeHtml(c.note||'')}</p></div></article>`).join('')}</div>`:`<div class="schedule-empty"><span>🏆</span><div><b>Nenhum campeão registrado neste período.</b><p>Os resultados podem ser adicionados pela Administração.</p></div></div>`}`;}catch(e){el.innerHTML=`<p>${escapeHtml(e.message)}</p>`;}
-}
-function populateScheduleTypeFilter(items){
-  const el=qs('#scheduleTypeFilter');if(!el)return;
-  const types=[...new Set((items||[]).map(x=>x.activity_type).filter(Boolean))].sort((a,b)=>scheduleTypeLabel(a).localeCompare(scheduleTypeLabel(b),'pt-BR'));
-  const current=el.value;el.innerHTML=`<option value="">Todos os tipos</option>`+types.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(scheduleTypeLabel(x))}</option>`).join('');if(types.includes(current))el.value=current;
-}
-async function loadMissions(){
-  const grid=qs("#missionGrid"),feature=qs("#missionActiveFeature"); if(!grid)return;
-  try{
-    const d=await api("/api/missions"); state.missions=d.missions||[]; renderMissionsPublic(state.missions);
-  }catch(e){grid.innerHTML=`<div class="panel"><h3>Missões indisponíveis</h3><p>${escapeHtml(e.message)}</p></div>`;}
-}
-function missionLabel(m){return `Missão de ${m.mission_type||"Missão"}`;}
-function missionDate(v){try{return new Date(v).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"});}catch{return String(v||"")}}
-function renderMissionsPublic(items){
-  const feature=qs("#missionActiveFeature"),grid=qs("#missionGrid"); if(!grid)return;
-  const search=(qs("#missionSearch")?.value||"").toLowerCase(),filter=qs("#missionStatusFilter")?.value||"";
-  const arr=(items||[]).filter(m=>(!search||String(m.mission_type||"").toLowerCase().includes(search))&&(!filter||m.status===filter));
-  const active=(items||[]).find(m=>m.status==="EM_ANDAMENTO");
-  if(feature) feature.innerHTML=active?`<div class="mission-active-feature"><div><p class="eyebrow">⚔️ ACONTECENDO AGORA</p><h2>${escapeHtml(missionLabel(active))}</h2><p>Encerra em <b>${escapeHtml(missionDate(active.end_at))}</b>.</p></div><button class="gold small" type="button" data-mission-scroll="${active.id}">Ver missão</button></div>`:"";
-  grid.innerHTML=arr.length?arr.map(m=>`<article class="mission-card ${m.status==="EM_ANDAMENTO"?"active":""}" id="mission-${m.id}"><div class="mission-card-top"><span class="tag">${escapeHtml(m.status)}</span><b>${escapeHtml(missionLabel(m))}</b></div><p>${escapeHtml(m.description||"Sem descrição publicada.")}</p><div class="mission-meta"><span>📅 ${escapeHtml(missionDate(m.start_at))}</span><span>⏳ ${escapeHtml(missionDate(m.end_at))}</span></div><div class="mission-instructions"><b>Instruções</b><p>${escapeHtml(m.instructions||"Consulte as instruções oficiais no Portal.")}</p></div><div class="mission-rewards">${m.reward_yuls?`🪙 ${money(m.reward_yuls)} Yuls`:""}${m.reward_exp?` ✨ ${money(m.reward_exp)} EXP`:""}${m.reward_cards?` 🃏 ${escapeHtml(m.reward_cards)}`:""}${!m.reward_yuls&&!m.reward_exp&&!m.reward_cards?"Sem recompensa cadastrada":""}</div></article>`).join(""):`<div class="panel"><h3>Nenhuma missão encontrada.</h3><p>Ajuste os filtros ou aguarde uma nova atividade oficial.</p></div>`;
-  qsa("[data-mission-scroll]").forEach(b=>b.onclick=()=>qs(`#mission-${b.dataset.missionScroll}`)?.scrollIntoView({behavior:"smooth",block:"center"}));
-}
-qs("#missionSearch")?.addEventListener("input",()=>renderMissionsPublic(state.missions));
-qs("#missionStatusFilter")?.addEventListener("change",()=>renderMissionsPublic(state.missions));
+<div class="mobile-quick-nav" id="mobileQuickNav" aria-label="Navegação rápida no celular">
+  <button type="button" data-page="home"><span>♠</span><small>Início</small></button>
+  <button type="button" data-page="jornal"><span>📰</span><small>Jornal</small></button>
+  <button type="button" data-page="cronograma"><span>📅</span><small>Agenda</small></button>
+  <button type="button" data-page="eventos"><span>🎪</span><small>Eventos</small></button>
+  <button type="button" id="mobileMenuBtn" aria-label="Abrir menu completo"><span>☰</span><small>Mais</small></button>
+</div>
 
-async function loadEvents(){
-  try{
-    const d=await api("/api/events");state.events=d.events||[];renderEvents(state.events);
-  }catch(e){
-    const g=qs("#eventGrid");if(g)g.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;
-  }
-}
-function renderEvents(items){
-  const feature=qs("#eventFeature"),grid=qs("#eventGrid");if(!grid)return;
-  const term=String(qs("#eventSearch")?.value||"").toLowerCase().trim();
-  const type=qs("#eventTypeFilter")?.value||"",status=qs("#eventStatusFilter")?.value||"";
-  const filtered=(items||[]).filter(e=>{
-    if(type&&e.event_type!==type)return false;
-    if(status&&e.status!==status)return false;
-    return !term||`${e.title} ${e.description} ${e.event_type}`.toLowerCase().includes(term);
-  });
-  const featured=(items||[]).find(e=>e.featured)||items?.find(e=>e.status==="ATIVO");
-  if(feature){
-    feature.innerHTML=featured?`<div class="event-feature">
-      <div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(featured.event_type))}</span><span class="event-status-pill ${eventStatusClass(featured.status)}">${escapeHtml(eventStatusLabel(featured.status))}</span></div>
-      <h2>${escapeHtml(featured.title)}</h2><p>${escapeHtml(featured.description||"")}</p>
-      <button class="gold small" type="button" data-event-open="${featured.id}">Ver evento</button>
-    </div>`:"";
-    qs("[data-event-open]")?.addEventListener("click",()=>openPublicEvent(Number(featured.id)));
-  }
-  grid.innerHTML=filtered.length?filtered.map(e=>`<article class="event-card" data-public-event="${e.id}">
-    <div class="event-card-cover" ${e.image_url?`style="background-image:url('${escapeHtml(e.image_url)}')"`:""}>${e.image_url?"":"♠"}</div>
-    <div class="event-card-body"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span></div>
-    <h3>${escapeHtml(e.title)}</h3><p>${escapeHtml((e.description||"").slice(0,150))}${(e.description||"").length>150?"…":""}</p></div>
-  </article>`).join(""):`<div class="panel"><p>Nenhum evento encontrado.</p></div>`;
-  qsa("[data-public-event]").forEach(b=>b.onclick=()=>openPublicEvent(Number(b.dataset.publicEvent)));
-}
-async function openPublicEvent(id){
-  let wrap=qs("#eventReader");if(!wrap){wrap=document.createElement("div");wrap.id="eventReader";wrap.className="event-public-modal";document.body.appendChild(wrap);}
-  wrap.style.display="block";wrap.innerHTML=`<div class="event-public-detail"><div class="event-public-head"><h2>Carregando...</h2></div></div>`;
-  try{
-    const d=await api(`/api/events/${id}`),e=d.event;
-    const actions=(d.actions||[]).map(a=>`<div class="event-action-public"><div><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.description||"")}</small></div><span>${a.points} pts</span></div>`).join("")||`<p style="font-size:10px;color:#888">Nenhuma ação cadastrada.</p>`;
-    const rewards=(d.card_rewards||[]).map(r=>`<div class="event-reward-public"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)}${e.event_type==="TEMPORADA"?` • ${r.points_cost} pontos`:""}${r.description?` • ${escapeHtml(r.description)}`:""}</small></div>${e.event_type==="TEMPORADA" && state.me?.account_type!=="ALLY"?`<button type="button" data-public-redeem="${r.card_id}">Resgatar</button>`:""}</div>`).join("")||(state.me?`<p style="font-size:10px;color:#888">Nenhum card disponível como recompensa.</p>`:`<p style="font-size:10px;color:#888">Recompensas em Cards estão visíveis somente a jogadores de Spade e Aliados.</p>`);
-    wrap.innerHTML=`<div class="event-public-detail">
-      <button class="journal-close" id="closeEventReader">×</button>
-      <div class="event-public-head"><div class="event-card-meta"><span class="event-type-pill">${escapeHtml(eventTypeLabel(e.event_type))}</span><span class="event-status-pill ${eventStatusClass(e.status)}">${escapeHtml(eventStatusLabel(e.status))}</span></div>
-      <h2>${escapeHtml(e.title)}</h2><p>${escapeHtml(e.description||"")}</p>${e.rules?`<div style="margin-top:12px;font-size:10px;color:#666;white-space:pre-line"><b>Regras:</b><br>${escapeHtml(e.rules)}</div>`:""}</div>
-      <div class="event-public-section"><h3>Como ganhar</h3><div class="event-action-list">${actions}</div></div>
-      <div class="event-public-section"><h3>Cards disponíveis</h3><div class="event-reward-list">${rewards}</div></div>
-    </div>`;
-    qs("#closeEventReader").onclick=()=>wrap.style.display="none";
-    wrap.onclick=e2=>{if(e2.target===wrap)wrap.style.display="none"};
-    qsa("[data-public-redeem]",wrap).forEach(b=>b.onclick=()=>redeemPublicEventCard(id,Number(b.dataset.publicRedeem)));
-  }catch(e){wrap.innerHTML=`<div class="event-public-detail"><div class="event-public-head"><button class="journal-close" id="closeEventReader">×</button><h2>Erro</h2><p>${escapeHtml(e.message)}</p></div></div>`;qs("#closeEventReader").onclick=()=>wrap.style.display="none"}
-}
-async function redeemPublicEventCard(eventId,cardId){
-  if(!state.me){alert("Entre no Portal para resgatar um card.");go("login");return}
-  try{
-    const r=await api(`/api/me/events/${eventId}/redeem`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_id:cardId})});
-    alert(`Card "${r.card.name}" resgatado com sucesso. Pontos restantes: ${r.points_remaining}.`);
-    await loadPlayerCards();
-    await openPublicEvent(eventId);
-  }catch(e){alert(e.message)}
-}
-
-async function loadEditions(){
-  try{
-    const d=state.data||await api("/api/home");
-    state.data=d;
-    const o=await api("/api/editorial/overview");
-    state.editorialOverview=o;
-    renderJournal(d.editions||[],d.news||[],o);
-  }catch(e){
-    const el=qs("#editions");if(el)el.innerHTML=`<div class="panel"><h3>Erro ao carregar o jornal</h3><p>${escapeHtml(e.message)}</p></div>`;
-  }
-}
-function renderEditorialStats(o){
-  const s=o?.stats||{};
-  const el=qs("#editorialStats");if(!el)return;
-  const cards=[["♟","Jogadores",s.players],["♜","Casas",s.houses],["⚔","Missões",s.missions],["◆","Eventos",s.events],["🃏","Cards ativos",s.cards],["🪙","Yuls em circulação",money(s.yuls)]];
-  el.innerHTML=cards.map(c=>`<div class="editorial-stat"><span>${c[0]}</span><small>${c[1]}</small><b>${c[2]}</b></div>`).join("");
-}
-function renderEditorialHouses(o){
-  const el=qs("#editorialHouses");if(!el)return;
-  el.innerHTML=(o?.houses||[]).map((h,i)=>`<button class="editorial-house-row" data-open-house-editorial="${h.id}" type="button"><span class="house-rank">${String(i+1).padStart(2,"0")}</span><span class="house-row-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="house-row-main"><b>${escapeHtml(h.name)}</b><small>${h.members} membros • ${h.missions} missões</small></span><strong>${money(h.yuls)} 🪙</strong></button>`).join("")||`<p style="font-size:9px;color:#888">Nenhuma Casa cadastrada.</p>`;
-  qsa("[data-open-house-editorial]").forEach(b=>b.onclick=()=>{go("casas");setTimeout(()=>openHouse(Number(b.dataset.openHouseEditorial)),50)});
-}
-function renderEditorialVoices(o){
-  const el=qs("#editorialVoices");if(!el)return;
-  el.innerHTML=(o?.voices||[]).map(v=>`<blockquote class="editorial-voice"><p>“${escapeHtml(v.message)}”</p><footer>${escapeHtml(v.nick)}${v.house?` • ${escapeHtml(v.house)}`:""}</footer></blockquote>`).join("")||`<div class="journal-empty-note">O mural ainda está silencioso.</div>`;
-}
-function renderJournalContents(articles){
-  const el=qs("#journalContents");if(!el)return;
-  el.innerHTML=(articles||[]).map((a,i)=>`<button type="button" class="journal-content-item" data-open-article-index="${i}"><span>${String(i+1).padStart(2,"0")}</span><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.category||"RPG")}${a.author?` • ${escapeHtml(a.author)}`:""}</small></div><em>→</em></button>`).join("")||`<p style="font-size:9px;color:#888">Esta edição ainda não possui matérias.</p>`;
-  qsa("[data-open-article-index]").forEach(b=>b.onclick=()=>openPublicArticle(Number(b.dataset.openArticleIndex),articles));
-}
-function renderJournalStories(articles){
-  const el=qs("#journalStories");if(!el)return;
-  const featured=(articles||[]).filter(a=>a.category!=="EDITORIAL");
-  el.innerHTML=featured.slice(0,8).map((a,i)=>`<article class="journal-story-card ${i<2?"large":""}"><div class="story-number">${String(i+1).padStart(2,"0")}</div><div class="story-copy"><span class="tag">${escapeHtml(a.category||"RPG")}</span><h3>${escapeHtml(a.title)}</h3><p>${escapeHtml(a.excerpt||"")}</p><button type="button" class="outline small" data-story-article="${a.id}">Ler matéria</button></div></article>`).join("")||`<div class="panel"><p>Nenhuma reportagem publicada.</p></div>`;
-  qsa("[data-story-article]").forEach(b=>b.onclick=()=>openPublicArticle(Number(b.dataset.storyArticle),articles));
-}
-function renderEditorialTimeline(){
-  const items=[
-    ["08 AGO","O começo","O novo Reino começa a reunir suas primeiras histórias."],
-    ["10 AGO","Primeiros desafios","Missões, exames e atividades colocam os jogadores em movimento."],
-    ["13 AGO","As Legiões","As primeiras forças organizadas começam a ganhar forma."],
-    ["21 AGO","Primeiro grande torneio","A competição passa a escrever seus primeiros resultados."],
-    ["23 AGO","Fichas e recompensas","A participação começa a alimentar o primeiro grande ciclo de trocas."],
-    ["26 AGO","A Forja","Criar também passa a fazer parte da história do Reino."],
-    ["31 AGO","Fim de um ciclo","Rankings e exames marcam o fechamento de agosto."],
-    ["02 SET","Nova fase","Administração, cargos e estrutura apontam para o próximo capítulo."]
-  ];
-  const el=qs("#journalTimeline");if(!el)return;
-  el.innerHTML=items.map((x,i)=>`<article class="timeline-item"><div class="timeline-dot">${String(i+1).padStart(2,"0")}</div><div class="timeline-date">${x[0]}</div><div class="timeline-copy"><h3>${x[1]}</h3><p>${x[2]}</p></div></article>`).join("");
-}
-function renderJournal(editions,news,o){
-  const feature=qs("#journalFeature"),editionEl=qs("#editions"),newsEl=qs("#journalNews"),latest=editions?.[0];
-  if(feature){
-    feature.innerHTML=latest?`<div class="journal-feature-cover ${latest.cover_url?"has-image":"fallback"}" ${latest.cover_url?`style="background-image:url('${escapeHtml(latest.cover_url)}')"`:""}>${latest.cover_url?"":`<span>♠</span><small>${escapeHtml(latest.edition||"EDIÇÃO 01")}</small><b>SPADE</b>`}</div><div class="journal-feature-info"><span class="journal-issue-label">${escapeHtml(latest.edition||"EDIÇÃO 01")} • ${escapeHtml(String(latest.date||""))}</span><h2>${escapeHtml(latest.title)}</h2><p>${escapeHtml(latest.description||"")}</p><div class="actions"><button class="gold" type="button" data-journal-open-latest="${latest.id}">Ler edição</button>${latest.pdf_url?`<a class="outline" href="${escapeHtml(latest.pdf_url)}" target="_blank" rel="noopener">PDF</a>`:""}</div><div class="journal-feature-foot"><span>${Number(latest.article_count||0)} matérias</span><span>EDIÇÃO DIGITAL</span></div></div>`:`<div class="panel"><h3>O jornal ainda não possui uma edição.</h3><p>As próximas edições serão publicadas pela administração.</p></div>`;
-    qs("[data-journal-open-latest]")?.addEventListener("click",()=>openPublicEdition(Number(qs("[data-journal-open-latest]").dataset.journalOpenLatest)));
-  }
-  // Use the current edition's article list in the index; fetch asynchronously.
-  renderEditorialStats(o);renderEditorialHouses(o);renderEditorialVoices(o);renderEditorialTimeline();
-  if(latest){
-    api(`/api/journal/editions/${latest.id}`).then(d=>{
-      renderJournalContents(d.articles||[]);renderJournalStories(d.articles||[]);
-      const first=d.articles?.find(a=>a.category==="EDITORIAL")||d.articles?.[0];
-      if(first){qs("#journalLetterTitle").textContent=first.title;qs("#journalLetterText").textContent=first.excerpt||first.body?.slice(0,220)||"";qs("#journalReadEditorial")?.addEventListener("click",()=>openPublicArticle(Number(first.id),d.articles));}
-    }).catch(()=>{});
-  }else{renderJournalContents([]);renderJournalStories([])}
-  if(editionEl){
-    editionEl.innerHTML=editions?.length?editions.map(e=>`<article class="edition"><div class="edition-cover ${e.cover_url?"has-image":""}" ${e.cover_url?`style="background-image:url('${escapeHtml(e.cover_url)}')"`:""}>${e.cover_url?"":`<span>♠</span><small>${escapeHtml(e.edition||"EDIÇÃO")}</small><b>SPADE</b><em>${escapeHtml(String(e.date||""))}</em>`}</div><h3>${escapeHtml(e.title)}</h3><p>${escapeHtml(e.description||"")}</p><small class="edition-card-meta">${Number(e.article_count||0)} matéria(s)</small><div class="actions"><button class="gold small journal-edition-open" type="button" data-open-edition="${e.id}">Ler edição</button>${e.pdf_url?`<a class="outline small" href="${escapeHtml(e.pdf_url)}" target="_blank" rel="noopener">PDF</a>`:""}</div></article>`).join(""):`<div class="panel"><h3>Nenhuma edição publicada.</h3></div>`;
-    qsa("[data-open-edition]").forEach(b=>b.onclick=()=>openPublicEdition(Number(b.dataset.openEdition)));
-  }
-  if(newsEl){newsEl.innerHTML=news?.length?news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt||"")}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada.</h3></div>`}
-}
-function openPublicArticle(id,articles){
-  let a=(articles||[]).find(x=>Number(x.id)===id);
-  if(!a && Array.isArray(articles))a=(articles||[]).find(x=>Number(x.id)===Number(id));
-  if(!a)return;
-  let wrap=qs("#journalEditionReader");
-  if(!wrap){wrap=document.createElement("div");wrap.id="journalEditionReader";wrap.className="journal-public-article-wrap";document.body.appendChild(wrap)}
-  wrap.style.display="block";
-  wrap.innerHTML=`<div class="journal-public-article journal-article-reader"><button class="journal-close" id="closeArticleReader">×</button><div class="journal-article-reader-head"><span class="tag">${escapeHtml(a.category||"RPG")} • ${escapeHtml(String(a.date||""))}</span><h2>${escapeHtml(a.title)}</h2>${a.subtitle?`<div class="article-subtitle">${escapeHtml(a.subtitle)}</div>`:""}<div class="article-meta">Por ${escapeHtml(a.author||"Redação")}</div></div><div class="article-body article-prose">${escapeHtml(a.body||a.excerpt||"")}</div></div>`;
-  qs("#closeArticleReader").onclick=()=>wrap.style.display="none";
-  wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
-}
-async function loadPlayers(){
-  const d=await api("/api/players");state.players=d.players;renderPlayers("");
-  qs("#playerSearch").oninput=e=>renderPlayers(e.target.value);
-}
-function renderPlayers(term){
-  const t=term.trim().toLowerCase();const p=(state.players||[]).filter(x=>`${x.nick} ${x.identifier} ${x.house}`.toLowerCase().includes(t));
-  qs("#playerGrid").innerHTML=p.map(x=>`<article class="player-card"><h3>${escapeHtml(displayPlayerName(x))}</h3><p><b>Casa:</b> ${escapeHtml(x.house||"—")}<br><b>Patente:</b> ${escapeHtml(x.patent)}</p><div class="public-role-chips">${(x.roles||[]).map(r=>`<span class="public-role-chip">${escapeHtml(r.name)}${r.rank_code?` • Rank ${escapeHtml(r.rank_code)}`:""}</span>`).join("")||`<span class="tag">Nenhum cargo</span>`}</div><p><b>Missões:</b> ${x.missions}<br><b>Yuls:</b> 🪙 ${money(x.yuls)}</p><button class="gold small public-profile-button" type="button" data-public-player="${x.id}">Ver ficha</button></article>`).join("")||`<div class="panel"><h3>Nenhum jogador encontrado.</h3></div>`;
-  qsa("[data-public-player]").forEach(b=>b.onclick=()=>openPublicPlayer(Number(b.dataset.publicPlayer)));
-}
-async function loadHouses(){
-  try{
-    const d=await api("/api/houses");
-    state.houses=d.houses||[];
-    renderHouses(state.houses);
-  }catch(e){
-    qs("#houseGrid").innerHTML=`<div class="house-empty">${escapeHtml(e.message)}</div>`;
-  }
-}
-function renderHouses(houses){
-  const grid=qs("#houseGrid");
-  const detail=qs("#houseDetail");
-  if(!grid||!detail)return;
-  grid.innerHTML=houses.length
-    ? houses.map(h=>`<button type="button" class="house-public-card" data-house-id="${h.id}">
-        <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
-        <h3>${escapeHtml(h.name)}</h3>
-        <p>${escapeHtml(h.description||"Casa do Reino Spade.")}</p>
-        ${h.motto?`<div class="house-motto">“${escapeHtml(h.motto)}”</div>`:""}
-        <div class="house-meta"><span>${h.count} membros</span><span>${h.missions} missões</span><span>🪙 ${money(h.yuls)}</span></div>
-      </button>`).join("")
-    : `<div class="house-empty">Nenhuma Casa cadastrada.</div>`;
-  qsa("[data-house-id]").forEach(b=>b.addEventListener("click",()=>openHouse(Number(b.dataset.houseId))));
-  detail.innerHTML="";
-}
-
-async function openHouse(id){
-  const detail=qs("#houseDetail");
-  if(!detail)return;
-  detail.innerHTML=`<div class="house-detail"><p class="eyebrow">CARREGANDO CASA</p><h2>Consultando os registros...</h2></div>`;
-  try{
-    const d=await api(`/api/houses/${id}`),h=d.house;
-    qsa(".house-public-card").forEach(x=>x.classList.toggle("selected",Number(x.dataset.houseId)===id));
-    detail.innerHTML=`<div class="house-detail">
-      <div class="house-back"><button type="button" id="closeHouse">← Voltar para Casas</button></div>
-      <div class="house-detail-head">
-        <div class="house-detail-ident">
-          <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
-          <div><p class="eyebrow">CASA</p><h2>${escapeHtml(h.name)}</h2><p class="lead-house">${escapeHtml(h.description||"")}</p></div>
-        </div>
-        <div style="text-align:right"><small style="color:#777;font-size:8px;letter-spacing:.12em;text-transform:uppercase">Liderança</small><div style="font-size:11px;margin-top:6px">${escapeHtml(h.leader||"Não definida")}</div><div style="color:#888;font-size:10px;margin-top:3px">${h.vice_leader?`Vice: ${escapeHtml(h.vice_leader)}`:"Vice-liderança não definida"}</div></div>
+<main id="mainContent" tabindex="-1">
+<section class="page active" id="home">
+  <div class="hero"><div><p class="eyebrow magic-kicker">BLACK CLOVER RPG • PORTAL OFICIAL DO REINO SPADE</p><h1>A história do RPG<br><em>vive aqui.</em></h1><p class="lead">Jornal, jogadores, Casas, rankings e os grandes acontecimentos do Reino em um só lugar.</p><div class="magic-traits"><span>✦ Mana</span><span>♣ Grimórios</span><span>♠ Casas</span><span>⚔️ Magia</span></div><div class="actions"><button class="gold" data-page="guia">Conhecer o RPG</button><button class="outline" data-page="login">Entrar no Reino</button></div>
+<div class="welcome-note"><p class="eyebrow">BEM-VINDO A SPADE</p><p>Antes de entrar para as Casas, conhecer os Cards ou buscar seu primeiro Grimório, reserve alguns minutos para entender como o Reino funciona e descobrir o caminho que você poderá construir aqui.</p></div></div><div class="magic-crest" aria-hidden="true"><div class="magic-ring ring-a"></div><div class="magic-ring ring-b"></div><div class="magic-rune">♣</div><div class="magic-star">✦</div></div><div class="seal">♠<small>REINO SPADE<br>PORTAL OFICIAL</small></div></div>
+  <div class="content"><div id="homeActiveActivities"></div><div class="section-head"><div><p class="eyebrow">DESTAQUES</p><h2>Últimas notícias</h2></div></div><div id="newsGrid" class="news-grid"></div>
+  <div class="split"><div class="panel"><p class="eyebrow">EDIÇÃO ATUAL</p><h3 id="homeEditionTitle">Carregando...</h3><p id="editionDesc"></p><button class="gold small" data-page="jornal">Abrir jornal</button></div><div class="panel"><p class="eyebrow">REINO</p><h3>O portal está vivo.</h3><p>As páginas públicas serão alimentadas pelos dados que você cadastrar no painel administrativo.</p></div></div></div>
+</section>
+<section class="page" id="guia">
+  <div class="guide-hero">
+    <div class="guide-hero-copy">
+      <p class="eyebrow">GUIA DO NOVATO • REINO SPADE</p>
+      <h1>Bem-vindo, <em>Mago.</em></h1>
+      <p class="guide-intro">Você não precisa conhecer todo o Reino antes de começar. Esta é a primeira página da sua jornada: uma apresentação para que você entenda onde está, como chegou até aqui e quais caminhos estarão diante de você.</p>
+      <div class="guide-actions">
+        <button class="gold" type="button" data-guide-scroll="como-comeca">Começar pelo essencial</button>
+        <button class="outline" type="button" data-guide-scroll="casas-iniciais">Conhecer as Casas</button>
       </div>
-      <div class="house-stats"><div class="house-stat"><small>Membros</small><b>${h.count}</b></div><div class="house-stat"><small>Missões</small><b>${h.missions}</b></div><div class="house-stat"><small>Yuls somados</small><b>🪙 ${money(h.yuls)}</b></div></div>
-      ${h.motto?`<div class="house-motto house-motto-dark">“${escapeHtml(h.motto)}”</div>`:""}
-      <div class="house-institution-grid">
-        <div><small>HISTÓRIA</small><p>${escapeHtml(h.history||"A história desta Casa ainda está sendo registrada no Portal.")}</p></div>
-        <div><small>OBJETIVOS</small><p>${escapeHtml(h.goals||"Nenhum objetivo publicado.")}</p></div>
-        <div><small>CONQUISTAS</small><p>${escapeHtml(h.achievements||"Nenhuma conquista registrada ainda.")}</p></div>
-      </div>
-      <div class="house-timeline"><h3>Linha do tempo</h3>${(h.timeline||[]).length?h.timeline.map(x=>`<div class="house-timeline-item"><span>${escapeHtml(x.event_date||"")}</span><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.event_type||"REGISTRO")}</small><p>${escapeHtml(x.description||"")}</p></div></div>`).join(""):`<p style="color:#888;font-size:10px">Ainda não há registros históricos publicados.</p>`}</div>
-      <div class="house-members"><h3>Membros da Casa</h3>
-        ${h.members.length?h.members.map(p=>`<div class="house-member-row"><div class="member-main"><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.patent||"")} ${p.role?`• ${escapeHtml(p.role)}`:""}</small></div><div class="member-values"><span>📋 ${p.missions} missões</span><span>🪙 ${money(p.yuls)} Yuls ${p.ranking>0?`• #${p.ranking}`:""}</span></div></div>`).join(""):`<div style="color:#888;font-size:11px;padding:10px 0">Nenhum membro público cadastrado.</div>`}
-      </div>
-    </div>`;
-    qs("#closeHouse").addEventListener("click",()=>{detail.innerHTML="";qsa(".house-public-card").forEach(x=>x.classList.remove("selected"));});
-    detail.scrollIntoView({behavior:"smooth",block:"start"});
-  }catch(e){
-    detail.innerHTML=`<div class="house-empty">${escapeHtml(e.message)}</div>`;
-  }
-}
-let rankingData={force:[],activity:[],missions:[],wealth:[],houses:[]};
-let activeRanking="force";
-
-async function loadHierarchy(){
-  try{
-    const d=await api("/api/hierarchy");
-    renderPublicHierarchy(d);
-    state.hierarchy=d;
-  }catch(e){
-    const p=qs("#publicPatents"),r=qs("#publicRoles");
-    if(p)p.innerHTML=`<div class="hierarchy-item"><p>${escapeHtml(e.message)}</p></div>`;
-    if(r)r.innerHTML=`<div class="hierarchy-item"><p>${escapeHtml(e.message)}</p></div>`;
-  }
-}
-
-function renderPublicHierarchy(d){
-  const p=qs("#publicPatents"), r=qs("#publicHierarchyRoles"), ro=qs("#publicRolesOccupants");
-  const patentHtml=(d.patents||[]).map(x=>`<article class="hierarchy-item public-patent-card" data-public-patent="${x.id}" style="cursor:pointer"><div class="role-meta"><span class="role-pill">🎖️ PATENTE</span><span class="role-pill">${Number(x.occupant_count||0)} ocupante(s)</span></div><h4>${escapeHtml(x.name)}</h4><p>${escapeHtml(x.description||"")}</p></article>`).join("")||`<div class="hierarchy-item"><p>Nenhuma patente cadastrada.</p></div>`;
-  if(p)p.innerHTML=patentHtml;
-
-  const ranks=d.ranks||[],roles=d.roles||[],rankNames={"I":"ADMINISTRAÇÃO","II":"GESTÃO","III":"COORDENAÇÃO","IV":"ESPECIALIZAÇÃO","V":"OPERACIONAL"};
-  if(qs("#rankSummary"))qs("#rankSummary").innerHTML=ranks.map(x=>`<button type="button" class="rank-summary-card" data-rank-scroll="${x.code}"><b>RANK ${escapeHtml(x.code)}</b><span>${escapeHtml(rankNames[x.code]||x.name)} • ${roles.filter(r=>r.rank_code===x.code).length} cargo(s)</span></button>`).join("");
-  if(qs("#publicRanks"))qs("#publicRanks").innerHTML=ranks.map(x=>`<section class="public-rank-card" id="rank-${escapeHtml(x.code)}"><div class="public-rank-code">${escapeHtml(x.code)}</div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.description||"")}</p><div class="public-rank-req"><b>Requisitos do Rank:</b><br>${escapeHtml(x.requirements||"")}</div></section>`).join("");
-  qsa("[data-rank-scroll]").forEach(b=>b.onclick=()=>qs("#rank-"+b.dataset.rankScroll)?.scrollIntoView({behavior:"smooth",block:"start"}));
-
-  const rolesHtml=roles.length?roles.map(x=>`<article class="public-role-card" data-public-role="${x.id}"><div class="role-meta"><span class="role-pill">RANK ${escapeHtml(x.rank_code||"—")}</span>${x.vacancies?`<span class="role-pill">${escapeHtml(x.vacancies)}</span>`:""}<span class="role-pill">${Number(x.occupant_count||0)} ocupante(s)</span>${x.scope?`<span class="role-pill">${escapeHtml(x.scope)}</span>`:""}</div><h4>${escapeHtml(x.name)}</h4><small>${escapeHtml(x.description||"Clique para ver detalhes e ocupantes.")}</small></article>`).join(""):`<div class="hierarchy-item"><p>Nenhum cargo cadastrado.</p></div>`;
-  if(r)r.innerHTML=rolesHtml;
-  if(ro)ro.innerHTML=rolesHtml;
-  qsa("[data-public-role]").forEach(b=>b.onclick=()=>openPublicRole(Number(b.dataset.publicRole)));
-  qsa("[data-public-patent]").forEach(b=>b.onclick=()=>openPublicPatent(Number(b.dataset.publicPatent)));
-}
-
-async function openPublicRole(id){
-  let wrap=qs("#roleDetailReader");
-  if(!wrap){wrap=document.createElement("div");wrap.id="roleDetailReader";wrap.className="role-detail-modal";document.body.appendChild(wrap)}
-  wrap.style.display="block";wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closeRoleDetail">×</button><h2>Carregando...</h2></div></div>`;
-  try{
-    const d=await api(`/api/roles/${id}`),r=d.role;
-    wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closeRoleDetail">×</button><div class="role-meta"><span class="role-pill">RANK ${escapeHtml(r.rank_code)}</span>${r.vacancies?`<span class="role-pill">${escapeHtml(r.vacancies)}</span>`:""}${r.scope?`<span class="role-pill">${escapeHtml(r.scope)}</span>`:""}</div><h2>${escapeHtml(r.name)}</h2><p>${escapeHtml(r.description||"")}</p></div><div class="role-detail-body">
-      <div class="role-detail-block"><h4>Detalhamento / responsabilidades</h4><p>${escapeHtml(r.description||"Não informado.")}</p></div>
-      <div class="role-detail-block"><h4>Vagas</h4><p>${escapeHtml(r.vacancies||"Não informadas.")}</p></div>
-      <div class="role-detail-block"><h4>Remuneração</h4><p>${escapeHtml(r.payment_mode||"")}${r.payment_mode&&r.remuneration_detail?"\n":""}${escapeHtml(r.remuneration_detail||"Não informada.")}</p></div>
-      <div class="role-detail-block"><h4>Requisitos / condições</h4><p>${escapeHtml(r.requirements||"Não informados.")}</p></div>
-      <div class="role-detail-block"><h4>Requisitos do Rank</h4><p>${escapeHtml(r.rank_requirements||"Não informados.")}</p></div>
-      <div class="role-detail-block"><h4>Benefícios / bônus</h4><p>${escapeHtml(r.benefits||"Não informado.")}</p></div>
-      <div class="role-detail-block role-occupants-block"><h4>Quem ocupa este cargo</h4>${(r.occupants||[]).length?`<div class="role-occupants-list">${r.occupants.map(p=>`<div class="role-occupant"><b>${escapeHtml(p.nick)}</b><small>${escapeHtml(p.house||"Sem Casa")} • ${escapeHtml(p.patent||"Sem patente")}</small></div>`).join("")}</div>`:`<p>Nenhum ocupante público cadastrado.</p>`}</div>
-    </div></div>`;
-    qs("#closeRoleDetail").onclick=()=>wrap.style.display="none";wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
-  }catch(e){wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closeRoleDetail">×</button><h2>Erro</h2><p>${escapeHtml(e.message)}</p></div></div>`;qs("#closeRoleDetail").onclick=()=>wrap.style.display="none"}
-}
-
-async function openPublicPatent(id){
-  let wrap=qs("#patentDetailReader");
-  if(!wrap){wrap=document.createElement("div");wrap.id="patentDetailReader";wrap.className="role-detail-modal";document.body.appendChild(wrap)}
-  wrap.style.display="block";wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closePatentDetail">×</button><h2>Carregando...</h2></div></div>`;
-  try{
-    const d=await api(`/api/patents/${id}`),p=d.patent;
-    wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closePatentDetail">×</button><div class="role-meta"><span class="role-pill">🎖️ PATENTE</span><span class="role-pill">${(p.occupants||[]).length} ocupante(s)</span></div><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.description||"")}</p></div><div class="role-detail-body"><div class="role-detail-block"><h4>Descrição</h4><p>${escapeHtml(p.description||"Não informada.")}</p></div><div class="role-detail-block role-occupants-block"><h4>Quem ocupa esta patente</h4>${(p.occupants||[]).length?`<div class="role-occupants-list">${p.occupants.map(x=>`<div class="role-occupant"><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||"Sem Casa")} • ${escapeHtml(x.grimoire||"Grimório não informado")}</small></div>`).join("")}`:`<p>Nenhum ocupante público cadastrado.</p>`}</div></div></div>`;
-    qs("#closePatentDetail").onclick=()=>wrap.style.display="none";wrap.onclick=e=>{if(e.target===wrap)wrap.style.display="none"};
-  }catch(e){wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closePatentDetail">×</button><h2>Erro</h2><p>${escapeHtml(e.message)}</p></div></div>`;qs("#closePatentDetail").onclick=()=>wrap.style.display="none"}
-}
-
-async function loadAdminHierarchy(){
-  try{
-    const d=await adminApi("/api/admin/hierarchy");
-    state.adminHierarchy=d;
-    renderAdminHierarchy(d);
-    return d;
-  }catch(e){console.error(e);return null}
-}
-
-function renderAdminHierarchy(d){
-  const patentList=qs("#adminPatentList"),roleList=qs("#adminRoleList");
-  if(patentList)patentList.innerHTML=(d.patents||[]).map(x=>`<div class="hier-list-item"><div><b>🎖️ ${escapeHtml(x.name)}</b><small>Ordem: ${x.sort_order}${x.description?` • ${escapeHtml(x.description)}`:""}</small></div><div class="hier-actions"><button type="button" data-patent-edit="${x.id}">✎</button><button type="button" class="delete" data-patent-delete="${x.id}">×</button></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma patente cadastrada.</div>`;
-  if(roleList)roleList.innerHTML=(d.roles||[]).map(x=>`<div class="hier-list-item"><div><b>👑 ${escapeHtml(x.name)}</b><small>Rank ${escapeHtml(x.rank_code||"—")} • ${escapeHtml(x.vacancies||"Vagas não informadas")} • ${escapeHtml(x.payment_mode||"")}${x.description?` • ${escapeHtml(x.description)}`:""}</small></div><div class="hier-actions"><button type="button" data-role-edit="${x.id}">✎</button><button type="button" class="delete" data-role-delete="${x.id}">×</button></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhum cargo cadastrado.</div>`;
-
-  qsa("[data-patent-edit]").forEach(b=>b.onclick=()=>editPatent(Number(b.dataset.patentEdit)));
-  qsa("[data-patent-delete]").forEach(b=>b.onclick=()=>deletePatent(Number(b.dataset.patentDelete)));
-  qsa("[data-role-edit]").forEach(b=>b.onclick=()=>editRole(Number(b.dataset.roleEdit)));
-  qsa("[data-role-delete]").forEach(b=>b.onclick=()=>deleteRole(Number(b.dataset.roleDelete)));
-}
-
-function resetPatentForm(){
-  const f=qs("#patentForm");if(!f)return;
-  f.reset();qs("#patentId").value="";qs("#patentOrder").value="0";
-  qs("#patentSaveBtn").textContent="Criar patente";qs("#patentError").textContent="";
-}
-function resetRoleForm(){
-  const f=qs("#roleForm");if(!f)return;
-  f.reset();qs("#roleId").value="";qs("#roleRank").value="V";qs("#roleSalary").value="0";qs("#roleOrder").value="0";qs("#roleActive").checked=true;
-  qs("#roleSaveBtn").textContent="Criar cargo";qs("#roleError").textContent="";
-}
-function editPatent(id){
-  const x=(state.adminHierarchy?.patents||[]).find(a=>Number(a.id)===id);if(!x)return;
-  qs("#patentId").value=x.id;qs("#patentName").value=x.name;qs("#patentOrder").value=x.sort_order;qs("#patentDescription").value=x.description||"";
-  qs("#patentSaveBtn").textContent="Salvar patente";qs("#patentError").textContent="";qs("#patentName").focus();
-}
-function editRole(id){
-  const x=(state.adminHierarchy?.roles||[]).find(a=>Number(a.id)===id);if(!x)return;
-  qs("#roleId").value=x.id;qs("#roleName").value=x.name;qs("#roleRank").value=x.rank_code||"V";qs("#roleVacancies").value=x.vacancies||"";qs("#rolePaymentMode").value=x.payment_mode||"";qs("#roleSalary").value=x.salary;qs("#roleOrder").value=x.sort_order;qs("#roleDescription").value=x.description||"";qs("#roleRemuneration").value=x.remuneration_detail||"";qs("#roleRequirements").value=x.requirements||"";qs("#roleBenefits").value=x.benefits||"";qs("#roleScope").value=x.scope||"";qs("#roleActive").checked=Number(x.active??1)===1;
-  qs("#roleSaveBtn").textContent="Salvar cargo";qs("#roleError").textContent="";qs("#roleName").focus();
-}
-async function deletePatent(id){
-  const x=(state.adminHierarchy?.patents||[]).find(a=>Number(a.id)===id);if(!x)return;
-  if(!confirm(`Excluir a patente ${x.name}?`))return;
-  try{await adminApi(`/api/admin/patents/${id}`,{method:"DELETE"});await loadAdminHierarchy();await loadAdminEditorial();await loadHierarchy();alert("Patente excluída.")}catch(e){alert(e.message)}
-}
-async function deleteRole(id){
-  const x=(state.adminHierarchy?.roles||[]).find(a=>Number(a.id)===id);if(!x)return;
-  if(!confirm(`Excluir o cargo ${x.name}?`))return;
-  try{await adminApi(`/api/admin/roles/${id}`,{method:"DELETE"});await loadAdminHierarchy();await loadHierarchy();alert("Cargo excluído.")}catch(e){alert(e.message)}
-}
-
-async function openPublicPlayer(id){
-  const wrap=qs("#publicPlayerDetail");
-  if(!wrap)return;
-  wrap.classList.add("open");
-  wrap.innerHTML=`<div class="public-player-detail"><p>Carregando ficha...</p></div>`;
-  try{
-    const d=await api(`/api/players/${id}`);
-    const p=d.player;
-    const roles=(p.roles||[]).map(r=>`<span class="public-role-chip">${escapeHtml(r.name)}</span>`).join("")||`<span class="tag">Nenhum cargo</span>`;
-    const missions=(d.mission_summary?.recent||[]).map(m=>`<div class="public-player-mission"><div><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.status)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""} • ${escapeHtml(String(m.completed_at||""))}</small></div><span>${m.reward_yuls>0?`🪙 +${money(m.reward_yuls)}`:""}</span></div>`).join("")||`<p style="color:#888;font-size:10px">Nenhuma missão recente.</p>`;
-    wrap.innerHTML=`<div class="public-player-detail">
-      <div class="public-player-detail-head"><div><p class="eyebrow">FICHA PÚBLICA</p><h2>${escapeHtml(displayPlayerName(p))}</h2><p>Perfil público do Reino Spade</p></div><button class="public-player-close" type="button" id="closePublicPlayer">×</button></div>
-      <div class="public-sheet-grid">
-        <div class="public-sheet-card"><span>🏰 Casa</span><b>${escapeHtml(p.house||"Não definida")}</b></div>
-        <div class="public-sheet-card"><span>🎖️ Patente</span><b>${escapeHtml(p.patent||"Não definida")}</b></div>
-        <div class="public-sheet-card"><span>📜 Grimório</span><b>${escapeHtml(p.grimoire||"Não definido")}</b></div>
-        <div class="public-sheet-card public-sheet-wide"><span>👑 Cargos</span><div class="public-role-chips" style="margin-top:7px">${roles}</div></div>
-        <div class="public-sheet-card"><span>⚔️ Força</span><b>${p.power}</b></div>
-        <div class="public-sheet-card"><span>📋 Missões</span><b>${p.missions}</b></div>
-        <div class="public-sheet-card"><span>🏆 Conquistas</span><b>${p.achievements}</b></div>
-        <div class="public-sheet-card"><span>🪙 Yuls</span><b>${money(p.yuls)}</b></div>
-        <div class="public-sheet-card"><span>🏆 Ranking</span><b>${p.ranking>0?"#"+p.ranking:"—"}</b></div>
-      </div>
-      <div class="public-player-missions"><h3>Atividade recente</h3>${missions}</div>
-    </div>`;
-    qs("#closePublicPlayer").onclick=()=>wrap.classList.remove("open");
-    wrap.onclick=e=>{if(e.target===wrap)wrap.classList.remove("open")};
-  }catch(e){
-    wrap.innerHTML=`<div class="public-player-detail"><button class="public-player-close" type="button" id="closePublicPlayer">×</button><p style="margin-top:35px">${escapeHtml(e.message)}</p></div>`;
-    qs("#closePublicPlayer").onclick=()=>wrap.classList.remove("open");
-  }
-}
-
-async function loadRanking(){
-  try{
-    const d=await api("/api/rankings"); rankingData=d; await renderRanking(activeRanking);
-    qsa(".ranking-tab").forEach(b=>{b.onclick=async()=>{activeRanking=b.dataset.rankingTab;await renderRanking(activeRanking)}});
-    await loadRankingPlayerActions();
-  }catch(e){qs("#rankingBody").innerHTML=`<tr><td colspan="5">${escapeHtml(e.message)}</td></tr>`;}
-}
-
-async function renderRanking(type){
-  const body=qs("#rankingBody"), info=qs("#rankingExplainer"); if(!body)return;
-  qsa(".ranking-tab").forEach(b=>b.classList.toggle("active",b.dataset.rankingTab===type));
-  const descriptions={force:"Poder é o valor atual cadastrado para o jogador. A automação pelo catálogo de Cards será consolidada no módulo de Cards.",skill_sc:"Skill em SC é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",skill_vt:"Skill em VT é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",activity:"Atividade considera missões e conquistas registradas no sistema.",missions:"Classificação pela quantidade de missões concluídas.",wealth:"Classificação pelo saldo atual de Yuls.",houses:"Classificação das Casas pelo poder somado dos seus membros."};
-  info.textContent=descriptions[type]||"";
-  if(type==="houses"){const rows=rankingData.houses||[];body.innerHTML=rows.length?rows.map((h,i)=>`<tr><td><span class="rank-number">${i+1}</span></td><td><div class="house-rank-main"><span class="house-rank-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="rank-main">${escapeHtml(h.name)}<small>${h.members} membros</small></span></div></td><td class="rank-house">${h.leader?`Líder: ${escapeHtml(h.leader)}`:"Sem líder definida"}</td><td class="rank-secondary">⚔️ ${h.power.toLocaleString("pt-BR")}</td><td class="rank-secondary">📋 ${h.missions}</td></tr>`).join(""):`<tr><td colspan="5">Nenhuma Casa cadastrada.</td></tr>`;return;}
-  const rows=rankingData[type]||[];body.innerHTML=rows.length?rows.map((p,i)=>{let main="",secondary="";if(type==="force"){main=`⚔️ ${p.power.toLocaleString("pt-BR")}`;secondary=`📋 ${p.missions} missões`;}if(type==="skill_sc"){main=`⚔️ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em SC";}if(type==="skill_vt"){main=`⚡ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em VT";}if(type==="activity"){main=`⭐ ${(p.missions+p.achievements*3).toLocaleString("pt-BR")}`;secondary=`🏆 ${p.achievements} conquistas`;}if(type==="missions"){main=`📋 ${p.missions}`;secondary=`🪙 ${money(p.yuls)} Yuls`;}if(type==="wealth"){main=`🪙 ${money(p.yuls)}`;secondary=`📋 ${p.missions} missões`;}return `<tr><td><span class="rank-number">${i+1}</span></td><td><div class="rank-main">${escapeHtml(displayPlayerName(p))}<small>${escapeHtml(p.identifier)}</small></div></td><td class="rank-house">${escapeHtml(p.house||"Sem Casa")}</td><td class="rank-secondary">${main}</td><td class="rank-secondary">${secondary}</td></tr>`;}).join(""):`<tr><td colspan="5">Nenhum jogador disponível.</td></tr>`;
-}
-
-async function loadRankingPlayerActions(){
-  const el=qs("#rankingPlayerActions");if(!el)return;
-  if(!state.me){el.innerHTML=`<div class="ranking-note">Entre no Portal para registrar e acompanhar suas batalhas de SC e VT.</div>`;return;}
-  try{const d=await api("/api/ranking-players"),b=await api("/api/me/ranking-battles");state.rankingPlayers=d.players||[];state.rankingBattles=b.battles||[];const opponents=state.rankingPlayers.filter(x=>Number(x.id)!==Number(state.me.id));el.innerHTML=`<div class="ranking-battle-box"><div><p class="eyebrow">BATALHA OFICIAL</p><h3>Registrar resultado para avaliação</h3><p>O adversário deverá confirmar. Depois, a Administração define as pontuações finais — nenhuma fórmula é presumida pelo Portal.</p></div><form id="rankingBattleForm" class="ranking-battle-form"><select id="battleType" required><option value="SC">Skill em SC</option><option value="VT">Skill em VT</option></select><select id="battleOpponent" required><option value="">Escolha o adversário</option>${opponents.map(x=>`<option value="${x.id}">${escapeHtml(x.nick)}${x.house?` — ${escapeHtml(x.house)}`:""}</option>`).join("")}</select><select id="battleResult"><option value="CHALLENGER">Vitória</option><option value="OPPONENT">Derrota</option><option value="EMPATE">Empate</option></select><input id="battleProof" placeholder="Link da prova (opcional)"><input id="battleNotes" placeholder="Observações (opcional)"><button class="gold" type="submit">⚔️ Enviar batalha</button><span class="error" id="battleError"></span></form><div class="ranking-my-battles"><b>Meus registros</b>${state.rankingBattles.slice(0,8).map(x=>`<div class="my-battle-row"><span><b>${x.ranking_type}</b> • ${escapeHtml(x.challenger_nick)} × ${escapeHtml(x.opponent_nick)}</span><small>${escapeHtml(x.status)}${x.opponent_id===state.me.id&&x.status==="AGUARDANDO_OPONENTE"?` <button type="button" data-confirm-battle="${x.id}">Confirmar</button>`:""}</small></div>`).join("")||`<small>Nenhum registro ainda.</small>`}</div></div>`;qs("#rankingBattleForm").onsubmit=async e=>{e.preventDefault();const err=qs("#battleError");err.textContent="";try{await api("/api/ranking-battles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ranking_type:qs("#battleType").value,opponent_id:Number(qs("#battleOpponent").value),result:qs("#battleResult").value,proof_url:qs("#battleProof").value,notes:qs("#battleNotes").value})});await loadRanking();}catch(ex){err.textContent=ex.message;}};qsa("[data-confirm-battle]").forEach(btn=>btn.onclick=async()=>{try{await api(`/api/ranking-battles/${btn.dataset.confirmBattle}/confirm`,{method:"POST"});await loadRanking();}catch(ex){alert(ex.message)}});
-  }catch(e){el.innerHTML=`<div class="ranking-note">${escapeHtml(e.message)}</div>`;}
-}
-
-async function loadAdminRankingBattles(){const list=qs("#adminRankingBattleList");if(!list)return;try{const status=qs("#adminRankingBattleStatus")?.value||"AGUARDANDO_ADMIN";const d=await adminApi(`/api/admin/ranking-battles?status=${encodeURIComponent(status)}`);state.adminRankingBattles=d.battles||[];list.innerHTML=state.adminRankingBattles.length?state.adminRankingBattles.map(x=>`<div class="admin-battle-row"><div><b>${escapeHtml(x.ranking_type)} • ${escapeHtml(x.challenger_nick)} × ${escapeHtml(x.opponent_nick)}</b><small>${escapeHtml(x.status)} • Resultado: ${escapeHtml(x.result)} • Antes: ${x.challenger_score_before} × ${x.opponent_score_before}</small>${x.proof_url?`<a href="${escapeHtml(x.proof_url)}" target="_blank" rel="noopener">Abrir prova</a>`:""}</div>${x.status==="AGUARDANDO_ADMIN"?`<div class="admin-battle-actions"><input type="number" min="0" id="cs-${x.id}" value="${x.challenger_score_before}" placeholder="SC/VT final"><input type="number" min="0" id="os-${x.id}" value="${x.opponent_score_before}" placeholder="SC/VT final"><button class="gold small" type="button" data-approve-battle="${x.id}">Aprovar</button><button class="outline danger small" type="button" data-reject-battle="${x.id}">Rejeitar</button></div>`:`<div class="admin-battle-final">${x.challenger_score_after??"—"} × ${x.opponent_score_after??"—"}</div>`}</div>`).join(""):`<div class="admin-history-empty">Nenhum registro nesta categoria.</div>`;qsa("[data-approve-battle]").forEach(b=>b.onclick=async()=>{const id=b.dataset.approveBattle;try{await adminApi(`/api/admin/ranking-battles/${id}/approve`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({challenger_score_after:Number(qs(`#cs-${id}`).value),opponent_score_after:Number(qs(`#os-${id}`).value)})});await loadAdminRankingBattles();}catch(ex){alert(ex.message)}});qsa("[data-reject-battle]").forEach(b=>b.onclick=async()=>{const reason=prompt("Motivo da rejeição:")??"";try{await adminApi(`/api/admin/ranking-battles/${b.dataset.rejectBattle}/reject`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason})});await loadAdminRankingBattles();}catch(ex){alert(ex.message)}});}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
-
-
-async function loadNotifications(){
-  const list=qs("#notificationList"), summary=qs("#notificationSummary"); if(!list)return;
-  if(!state.me){list.innerHTML=`<div class="panel"><h3>Entre para acessar suas notificações.</h3><p>Esta central é exclusiva dos jogadores.</p></div>`;return;}
-  try{const d=await api("/api/me/notifications"); const items=d.notifications||[]; const unread=Number(d.unread||0);
-    if(summary)summary.textContent=`${unread} não lida${unread===1?"":"s"} • ${items.length} notificações`;
-    const badge=qs("#notificationBadge"); if(badge){badge.textContent=unread;badge.style.display=unread?"inline-flex":"none";}
-    list.innerHTML=items.length?items.map(n=>`<article class="notification-card ${n.read?"read":"unread"}" data-notification-id="${n.id}"><div class="notification-icon">${n.type==="URGENTE"?"🔴":n.type==="IMPORTANTE"?"🟡":n.type==="SISTEMA"?"⚙️":"🔔"}</div><div class="notification-main"><div class="notification-top"><span>${escapeHtml(n.type)}</span><small>${new Date(n.created_at).toLocaleString("pt-BR")}</small></div><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.body||"")}</p>${n.link_page?`<button class="outline small notification-link" data-notification-link="${escapeHtml(n.link_page)}">Abrir conteúdo →</button>`:""}</div>${n.read?"":`<button class="notification-read" data-read-notification="${n.id}" aria-label="Marcar como lida">✓</button>`}</article>`).join(""):"<div class='panel'><h3>Nenhuma notificação.</h3><p>Quando houver um aviso direcionado a você, ele aparecerá aqui.</p></div>";
-    qsa("[data-read-notification]").forEach(b=>b.onclick=async()=>{try{await api(`/api/me/notifications/${b.dataset.readNotification}/read`,{method:"POST"});await loadNotifications();}catch(e){alert(e.message)}});
-    qsa("[data-notification-link]").forEach(b=>b.onclick=()=>{const pg=b.dataset.notificationLink;if(document.querySelector(`#${pg}`))go(pg);else window.location.hash=pg;});
-  }catch(e){list.innerHTML=`<div class="panel"><p>${escapeHtml(e.message)}</p></div>`;}
-}
-
-async function loadNotificationBadge(){if(!state.me)return;try{const d=await api("/api/me/notifications");const b=qs("#notificationBadge");if(b){b.textContent=Number(d.unread||0);b.style.display=d.unread?"inline-flex":"none";}}catch{}}
-
-function playerAlertStorageKey(id){
-  return `spade-alert-${state.me?.identifier||"player"}-${id}`;
-}
-
-function playerAlertDismissed(id){
-  try{return localStorage.getItem(playerAlertStorageKey(String(id)))==="1"}catch{return false}
-}
-
-function dismissPlayerAlert(id){
-  try{localStorage.setItem(playerAlertStorageKey(String(id)),"1")}catch{}
-  const el=qsa('[data-player-alert]').find(x=>x.dataset.playerAlert===String(id));
-  if(el)el.remove();
-}
-
-async function loadPlayerAlerts(){
-  const wrap=qs("#playerAlerts");
-  if(!wrap||!state.me)return;
-  try{
-    const d=await api("/api/me/alerts");
-    const alerts=(d.alerts||[]).filter(a=>!playerAlertDismissed(a.id));
-    wrap.innerHTML=alerts.length
-      ? alerts.map(a=>{
-          const urgent=a.priority==="URGENTE";
-          return `<div class="player-alert ${urgent?"urgent":"important"}" data-player-alert="${a.id}">
-            <div class="player-alert-main">
-              <span class="player-alert-badge">${urgent?"🔴":"🟡"} ${escapeHtml(a.priority)}</span>
-              <h3>${escapeHtml(a.title)}</h3>
-              <p>${escapeHtml(a.body||"")}</p>
-              <div class="player-alert-date">${escapeHtml(a.category||"")} • ${escapeHtml(String(a.date||""))}</div>
-              <a class="player-alert-link" href="#${escapeHtml(a.link_page||'comunicados')}">Ver conteúdo →</a>
-            </div>
-            <button class="player-alert-close" type="button" data-close-player-alert="${a.id}" aria-label="Fechar aviso">×</button>
-          </div>`;
-        }).join("")
-      : "";
-    qsa("[data-close-player-alert]").forEach(b=>{
-      b.onclick=()=>dismissPlayerAlert(Number(b.dataset.closePlayerAlert));
-    });
-  }catch(e){
-    wrap.innerHTML="";
-  }
-}
-
-async function loadPlayerYuls(){
-  const balanceEl=qs("#playerYulsBalance");
-  const historyEl=qs("#playerYulsHistory");
-  if(!balanceEl||!historyEl)return;
-
-  balanceEl.textContent=`🪙 ${money(state.me?.yuls||0)}`;
-  historyEl.innerHTML="<p>Carregando histórico...</p>";
-
-  try{
-    const d=await api("/api/me/yuls-history");
-    balanceEl.textContent=`🪙 ${money(d.balance)}`;
-
-    historyEl.innerHTML=d.history.length
-      ? d.history.map(h=>`<div class="player-yuls-row">
-          <div class="reason">
-            <b>${escapeHtml(h.reason||"Movimentação")}</b>
-            <small>${escapeHtml(new Date(h.created_at).toLocaleString("pt-BR"))}</small>
-          </div>
-          <div class="change ${h.amount>=0?"plus":"minus"}">
-            ${h.amount>=0?"+":""}${money(h.amount)}
-            <small>Saldo: ${money(h.balance_after)}</small>
-          </div>
-        </div>`).join("")
-      : `<div class="yuls-empty">Nenhuma movimentação de Yuls registrada.</div>`;
-  }catch(e){
-    historyEl.innerHTML=`<div class="yuls-empty">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function loadPlayerMissions(){
-  const countEl=qs("#playerMissionCount");
-  const historyEl=qs("#playerMissionHistory");
-  if(!countEl||!historyEl)return;
-  try{
-    const d=await api("/api/me/missions");
-    const completed=d.missions.filter(m=>m.status==="Concluída").length;
-    countEl.textContent=`${completed} ${completed===1?"missão":"missões"} concluídas`;
-    historyEl.innerHTML=d.missions.length?d.missions.map(m=>{
-      const cls=m.status==="Concluída"?"done":m.status==="Falha"?"fail":"cancel";
-      return `<div class="player-mission-row"><div class="player-mission-top"><div><div class="player-mission-title">${escapeHtml(m.title)}</div><div class="player-mission-meta">${escapeHtml(m.mission_type)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""} • ${escapeHtml(String(m.completed_at||""))}</div></div><span class="mission-status ${cls}">${escapeHtml(m.status)}</span></div>${m.reward_yuls>0?`<div class="mission-reward">🪙 +${money(m.reward_yuls)} Yuls</div>`:""}${m.notes?`<div class="mission-notes">${escapeHtml(m.notes)}</div>`:""}</div>`;
-    }).join(""):"<div class=\"yuls-empty\">Nenhuma missão registrada.</div>";
-  }catch(e){historyEl.innerHTML=`<div class=\"yuls-empty\">${escapeHtml(e.message)}</div>`}
-}
-
-function cardCategoryList(cards){
-  return [...new Set((cards||[]).map(c=>c.category).filter(Boolean))]
-    .sort((a,b)=>a.localeCompare(b,"pt-BR"));
-}
-function renderPlayerCardFilters(cards){
-  const el=qs("#playerCardCategoryFilter");if(!el)return;
-  const categories=cardCategoryList(cards);
-  el.innerHTML=`<option value="">Todas as categorias</option>`+
-    categories.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-  el.value=state.cardFilter||"";
-}
-function acquisitionLabel(c){
-  const labels={MISSAO:"Missão",EVENTO:"Evento",LOJA:"Loja",PATENTE:"Patente",OUTRO:"Outra origem"};
-  const label=labels[c.acquisition_type]||"Outra origem";
-  return c.acquisition_name?`${label}: ${c.acquisition_name}`:label;
-}
-async function loadMyGrimoire(){
-  if(!state.me||state.me.account_type==="ALLY")return;
-  try{
-    const d=await api("/api/me/grimoire");
-    state.grimoireData=d; state.grimoirePages=d.pages||[];
-    if(!d.available){const g=qs("#grimoireNav");if(g)g.style.display="none";go("dashboard");return;}
-    const title=qs("#grimoireTitle"),intro=qs("#grimoireIntroText"),exp=qs("#grimoireExp"),pat=qs("#grimoirePatent"),count=qs("#grimoirePageCount"),level=qs("#grimoireLevel"),progress=qs("#grimoireProgressBar"),progressLabel=qs("#grimoireProgressLabel"),progressHint=qs("#grimoireProgressHint"),pages=qs("#grimoirePages");
-    if(title)title.textContent=d.grimoire||"Seu Grimório";
-    if(intro)intro.textContent="Seu Grimório registra a evolução do Mago. A experiência acumulada determina o próximo avanço e, a cada nível conquistado, uma nova página pode revelar a habilidade destinada àquela etapa.";
-    if(exp)exp.textContent=money(d.exp||0); if(pat)pat.textContent=d.patent||"—"; if(level)level.textContent=String(d.level||1); if(count)count.textContent=String((d.pages||[]).length);
-    if(progress)progress.style.width=`${Number(d.progress_percent||0)}%`;
-    if(progressLabel)progressLabel.textContent=d.next_threshold?`${money(d.exp||0)}% / ${money(d.next_threshold)}%`:`Nível ${d.level||1} alcançado`;
-    if(progressHint)progressHint.textContent=d.next_threshold?`Faltam ${money(Math.max(0,Number(d.next_threshold)-Number(d.exp||0)))}% para o nível ${d.next_level}. Ao alcançar o requisito, a EXP volta a zero.`:`Não há requisito de nível superior cadastrado neste momento.`;
-    if(pages){pages.innerHTML=(d.pages||[]).length?(d.pages||[]).map((pg,i)=>`<article class="grimoire-magic-page"><div class="grimoire-page-number">${String(pg.level_number).padStart(2,"0")}</div><div class="grimoire-page-copy"><span class="grimoire-kind">${pg.kind==="ATIVACAO"?"✦ ATIVAÇÃO":"✧ MAGIA EXCLUSIVA"}</span><h3>${escapeHtml(pg.magic_name)}</h3><p>${escapeHtml(pg.description||"Magia registrada nesta etapa de evolução.")}</p><small>Conquistada no nível ${pg.level_number} • Página ${i+1}</small></div></article>`).join(''):'<p class="grimoire-empty">Seu Grimório foi registrado, mas ainda não possui magias preenchidas pela Administração.</p>';}
-  }catch(e){const el=qs("#grimoirePages");if(el)el.innerHTML=`<p class="grimoire-empty">${escapeHtml(e.message)}</p>`;}
-}
-
-function renderPlayerCardItem(c){
-  const elemental=c.element_type==="ELEMENTAL";
-  const glyph={Fogo:"🔥",Água:"💧",Vento:"🌪️",Raio:"⚡",Sombra:"🌑",Cristal:"💎",Fumaça:"💨",Estrelas:"🌟",Tempo:"⏳",Ossos:"☠️"}[c.element]||"✦";
-  return `<article class="card-inventory-item ${elemental?"card-elemental":"card-non-elemental"}" data-element="${escapeHtml(c.element||"")}">
-    <div class="card-magic-aura" aria-hidden="true">${elemental?glyph:"✦"}</div>
-    <div class="card-inventory-top"><span class="card-type-pill">${escapeHtml(c.category)}</span><span class="card-nature-pill">${elemental?"ELEMENTAL":"NÃO ELEMENTAL"}</span></div>
-    <h3>${escapeHtml(c.name_pt||c.name)}</h3>
-    ${c.name_jp?`<div class="card-jp-name">${escapeHtml(c.name_jp)}</div>`:""}
-    <p class="card-description">${escapeHtml(c.description||"Descrição não cadastrada.")}</p>
-    <div class="card-meta-line"><span>Poder: <b>${Number(c.power_value||0)}</b></span><span>Dano: <b>${Number(c.damage_value||0)}</b> <small>${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}</small></span><span>${escapeHtml(c.origin||"Exclusivo")}</span>${elemental&&c.element?`<span>Elemento: ${escapeHtml(c.element)}</span>`:""}</div>
-    ${c.cost?`<div class="card-cost">Custo: ${escapeHtml(c.cost)} ${c.cost_type&&c.cost_type!=="SEM_CUSTO"?`(${escapeHtml(c.cost_type)})`:""}</div>`:""}
-    <div class="card-acquisition">Obtido por: ${escapeHtml(acquisitionLabel(c))}${Number(c.quantity||1)>1?` • Quantidade: ${Number(c.quantity)}`:""}</div>
-    <button type="button" class="outline dark-outline small card-view-button" data-player-card-view="${Number(c.id)}">👁 Ver ficha do Card #${Number(c.id)}</button>
-  </article>`;
-}
-function renderPlayerCards(cards){
-  const grid=qs("#playerCardsGrid"),summary=qs("#playerCardsSummary"),stats=qs("#playerCardsStats");
-  if(!grid)return;
-  const allCards=cards||[];
-  const totalPower=allCards.reduce((sum,c)=>sum+Number(c.power_value||0),0);
-  const totalCategories=cardCategoryList(allCards).length;
-  const totalUnits=allCards.reduce((sum,c)=>sum+Math.max(1,Number(c.quantity||1)),0);
-  if(stats) stats.innerHTML=`<span><small>CARDS</small><b>${totalUnits}</b></span><span><small>PODER</small><b>${totalPower}</b></span><span><small>CATEGORIAS</small><b>${totalCategories}</b></span>`;
-  const filtered=allCards.filter(c=>{
-    if(state.cardFilter && c.category!==state.cardFilter)return false;
-    const term=String(state.cardSearch||"").trim().toLowerCase();
-    return !term || `${c.name_pt||c.name} ${c.name_jp||""} ${c.category} ${c.element||""} ${c.origin||""} ${c.description||""} ${c.acquisition_name||""}`.toLowerCase().includes(term);
-  });
-  if(summary)summary.textContent=filtered.length===allCards.length?`${totalUnits} ${totalUnits===1?'card':'cards'} no inventário`:`${filtered.length} ${filtered.length===1?'card':'cards'} encontrados`;
-  if(!filtered.length){
-    grid.innerHTML=`<div class="cards-empty"><div style="font:28px Georgia;color:#c6a45d">♠</div><b>${(cards||[]).length?"Nenhum card corresponde ao filtro.":"Seu inventário ainda está vazio."}</b><p>${(cards||[]).length?"Tente outra categoria ou pesquisa.":"Os cards serão adicionados pela administração do RPG."}</p></div>`;
-    return;
-  }
-  const groups={}; filtered.forEach(c=>(groups[c.category]??=[]).push(c));
-  grid.innerHTML=Object.entries(groups).map(([category,items])=>`<section class="player-card-group"><div class="player-card-group-head"><h2>${escapeHtml(category)}</h2><span>${items.length} card(s)</span></div><div class="player-card-grid">${items.map(renderPlayerCardItem).join("")}</div></section>`).join("");
-  qsa("[data-player-card-view]").forEach(b=>b.addEventListener("click",()=>openCardDetailModal(Number(b.dataset.playerCardView),false)));
-}
-
-async function loadAllyCards(){
-  try{
-    const d=await api("/api/me/ally-cards");
-    state.playerCards=d.cards||[];
-    renderPlayerCardFilters(state.playerCards);
-    renderPlayerCards(state.playerCards);
-    const summary=qs("#playerCardsSummary"); if(summary)summary.textContent=`${state.playerCards.length} cards no inventário de aliado`;
-    const sub=qs("#cards .subhero p"); if(sub)sub.textContent="Consulte os Cards concedidos a esta conta de aliado.";
-  }catch(e){const grid=qs("#playerCardsGrid");if(grid)grid.innerHTML=`<div class="cards-empty">${escapeHtml(e.message)}</div>`;}
-}
-
-async function loadPlayerCards(){
-  if(state.me?.account_type==="ALLY") return loadAllyCards();
-  try{
-    const d=await api("/api/me/cards");
-    state.playerCards=d.cards||[];
-    renderPlayerCardFilters(state.playerCards);
-    renderPlayerCards(state.playerCards);
-  }catch(e){
-    const grid=qs("#playerCardsGrid");
-    if(grid)grid.innerHTML=`<div class="cards-empty">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-
-async function refreshDashboardStateOnly(){
-  try{
-    const d=await api("/api/me");
-    state.me=d.player;
-    if(state.page==="dashboard"){ await loadPlayerDashboardData(); }
-  }catch{}
-}
-
-async function refreshDashboard(){
-  try{
-    const d=await api("/api/me");
-    state.me=d.player;
-    setPlayerNav();
-    await loadPlayerDashboardData();
-  }catch(e){
-    state.me=null;
-    setLoginNav();
-    go("login");
-  }
-}
-
-async function loadPlayerDashboardData(){
-  try{
-    const d=await api("/api/me/dashboard");
-    state.dashboardData=d;
-    state.me=d.player||state.me;
-    renderDashboard();
-  }catch(e){
-    if(state.page==="dashboard"){
-      const el=qs("#dash");
-      if(el)el.innerHTML=`<div class="panel"><h3>Não foi possível carregar seu painel.</h3><p>${escapeHtml(e.message)}</p></div>`;
-    }
-  }
-}
-
-function dashboardDateLabel(v){
-  if(!v)return "";
-  const s=String(v).slice(0,10);const [y,m,d]=s.split('-');
-  return y&&m&&d?`${d}/${m}`:s;
-}
-function dashboardTimeLabel(v){return v?String(v).slice(0,5):"";}
-function renderDashboard(){
-  if(!state.me)return go("login");
-  if(state.me.account_type==="ALLY") return renderAllyDashboard();
-  const d=state.dashboardData||{};
-  const p=d.player||state.me,c=d.cards||{},r=d.rankings||{};
-  qs("#dashName").textContent=`Bem-vindo, ${displayPlayerName(p)}.`;
-  const active=[...(d.activeEvents||[])].map(x=>`<article class="dashboard-live-item"><div><span class="tag">🎪 ${escapeHtml(x.event_type||"EVENTO")}</span><h4>${escapeHtml(x.title)}</h4><p>Encerramento: ${escapeHtml(dashboardDateLabel(x.end_date))}</p></div><button class="outline dark-outline small" type="button" data-dashboard-page="eventos">Ver evento</button></article>`).join("");
-  const upcoming=[...(d.upcoming||[])].map(x=>`<div class="dashboard-upcoming-item"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.activity_type||"ATIVIDADE")}</small></div><span>${escapeHtml(dashboardDateLabel(x.activity_date))}${x.start_time?` • ${escapeHtml(dashboardTimeLabel(x.start_time))}`:""}</span></div>`).join("");
-  const notes=[...(d.notifications||[])].slice(0,3).map(n=>`<div class="dashboard-note-item ${n.read?"":"unread"}"><span class="dashboard-note-dot"></span><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.body||"")}</small></div></div>`).join("");
-  const status=d.todayStatus?.message?`<div class="dashboard-status-preview"><small>💬 SEU STATUS DE HOJE</small><p>${escapeHtml(d.todayStatus.message)}</p><button class="text-button" type="button" data-dashboard-page="status">Ver mural</button></div>`:`<div class="dashboard-status-preview empty"><small>💬 STATUS DE HOJE</small><p>Você ainda não publicou seu status de hoje.</p><button class="gold small" type="button" data-dashboard-page="status">Publicar status</button></div>`;
-  qs("#dash").innerHTML=`
-    <div class="dashboard-hero-grid">
-      <section class="dash-main dashboard-profile-card">
-        <div class="dash-ident"><div class="avatar">♠</div><div><h2>${escapeHtml(displayPlayerName(p))}</h2><p>${escapeHtml(p.patent||"Patente não definida")} • ${escapeHtml(p.house||"Casa não definida")}</p></div></div>
-        <div class="dashboard-profile-tags"><span>📜 ${escapeHtml(p.grimoire||"Grimório não definido")}</span><span>👑 ${escapeHtml((p.roles||[]).map(x=>x.name).join(" • ")||"Sem cargo")}</span></div>
-        <div class="profile-lines">${String(p.grimoire||"").trim()?`<div><small>✨ EXP • Nível ${Number(p.grimoire_level||1)}</small><b>${money(p.exp||0)}%</b></div>`:""}<div><small>Conquistas</small><b>${money(p.achievements||0)}</b></div></div>
-      </section>
-      <section class="dash-status dashboard-resource-card"><p class="eyebrow">MEUS RECURSOS</p><div class="stats"><div class="stat"><small>❤️ HP</small><b>${money(p.hp)}</b></div><div class="stat"><small>♦️ Mana</small><b>${money(p.mana)}</b></div><div class="stat yuls"><small>🪙 Yuls</small><b>${money(p.yuls)}</b></div><div class="stat"><small>🃏 Cards</small><b>${money(c.count)}</b></div></div></section>
     </div>
-    <div class="dashboard-rank-grid">
-      <div class="dashboard-rank-card"><small>⚡ PODER</small><strong>#${r.power||"—"}</strong><span>${money(c.power)} de Poder</span></div>
-      <div class="dashboard-rank-card"><small>⚔️ SKILL SC</small><strong>#${r.sc||"—"}</strong><span>Ranking atual</span></div>
-      <div class="dashboard-rank-card"><small>🏟️ SKILL VT</small><strong>#${r.vt||"—"}</strong><span>Ranking atual</span></div>
-      <div class="dashboard-rank-card"><small>💬 NOTIFICAÇÕES</small><strong>${d.unreadNotifications||0}</strong><span>não lidas</span></div>
-    </div>
-    <section class="dashboard-live panel">
-      <div class="panel-head"><div><p class="eyebrow">ACONTECENDO AGORA</p><h3>O Reino está em movimento</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Ver cronograma</button></div>
-      <div class="dashboard-live-list">${(d.activeActivities||[]).map(x=>`<article class="dashboard-live-item"><div><span class="tag">${x.source==='MISSION'?'⚔️ MISSÃO':x.source==='EVENT'?'🎪 EVENTO':'📅 CRONOGRAMA'}</span><h4>${escapeHtml(x.title)}</h4><p>${escapeHtml(x.end_label||x.description||'Em andamento')}</p></div>${x.source==='EVENT'?`<button class="outline dark-outline small" type="button" data-dashboard-event="${Number(x.event_id||x.id)}">Ver evento</button>`:`<button class="outline dark-outline small" type="button" data-dashboard-page="${x.source==='MISSION'?'missoes':'cronograma'}">Acompanhar</button>`}</article>`).join('')||`<div class="dashboard-empty-state"><span>✦</span><div><b>Nenhuma atividade ativa agora.</b><p>Você pode conferir as próximas atividades no cronograma.</p></div></div>`}</div>
+    <div class="guide-seal" aria-hidden="true"><div class="guide-ring"></div><div class="guide-symbol">♠</div><small>REINO<br>SPADE</small></div>
+  </div>
+
+  <div class="content guide-content">
+    <section class="guide-section intro-story" id="o-reino">
+      <div class="guide-heading"><span>01</span><div><p class="eyebrow">O REINO</p><h2>Uma nova potência começa a escrever sua história.</h2></div></div>
+      <div class="guide-prose">
+        <p>O Reino Spade iniciou suas atividades em 08 de agosto de 2026, tornando-se o terceiro reino aberto no RPG Black Clover, depois de Clover e Diamond. Sua criação trouxe uma proposta diferente para o universo do RPG: formar um reino de identidade militarizada e sombria, onde organização, competitividade e vontade de vencer ocupam um lugar central.</p>
+        <p>No anime, Spade é conhecido por sua força militar e por uma história marcada pela queda da Casa Grinberryall e pela ascensão da Tríade Negra. No RPG, essa inspiração serve como ponto de partida para uma versão própria do Reino: um ambiente mais rígido, mais organizado e construído para que seus Magos tenham espaço para disputar, evoluir e conquistar reconhecimento independentemente da diferença de poder com que iniciam sua caminhada.</p>
+        <p>Spade está sob a égide do Imperador Supremo Cooper Luminaris, enquanto a administração do próprio Reino é conduzida por Mattiel Novachrono, o Rei; Wesyx Zogratis, o Rei Mago; e Matityahu Grinberryall, o Conselheiro.</p>
+      </div>
+      <blockquote>Em Spade, poder mágico e determinação caminham juntos; o que você fará com aquilo que conquistar é parte da própria jornada.</blockquote>
     </section>
-    <div class="dashboard-two-col">
-      <section class="panel"><div class="panel-head"><div><p class="eyebrow">PRÓXIMOS</p><h3>Agenda pessoal</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Tudo</button></div><div class="dashboard-upcoming-list">${upcoming||`<div class="dashboard-empty-state"><span>📅</span><div><b>Sem próximas atividades.</b><p>O calendário será atualizado pela Administração.</p></div></div>`}</div></section>
-      <section class="panel"><div class="panel-head"><div><p class="eyebrow">ATENÇÃO</p><h3>Notificações</h3></div><button class="text-button" type="button" data-dashboard-page="notificacoes">Ver todas</button></div><div class="dashboard-note-list">${notes||`<div class="dashboard-empty-state"><span>✓</span><div><b>Tudo em ordem.</b><p>Nenhuma notificação recente.</p></div></div>`}</div></section>
-    </div>
-    ${status}
-    <div class="panel" style="margin-top:12px"><p class="eyebrow">ATIVIDADE</p><h3>${money(p.missions||0)} missões registradas</h3><p>Seu painel reúne sua situação atual e os atalhos para o que importa no Reino.</p></div>`;
-  qsa('[data-dashboard-page]').forEach(b=>b.onclick=()=>go(b.dataset.dashboardPage));
-  qsa('[data-dashboard-event]').forEach(b=>b.onclick=()=>openPublicEvent(Number(b.dataset.dashboardEvent)));
-  loadPlayerYuls();loadPlayerMissions();loadPlayerAlerts();loadTodayStatus();
-}
 
-function renderAllyDashboard(){
-  const d=state.dashboardData||{}; const p=d.player||state.me, c=d.cards||{};
-  qs("#dashboardEyebrow").textContent="PAINEL DO ALIADO";
-  qs("#dashboardDescription").textContent="Acompanhe Spade em modo observador: conteúdo liberado, sem interações.";
-  const badge=qs("#allyModeBadge"); if(badge)badge.hidden=false;
-  qs("#dashName").textContent=`Bem-vindo, ${displayPlayerName(p)}.`;
-  const active=(d.activeEvents||[]).map(x=>`<article class="dashboard-live-item"><div><span class="tag">🎪 ${escapeHtml(x.event_type||"EVENTO")}</span><h4>${escapeHtml(x.title)}</h4><p>Encerramento: ${escapeHtml(dashboardDateLabel(x.end_date))}</p></div><button class="outline dark-outline small" type="button" data-dashboard-page="eventos">Ver evento</button></article>`).join("");
-  const upcoming=(d.upcoming||[]).map(x=>`<div class="dashboard-upcoming-item"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.activity_type||"ATIVIDADE")}</small></div><span>${escapeHtml(dashboardDateLabel(x.activity_date))}${x.start_time?` • ${escapeHtml(dashboardTimeLabel(x.start_time))}`:""}</span></div>`).join("");
-  qs("#dash").innerHTML=`
-    <div class="dashboard-hero-grid">
-      <section class="dash-main dashboard-profile-card ally-profile-card">
-        <div class="dash-ident"><div class="avatar">🤝</div><div><h2>${escapeHtml(displayPlayerName(p))}</h2><p>${escapeHtml(p.origin_kingdom||"Reino aliado não informado")} • ${escapeHtml(p.origin_house||"Casa não informada")}</p></div></div>
-        <div class="dashboard-profile-tags"><span>🤝 Aliado Oculto</span><span>👁️ Somente leitura</span>${p.patent?`<span>🎖️ ${escapeHtml(p.patent)}</span>`:""}${p.role?`<span>💼 ${escapeHtml(p.role)}</span>`:""}</div>
-        <div class="profile-lines"><div><small>CARDS</small><b>${money(c.count)}</b></div><div><small>PODER DOS CARDS</small><b>${money(c.power)}</b></div></div>
-      </section>
-      <section class="dash-status dashboard-resource-card"><p class="eyebrow">ACESSO</p><div class="ally-access-copy"><b>Modo observador</b><p>Você pode acompanhar o Reino Spade, consultar seu inventário e ler o mural. Publicações e interações estão desabilitadas.</p></div></section>
-    </div>
-    <div class="dashboard-rank-grid">
-      <div class="dashboard-rank-card"><small>🃏 MEUS CARDS</small><strong>${money(c.count)}</strong><span>Cards em seu inventário</span></div>
-      <div class="dashboard-rank-card"><small>⚡ PODER DOS CARDS</small><strong>${money(c.power)}</strong><span>valor acumulado</span></div>
-      <div class="dashboard-rank-card"><small>🎪 EVENTOS ATIVOS</small><strong>${(d.activeEvents||[]).length}</strong><span>para acompanhar</span></div>
-      <div class="dashboard-rank-card"><small>📅 PRÓXIMAS ATIVIDADES</small><strong>${(d.upcoming||[]).length}</strong><span>no cronograma</span></div>
-    </div>
-    <section class="dashboard-live panel"><div class="panel-head"><div><p class="eyebrow">ACONTECENDO AGORA</p><h3>O Reino está em movimento</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Ver cronograma</button></div><div class="dashboard-live-list">${active||`<div class="dashboard-empty-state"><span>✦</span><div><b>Nenhum evento ativo agora.</b><p>Você pode acompanhar as próximas atividades no cronograma.</p></div></div>`}</div></section>
-    <div class="dashboard-two-col"><section class="panel"><div class="panel-head"><div><p class="eyebrow">PRÓXIMOS</p><h3>Agenda do Reino</h3></div><button class="text-button" type="button" data-dashboard-page="cronograma">Tudo</button></div><div class="dashboard-upcoming-list">${upcoming||`<div class="dashboard-empty-state"><span>📅</span><div><b>Sem próximas atividades.</b><p>O calendário será atualizado pela Administração.</p></div></div>`}</div></section><section class="panel"><div class="panel-head"><div><p class="eyebrow">💬 COMUNIDADE</p><h3>Status de Spade</h3></div><button class="text-button" type="button" data-dashboard-page="status">Ver mural</button></div><div class="dashboard-empty-state"><span>👁️</span><div><b>Acompanhamento em modo observador.</b><p>Leia os Status e comentários sem publicar, reagir ou comentar.</p></div></div></section></div>`;
-  qsa('[data-dashboard-page]').forEach(b=>b.onclick=()=>go(b.dataset.dashboardPage));
-  loadAllyCards();
-}
+    <section class="guide-section steps-section" id="como-comeca">
+      <div class="guide-heading"><span>02</span><div><p class="eyebrow">PRIMEIROS PASSOS</p><h2>Sua entrada acontece aos poucos.</h2></div></div>
+      <p class="section-lead">Você não precisa descobrir tudo sozinho. A entrada no Reino segue um caminho simples, e cada etapa marca uma pequena mudança na sua posição dentro da comunidade.</p>
+      <div class="guide-steps">
+        <article><b>01</b><h3>Recrutamento</h3><p>Você é convidado para o RPG e recebe as orientações iniciais para preparar sua entrada.</p></article>
+        <article><b>02</b><h3>Ficha</h3><p>Preenche sua ficha e informa quem o convidou. Em seguida, envia o material no grupo responsável pela entrada.</p></article>
+        <article><b>03</b><h3>Seu elemento</h3><p>Um sorteio define seu elemento. A partir dele, sua identidade dentro do universo começa a ganhar forma.</p></article>
+        <article><b>04</b><h3>Sua Casa</h3><p>O líder da Casa o adiciona ao grupo, onde você começa a acompanhar a rotina e as orientações do Reino.</p></article>
+        <article><b>05</b><h3>Primeira missão</h3><p>Depois da sua primeira missão, sua entrada no Reino é oficialmente registrada.</p></article>
+      </div>
+    </section>
 
+    <section class="guide-section houses-section" id="casas-iniciais">
+      <div class="guide-heading"><span>03</span><div><p class="eyebrow">CASAS INICIAIS</p><h2>Três linhagens, três maneiras de jogar.</h2></div></div>
+      <p class="section-lead">As Casas representam sua origem dentro de Spade. Cada uma possui uma identidade própria e uma característica que influencia a forma como seus Magos lidam com a batalha.</p>
+      <div class="guide-house-grid">
+        <article class="guide-house house-zogratis"><div class="guide-house-symbol">☠️</div><p class="eyebrow">CASA ZOGRATIS</p><h3>Ossos</h3><p>A linhagem associada à força, resistência e domínio sobre aumento e redução de dano.</p><span>A Casa Zogratis esteve por trás do golpe que derrubou a antiga família real e instaurou a Tríade Negra no universo de Black Clover.</span></article>
+        <article class="guide-house house-grin"><div class="guide-house-symbol">🌟</div><p class="eyebrow">CASA GRINBERRYALL</p><h3>Estrelas</h3><p>Magos ligados à economia de Mana a cada magia, capazes de permanecer mais tempo em batalha utilizando seu arsenal.</p><span>É a linhagem da antiga família real de Spade, lembrada por seu governo pacífico e benevolente.</span></article>
+        <article class="guide-house house-nova"><div class="guide-house-symbol">⏳</div><p class="eyebrow">CASA NOVACHRONO</p><h3>Tempo</h3><p>Uma linhagem marcada pelo controle e pela sobrevivência, com imunidade a dano durante um turno de batalha.</p><span>Está ligada à figura de Julius Novachrono e aos mistérios que envolvem sua ligação com Lucius Zogratis.</span></article>
+      </div>
+    </section>
 
-const SIM_DIFF_LABEL={FACIL:'Fácil',NORMAL:'Normal',DIFICIL:'Difícil',MESTRE:'Mestre'};
-const SIM_PERSONALITY_LABEL={AGRESSIVO:'Agressivo',DEFENSIVO:'Defensivo',ESTRATEGICO:'Estratégico',IMPREVISIVEL:'Imprevisível',EXPERIMENTAL:'Experimental'};
-function simCardCategory(c){return String(c?.category||c?.type||'Outros').trim();}
-function simCardName(c){return String(c?.name_pt||c?.name||'Card');}
-function simCardCost(c){if(String(c?.cost_type||'SEM_CUSTO')==='SEM_CUSTO')return 0;const m=String(c?.cost||'').match(/\d+/);return m?Number(m[0]):0;}
-function simCardDerivedDamage(c){let d=Number(c?.damage_value||0);if(d>0)return d;const m=String(c?.cost||'').match(/(\d+)\s*\/\s*(\d+)/);if(m){const cat=simCardCategory(c).toLowerCase();if(/ataque|ofensiva|técnica|paralisia|falha|barreira/.test(cat))return Number(m[2]||0);}return 0;}
-function simCardDuration(c){const text=`${c?.name||''} ${c?.description||''}`;const m=text.match(/(\d+)\s*(?:rounds?|turnos?)/i);return m?Math.max(1,Number(m[1])):1;}
-function simIs(c,kind){const cat=simCardCategory(c).toLowerCase();const name=`${c?.name||''} ${c?.name_pt||''}`.toLowerCase();if(kind==='failure')return cat.includes('falha');if(kind==='flee')return cat.includes('fuga')||cat.includes('camuflag');if(kind==='defense')return cat.includes('barreira')||cat.includes('ataque/defesa')||cat.includes('réplica')||simIs(c,'flee');if(kind==='offensive')return cat.includes('magia ofensiva')||cat==='ofensiva';if(kind==='paralysis')return cat.includes('paralisia');if(kind==='technique')return cat.includes('técnica');if(kind==='activation')return cat.includes('ativação');if(kind==='reflection')return name.includes('refletivo')||name.includes('refletiva');if(kind==='illusion')return cat.includes('ilusão');return false;}
-function simPlayable(card,side){const cost=simCardCost(card);return String(card.cost_type||'SEM_CUSTO')==='VIDA'?side.hp>cost:String(card.cost_type||'SEM_CUSTO')==='MANA'?side.mana>=cost:true;}
-function simPayCost(card,side){const cost=simCardCost(card);if(cost<=0)return {ok:true,cost:0};if(String(card.cost_type||'SEM_CUSTO')==='VIDA'){if(side.hp<=cost)return {ok:false,cost};side.hp-=cost;return {ok:true,cost};}if(String(card.cost_type||'SEM_CUSTO')==='MANA'){if(side.mana<cost)return {ok:false,cost};side.mana-=cost;return {ok:true,cost};}return {ok:true,cost:0};}
-function simMakeSide(name,hp,mana,cards,isPlayer){return {name,hp:Number(hp),maxHp:Number(hp),mana:Number(mana),maxMana:Number(mana),cards:cards||[],isPlayer,paralyzed:0,defense:null,effects:[],activations:[],damageBoost:0,techImmune:false,usedCategories:new Set(),usedCards:new Set()};}
-function simRefreshEffectsStart(side,log){const next=[];for(const e of side.effects||[]){side.hp=Math.max(0,side.hp-Number(e.damage||0));log.push(`${side.isPlayer?'👤':'🤖'} ${escapeHtml(side.name)} sofreu ${Number(e.damage||0)} de dano contínuo de ${escapeHtml(e.name)}.`);const remaining=Number(e.remaining||1)-1;if(remaining>0)next.push({...e,remaining});}side.effects=next;if(side.defense){side.defense.remaining-=1;if(side.defense.remaining<=0)side.defense=null;}}
-function simApplyContinuous(target,card){const duration=simCardDuration(card);target.effects.push({name:simCardName(card),damage:simCardDerivedDamage(card),remaining:Math.max(duration,1)});}
-function simAddParalysis(target,card){target.paralyzed=Math.max(target.paralyzed,simCardDuration(card));}
-function simHasDefense(side){return !!side.defense;}
-function simSetDefense(side,card){side.defense={name:simCardName(card),remaining:Math.max(1,simCardDuration(card)),blocks:true};}
-function simCandidateScore(card,side,opp,battle){let score=Math.random()*2;const dmg=simCardDerivedDamage(card),cost=simCardCost(card);if(simIs(card,'offensive')||simIs(card,'technique'))score+=dmg*0.65;if(simIs(card,'defense'))score+=(side.hp<side.maxHp*0.45?35:10);if(simIs(card,'paralysis'))score+=(opp.hp>side.maxHp*0.35?24:10);if(simIs(card,'failure'))score+=opp.hp>side.hp?8:2;if(simIs(card,'activation'))score+=6;if(opp.defense&& (simIs(card,'failure')||simIs(card,'reflection')))score+=20;if(side.hp<side.maxHp*0.3&&simIs(card,'flee'))score+=45;score-=cost*0.05;switch(battle.training.personality){case 'AGRESSIVO':score+=(simIs(card,'offensive')||simIs(card,'technique')?28:0);break;case 'DEFENSIVO':score+=(simIs(card,'defense')||simIs(card,'flee')?28:0);break;case 'ESTRATEGICO':score+=(simIs(card,'paralysis')||simIs(card,'failure')||simIs(card,'activation')?16:0);break;case 'EXPERIMENTAL':score+=10;break;}return score;}
-function simPickAI(side,opp,battle){const playable=side.cards.filter(c=>Number(c.status!=='INATIVO')&&simPlayable(c,side));if(!playable.length)return null;let scored=playable.map(c=>({card:c,score:simCandidateScore(c,side,opp,battle)})).sort((a,b)=>b.score-a.score);if(battle.training.personality==='IMPREVISIVEL'){return playable[Math.floor(Math.random()*playable.length)];}const pool=battle.training.difficulty==='FACIL'?scored.slice(-Math.min(3,scored.length)):battle.training.difficulty==='DIFICIL'?scored.slice(0,Math.min(4,scored.length)):battle.training.difficulty==='MESTRE'?scored.slice(0,Math.min(2,scored.length)):scored.slice(0,Math.min(5,scored.length));return pool[Math.floor(Math.random()*pool.length)].card;}
-function simResolvePair(playerCard,oppCard,battle){const p=battle.player,o=battle.opponent,log=[];const pCancel={v:false},oCancel={v:false};if(playerCard){p.usedCategories.add(simCardCategory(playerCard));p.usedCards.add(Number(playerCard.id));}if(oppCard){o.usedCategories.add(simCardCategory(oppCard));o.usedCards.add(Number(oppCard.id));}
-  const pPay=playerCard?simPayCost(playerCard,p):{ok:true,cost:0},oPay=oppCard?simPayCost(oppCard,o):{ok:true,cost:0};
-  if(playerCard&&!pPay.ok) {log.push(`❌ ${p.name} não tinha recurso suficiente para ${simCardName(playerCard)}.`);playerCard=null;}
-  if(oppCard&&!oPay.ok) {log.push(`❌ ${o.name} não tinha recurso suficiente para ${simCardName(oppCard)}.`);oppCard=null;}
-  if(playerCard&&simIs(playerCard,'failure')&&oppCard&&!simIs(oppCard,'flee')&&!simIs(oppCard,'activation'))pCancel.v=true;
-  if(oppCard&&simIs(oppCard,'failure')&&playerCard&&!simIs(playerCard,'flee')&&!simIs(playerCard,'activation'))oCancel.v=true;
-  if(playerCard)log.push(`👤 ${p.name}: #${playerCard.id} • ${simCardName(playerCard)} • ${simCardCategory(playerCard)}`);else log.push(`👤 ${p.name}: passa o round.`);
-  if(oppCard)log.push(`🤖 ${o.name}: #${oppCard.id} • ${simCardName(oppCard)} • ${simCardCategory(oppCard)}`);else log.push(`🤖 ${o.name}: passa o round.`);
-  const pDamage=playerCard?Math.max(0,simCardDerivedDamage(playerCard)+p.damageBoost):0,oDamage=oppCard?Math.max(0,simCardDerivedDamage(oppCard)+o.damageBoost):0;
-  if(playerCard&&simIs(playerCard,'activation')){p.activations.push(simCardName(playerCard));const m=String(playerCard.description||'').match(/\+(\d+)\s*(?:de\s*)?Dano/i);if(m)p.damageBoost+=Number(m[1]);if(/imune\s+a\s+t[ée]cnicas/i.test(playerCard.description||''))p.techImmune=true;log.push(`✨ ${p.name} ativou ${simCardName(playerCard)}. O efeito da ativação é acompanhado pelo simulador quando reconhecível.`);}
-  if(oppCard&&simIs(oppCard,'activation')){o.activations.push(simCardName(oppCard));const m=String(oppCard.description||'').match(/\+(\d+)\s*(?:de\s*)?Dano/i);if(m)o.damageBoost+=Number(m[1]);if(/imune\s+a\s+t[ée]cnicas/i.test(oppCard.description||''))o.techImmune=true;log.push(`✨ ${o.name} ativou ${simCardName(oppCard)}.`);}
-  if(playerCard&&simIs(playerCard,'defense')&&!simIs(playerCard,'flee'))simSetDefense(p,playerCard);
-  if(oppCard&&simIs(oppCard,'defense')&&!simIs(oppCard,'flee'))simSetDefense(o,oppCard);
-  if(playerCard&&simIs(playerCard,'flee'))simSetDefense(p,playerCard);
-  if(oppCard&&simIs(oppCard,'flee'))simSetDefense(o,oppCard);
-  if(playerCard&&simIs(playerCard,'reflection')&&!oCancel.v)o._reflectNext=true;
-  if(oppCard&&simIs(oppCard,'reflection')&&!pCancel.v)p._reflectNext=true;
-  if(playerCard&&!pCancel.v&&simIs(playerCard,'paralysis')&&oppCard){if(simIs(oppCard,'offensive')){const pc=simCardCost(playerCard),oc=simCardCost(oppCard);if(pc>=oc){simAddParalysis(o,playerCard);log.push(`⛓️ ${o.name} foi paralisado por ${simCardDuration(playerCard)} round(s).`);}else{if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-oDamage);log.push(`💥 ${p.name} sofreu ${oDamage} de dano.`);}else log.push(`🛡️ ${p.name} foi protegido por ${p.defense.name}.`);}}else if(simIs(oppCard,'technique')&&simCardDuration(playerCard)>=2){simAddParalysis(o,playerCard);log.push(`⛓️ ${o.name} foi paralisado; a Paralisia de 2 Rounds não sofre dano da Técnica.`);}else simAddParalysis(o,playerCard);}
-  if(oppCard&&!oCancel.v&&simIs(oppCard,'paralysis')&&playerCard){if(simIs(playerCard,'offensive')){const oc=simCardCost(oppCard),pc=simCardCost(playerCard);if(oc>=pc){simAddParalysis(p,oppCard);log.push(`⛓️ ${p.name} foi paralisado por ${simCardDuration(oppCard)} round(s).`);}else if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-pDamage);log.push(`💥 ${o.name} sofreu ${pDamage} de dano.`);}else log.push(`🛡️ ${o.name} foi protegido por ${o.defense.name}.`);}else if(simIs(playerCard,'technique')&&simCardDuration(oppCard)>=2){simAddParalysis(p,oppCard);log.push(`⛓️ ${p.name} foi paralisado; a Paralisia de 2 Rounds não sofre dano.`);}else simAddParalysis(p,oppCard);}
-  const pAttacks=playerCard&&!pCancel.v&&!simIs(playerCard,'defense')&&!simIs(playerCard,'flee')&&!simIs(playerCard,'paralysis')&&!simIs(playerCard,'activation')&&!simIs(playerCard,'failure');
-  const oAttacks=oppCard&&!oCancel.v&&!simIs(oppCard,'defense')&&!simIs(oppCard,'flee')&&!simIs(oppCard,'paralysis')&&!simIs(oppCard,'activation')&&!simIs(oppCard,'failure');
-  if(pAttacks&&oAttacks&&simIs(playerCard,'offensive')&&simIs(oppCard,'offensive')){const pc=simCardCost(playerCard),oc=simCardCost(oppCard);if(pc>oc){if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-pDamage);log.push(`⚔️ Magia Ofensiva de ${p.name} prevaleceu pelo custo ${pc} > ${oc}. ${o.name} sofreu ${pDamage}.`);}else log.push(`🛡️ ${o.name} absorveu o dano com ${o.defense.name}.`);}else if(oc>pc){if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-oDamage);log.push(`⚔️ Magia Ofensiva de ${o.name} prevaleceu pelo custo ${oc} > ${pc}. ${p.name} sofreu ${oDamage}.`);}else log.push(`🛡️ ${p.name} absorveu o dano com ${p.defense.name}.`);}else log.push('⚔️ Os custos de Mana foram iguais: as duas Magias Ofensivas foram anuladas.');}
-  else {
-    if(pAttacks&&oAttacks){if(o._reflectNext&&!simIs(playerCard,'activation')){if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-pDamage);log.push(`↩️ ${p.name} recebeu de volta ${pDamage} de dano.`);}}else if(p._reflectNext&&!simIs(oppCard,'activation')){if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-oDamage);log.push(`↩️ ${o.name} recebeu de volta ${oDamage} de dano.`);}}else{if(!simHasDefense(o)){o.hp=Math.max(0,o.hp-pDamage);if(pDamage)log.push(`💥 ${o.name} sofreu ${pDamage} de dano.`);}else if(pDamage)log.push(`🛡️ ${o.name} bloqueou o dano de ${p.name}.`);if(!simHasDefense(p)){p.hp=Math.max(0,p.hp-oDamage);if(oDamage)log.push(`💥 ${p.name} sofreu ${oDamage} de dano.`);}else if(oDamage)log.push(`🛡️ ${p.name} bloqueou o dano de ${o.name}.`);}}
-    else if(pAttacks){if(simIs(playerCard,'technique')&&o.techImmune){log.push(`⚡ ${o.name} está imune a Técnicas.`);}else if(!simHasDefense(o)){if(simCardDamageType(playerCard)==='DANO_CONTINUO')simApplyContinuous(o,playerCard);else{o.hp=Math.max(0,o.hp-pDamage);if(pDamage)log.push(`💥 ${o.name} sofreu ${pDamage} de dano.`);}}else if(pDamage)log.push(`🛡️ ${o.name} bloqueou o dano.`);}
-    else if(oAttacks){if(simIs(oppCard,'technique')&&p.techImmune){log.push(`⚡ ${p.name} está imune a Técnicas.`);}else if(!simHasDefense(p)){if(simCardDamageType(oppCard)==='DANO_CONTINUO')simApplyContinuous(p,oppCard);else{p.hp=Math.max(0,p.hp-oDamage);if(oDamage)log.push(`💥 ${p.name} sofreu ${oDamage} de dano.`);}}else if(oDamage)log.push(`🛡️ ${p.name} bloqueou o dano.`);}
-  }
-  return log;
-}
-function simCardDamageType(c){return String(c?.damage_type||'SEM_DANO');}
-function simGoalStatus(training,battle){const o=training.objective||{type:'WIN',value:0};const t=o.type;let achieved=false;if(t==='USE_CATEGORY')achieved=battle.player.usedCategories.has(String(o.value));else if(t==='USE_CARD')achieved=battle.player.usedCards.has(Number(o.value));else if(t==='FINISH_MANA_AT_LEAST')achieved=battle.player.mana>=Number(o.value||0)&&(battle.over||battle.result!=='EM_ANDAMENTO');else if(t==='SURVIVE_ROUNDS')achieved=battle.player.hp>0&&battle.round>=Number(o.value||0);else achieved=battle.result==='VITORIA';return {type:t,value:o.value,achieved,label:o.label||'Objetivo'};}
-function simulatorStorageKey(id){return `spade-simulator-${id}`;}
-function saveSimulatorResult(training,battle){try{const key=simulatorStorageKey(training.id),old=JSON.parse(localStorage.getItem(key)||'{}');const result={bestRounds:old.bestRounds||null,wins:Number(old.wins||0),attempts:Number(old.attempts||0),lastResult:battle.result,completedAt:new Date().toISOString()};result.attempts+=1;if(battle.result==='VITORIA')result.wins+=1;if(battle.result==='VITORIA'&&(!result.bestRounds||battle.round<result.bestRounds))result.bestRounds=battle.round;localStorage.setItem(key,JSON.stringify(result));}catch{}}
-function simulatorProgress(id){try{return JSON.parse(localStorage.getItem(simulatorStorageKey(id))||'{}')}catch{return {}}}
-function simFormatTrainingRules(r){const parts=[];if(r.allowed_origins?.length)parts.push(`Origem: ${r.allowed_origins.join(', ')}`);if(r.allowed_categories?.length)parts.push(`Categoria: ${r.allowed_categories.join(', ')}`);if(r.allowed_card_ids?.length)parts.push(`Cards: #${r.allowed_card_ids.join(', #')}`);if(r.blocked_card_ids?.length)parts.push(`Proibidos: #${r.blocked_card_ids.join(', #')}`);return parts.join(' • ')||'Todos os Cards ativos';}
-async function loadSimulatorPage(){const root=qs('#simulatorRoot');if(!root)return;root.innerHTML='<div class="simulator-loading panel">⚔️ Preparando a arena...</div>';try{const d=await api('/api/simulator/trainings');state.simulator.trainings=d.trainings||[];renderSimulatorTrainingList();}catch(e){root.innerHTML=`<div class="panel simulator-error">${escapeHtml(e.message||'Não foi possível carregar os treinamentos.')}</div>`;}}
-function renderSimulatorTrainingList(){const root=qs('#simulatorRoot');if(!root)return;const items=(state.simulator.trainings||[]).map(t=>{const p=simulatorProgress(t.id);return `<button class="sim-training-card" type="button" data-sim-training="${t.id}"><div class="sim-training-icon">⚔️</div><div class="sim-training-copy"><span class="tag">${escapeHtml(t.name)}</span><h3>${escapeHtml(t.description||'Treinamento de combate')}</h3><p>${escapeHtml(simFormatTrainingRules(t.card_rules))}</p><small>🤖 ${escapeHtml(t.opponent_name)} • ${escapeHtml(SIM_DIFF_LABEL[t.difficulty]||t.difficulty)} • ${escapeHtml(SIM_PERSONALITY_LABEL[t.personality]||t.personality)}</small>${p.bestRounds?`<strong>🏆 Melhor: ${p.bestRounds} round(s) • ${p.wins||0} vitória(s)</strong>`:''}</div></button>`}).join('');root.innerHTML=`<div class="simulator-intro-grid"><div class="panel"><p class="eyebrow">COMO FUNCIONA</p><h2>Treine sem arriscar seu personagem.</h2><p>O simulador usa seus Cards reais, mas nenhuma jogada altera HP, Mana, Cards ou rankings oficiais.</p></div><div class="simulator-rule-note"><span>📚</span><div><b>Regras do Databook</b><small>O motor resolve automaticamente interações conhecidas e identifica situações que ainda dependem da descrição específica do Card.</small></div></div></div><div class="sim-training-head"><div><p class="eyebrow">TREINAMENTOS</p><h2>Escolha um cenário</h2></div></div><div class="sim-training-grid">${items||'<div class="panel">Nenhum treinamento público disponível.</div>'}</div>`;qsa('[data-sim-training]').forEach(b=>b.onclick=()=>startSimulator(Number(b.dataset.simTraining)));}
-async function startSimulator(trainingId){const root=qs('#simulatorRoot');if(!root)return;root.innerHTML='<div class="simulator-loading panel">⏳ Carregando seu inventário e preparando o oponente...</div>';try{const [td,pc]=await Promise.all([api(`/api/simulator/trainings/${trainingId}`),api(`/api/me/simulator/cards?training_id=${trainingId}`)]);const t=td.training;const playerCards=pc.cards||[];const opponentCards=t.opponent_cards||[];if(!playerCards.length)throw new Error('Você não possui nenhum Card ativo elegível para este treinamento.');if(!opponentCards.length)throw new Error('Este treinamento ainda não possui Cards disponíveis para o oponente fictício.');const player=simMakeSide(state.me.nick,t.player_hp,t.player_mana,playerCards,true);const opponent=simMakeSide(t.opponent_name,t.opponent_hp,t.opponent_mana,opponentCards,false);state.simulator.training=t;state.simulator.playerCards=playerCards;state.simulator.opponentCards=opponentCards;state.simulator.battle={training:t,player,opponent,round:1,log:[],selectedCardId:null,selectedBonusCardId:null,awaitingSecondAction:false,over:false,result:'EM_ANDAMENTO'};renderSimulatorArena();}catch(e){root.innerHTML=`<div class="panel simulator-error"><h3>Não foi possível iniciar</h3><p>${escapeHtml(e.message||'Erro desconhecido.')}</p><button class="outline dark-outline" type="button" id="simBackTraining">← Escolher outro treinamento</button></div>`;qs('#simBackTraining')?.addEventListener('click',renderSimulatorTrainingList);}}
-function renderSimulatorArena(){
-  const root=qs('#simulatorRoot'),b=state.simulator.battle,t=state.simulator.training;
-  if(!root||!b||!t)return;
-  const player=b.player,opp=b.opponent;
-  const grouped=new Map();
-  for(const c of player.cards){const k=simCardCategory(c);if(!grouped.has(k))grouped.set(k,[]);grouped.get(k).push(c);}
-  const cardButtons=[...grouped.entries()].map(([cat,cards])=>`<div class="sim-card-group"><span class="sim-card-group-title">${escapeHtml(cat)}</span><div class="sim-card-choices">${cards.map(c=>{
-    const selected=b.selectedCardId===Number(c.id)||b.selectedBonusCardId===Number(c.id);
-    const disabled=b.over||(!b.awaitingSecondAction&&player.paralyzed>0)||!simPlayable(c,player)||(b.awaitingSecondAction&&Number(c.id)===Number(b.selectedCardId));
-    return `<button type="button" class="sim-card-choice ${selected?'selected':''}" data-sim-card="${Number(c.id)}" ${disabled?'disabled':''}><b>#${Number(c.id)} • ${escapeHtml(simCardName(c))}</b><small>${escapeHtml(c.cost||'Sem custo')} • ${simCardDerivedDamage(c)} dano</small>${c.quantity?`<em>×${Number(c.quantity)}</em>`:''}</button>`;
-  }).join('')}</div></div>`).join('');
-  const goal=simGoalStatus(t,b);
-  const canPlay=!b.over&&!player.paralyzed&&!!b.selectedCardId&&(!b.awaitingSecondAction||!!b.selectedBonusCardId);
-  const playLabel=b.awaitingSecondAction?'⚔️ Jogar as duas ações':'⚔️ Jogar Round';
-  root.innerHTML=`
-    <div class="simulator-topbar"><button class="outline dark-outline small" type="button" id="simBackBtn">← Treinamentos</button><div><p class="eyebrow">${escapeHtml(t.name)}</p><b>${escapeHtml(t.description||'')}</b></div><span class="sim-round-pill">ROUND ${b.round}${t.max_rounds?` / ${t.max_rounds}`:''}</span></div>
-    <div class="sim-arena">
-      <article class="sim-combatant player"><div class="sim-combatant-head"><div class="sim-avatar">♠</div><div><p class="eyebrow">VOCÊ</p><h2>${escapeHtml(player.name)}</h2></div></div><div class="sim-bars"><div><div class="sim-bar-label"><span>❤️ HP</span><b>${player.hp} / ${player.maxHp}</b></div><div class="sim-bar"><i style="width:${Math.max(0,Math.min(100,player.hp/player.maxHp*100))}%"></i></div></div><div><div class="sim-bar-label"><span>♦️ MANA</span><b>${player.mana} / ${player.maxMana}</b></div><div class="sim-bar mana"><i style="width:${player.maxMana?Math.max(0,Math.min(100,player.mana/player.maxMana*100)):0}%"></i></div></div></div><div class="sim-effects">${player.paralyzed?`<span>⛓️ Paralisado ${player.paralyzed}</span>`:''}${player.defense?`<span>🛡️ ${escapeHtml(player.defense.name)} ${player.defense.remaining}</span>`:''}${player.effects.map(e=>`<span>🔥 ${escapeHtml(e.name)} ${e.remaining}</span>`).join('')}${player.activations.length?`<span>✨ ${player.activations.length} ativação(ões)</span>`:''}</div></article>
-      <div class="sim-vs">VS</div>
-      <article class="sim-combatant opponent"><div class="sim-combatant-head"><div class="sim-avatar">🤖</div><div><p class="eyebrow">OPONENTE FICTÍCIO</p><h2>${escapeHtml(opp.name)}</h2></div></div><div class="sim-bars"><div><div class="sim-bar-label"><span>❤️ HP</span><b>${opp.hp} / ${opp.maxHp}</b></div><div class="sim-bar"><i style="width:${Math.max(0,Math.min(100,opp.hp/opp.maxHp*100))}%"></i></div></div><div><div class="sim-bar-label"><span>♦️ MANA</span><b>${opp.mana} / ${opp.maxMana}</b></div><div class="sim-bar mana"><i style="width:${opp.maxMana?Math.max(0,Math.min(100,opp.mana/opp.maxMana*100)):0}%"></i></div></div></div><div class="sim-effects">${opp.paralyzed?`<span>⛓️ Paralisado ${opp.paralyzed}</span>`:''}${opp.defense?`<span>🛡️ ${escapeHtml(opp.defense.name)} ${opp.defense.remaining}</span>`:''}${opp.effects.map(e=>`<span>🔥 ${escapeHtml(e.name)} ${e.remaining}</span>`).join('')}${opp.activations.length?`<span>✨ ${opp.activations.length} ativação(ões)</span>`:''}</div></article>
-    </div>
-    <div class="simulator-main-grid">
-      <section class="panel sim-play-panel"><div class="panel-head"><div><p class="eyebrow">SUA JOGADA</p><h3>${player.paralyzed?'Você está paralisado.':b.awaitingSecondAction?'Sua Ativação foi escolhida — escolha a segunda ação.':'Escolha um Card'}</h3></div><span>${escapeHtml(simFormatTrainingRules(t.card_rules))}</span></div>
-        ${player.paralyzed?'<div class="sim-paralyzed-note">⛓️ Você não pode realizar uma jogada neste round. Use “Passar Round” para avançar.</div>':cardButtons||'<div class="sim-paralyzed-note">Nenhum Card utilizável com os recursos atuais.</div>'}
-        <div class="sim-actions"><button class="gold" type="button" id="simPlayBtn" ${(!canPlay&&!player.paralyzed)?'disabled':''}>${player.paralyzed?'⏭️ Passar Round':playLabel}</button><button class="outline dark-outline" type="button" id="simRestartBtn">↻ Reiniciar</button></div>
-        <div class="sim-objective"><span>🎯</span><div><b>Objetivo</b><small>${escapeHtml(goal.label)}</small></div><strong class="${goal.achieved?'done':''}">${goal.achieved?'✅ Cumprido':'Em andamento'}</strong></div>
-      </section>
-      <section class="panel sim-log-panel"><div class="panel-head"><div><p class="eyebrow">📜 LOG</p><h3>Histórico da batalha</h3></div><span>${escapeHtml(SIM_DIFF_LABEL[t.difficulty]||t.difficulty)} • ${escapeHtml(SIM_PERSONALITY_LABEL[t.personality]||t.personality)}</span></div><div id="simulatorLog" class="simulator-log">${b.log.length?b.log.map((x,i)=>`<div class="sim-log-entry"><span>${String(i+1).padStart(2,'0')}</span><p>${x}</p></div>`).join(''):`<div class="sim-log-empty">Escolha seu primeiro Card para começar.</div>`}</div></section>
-    </div>
-    ${b.over?`<div class="sim-result panel"><p class="eyebrow">RESULTADO</p><h2>${b.result==='VITORIA'?'🏆 Vitória':b.result==='DERROTA'?'💀 Derrota':b.result==='LIMITE'?'⏳ Limite alcançado':'⚔️ Simulação encerrada'}</h2><p>${b.result==='VITORIA'?'Você venceu o oponente fictício.':'A simulação terminou.'} Round ${b.round}.</p><div class="sim-result-stats"><span>❤️ ${player.hp} HP</span><span>♦️ ${player.mana} Mana</span><span>🤖 ${opp.hp} HP</span></div><div class="sim-actions"><button class="gold" type="button" id="simRevancheBtn">🔄 Revanche</button><button class="outline dark-outline" type="button" id="simBackResultBtn">📚 Outros treinamentos</button></div></div>`:''}`;
-  qs('#simBackBtn')?.addEventListener('click',renderSimulatorTrainingList);
-  qs('#simBackResultBtn')?.addEventListener('click',renderSimulatorTrainingList);
-  qs('#simRestartBtn')?.addEventListener('click',()=>startSimulator(t.id));
-  qs('#simRevancheBtn')?.addEventListener('click',()=>startSimulator(t.id));
-  qsa('[data-sim-card]').forEach(btn=>btn.addEventListener('click',()=>{
-    if(b.over||player.paralyzed)return;
-    const c=player.cards.find(x=>Number(x.id)===Number(btn.dataset.simCard));
-    if(!c||!simPlayable(c,player))return;
-    if(b.awaitingSecondAction){if(Number(c.id)===Number(b.selectedCardId))return;b.selectedBonusCardId=Number(c.id);}
-    else {b.selectedCardId=Number(c.id);if(simIs(c,'activation')){b.awaitingSecondAction=true;b.selectedBonusCardId=null;}}
-    renderSimulatorArena();
-  }));
-  qs('#simPlayBtn')?.addEventListener('click',()=>runSimulatorRound());
-}
-async function runSimulatorRound(){
-  const b=state.simulator.battle;if(!b||b.over)return;
-  const p=b.player,o=b.opponent,round=b.round;
-  if(p.paralyzed){
-    b.log.push(`<b>ROUND ${round}</b>`);simRefreshEffectsStart(p,b.log);simRefreshEffectsStart(o,b.log);
-    b.log.push(`⛓️ ${escapeHtml(p.name)} está paralisado e não realizou uma ação.`);
-    const ai=o.paralyzed?null:simPickAI(o,p,b);
-    b.log.push(...simResolvePair(null,ai,b));
-    if(p.paralyzed>0)p.paralyzed=Math.max(0,p.paralyzed-1);if(o.paralyzed>0)o.paralyzed=Math.max(0,o.paralyzed-1);
-    if(p.hp<=0||o.hp<=0){finishSimulatorBattle(b);renderSimulatorArena();return;}
-    const goal=simGoalStatus(b.training,b);
-    if((goal.type==='SURVIVE_ROUNDS'&&b.round>=Number(goal.value||0))||((b.training.max_rounds&&round>=Number(b.training.max_rounds)))){
-      b.over=true;b.result=goal.achieved?'VITORIA_TREINO':'LIMITE';saveSimulatorResult(b.training,b);b.log.push(`<b>${goal.achieved?'🏆 Objetivo do treinamento concluído.':'⏳ Limite do treinamento alcançado.'}</b>`);
-    }else b.round+=1;
-    b.selectedCardId=null;b.selectedBonusCardId=null;b.awaitingSecondAction=false;renderSimulatorArena();return;
-  }
-  const first=p.cards.find(c=>Number(c.id)===Number(b.selectedCardId));if(!first||!simPlayable(first,p))return;
-  const playerSeq=[first];if(simIs(first,'activation')){if(!b.selectedBonusCardId)return;const second=p.cards.find(c=>Number(c.id)===Number(b.selectedBonusCardId));if(second&&second.id!==first.id&&simPlayable(second,p))playerSeq.push(second);else return;}
-  const aiFirst=o.paralyzed?null:simPickAI(o,p,b);const oppSeq=aiFirst?[aiFirst]:[];
-  if(aiFirst&&simIs(aiFirst,'activation')){const aiSecond=simPickAI(o,p,b);if(aiSecond&&Number(aiSecond.id)!==Number(aiFirst.id)&&simPlayable(aiSecond,o))oppSeq.push(aiSecond);}
-  b.log.push(`<b>ROUND ${round}</b>`);simRefreshEffectsStart(p,b.log);simRefreshEffectsStart(o,b.log);
-  if(p.hp<=0||o.hp<=0){finishSimulatorBattle(b);renderSimulatorArena();return;}
-  const max=Math.max(playerSeq.length,oppSeq.length);
-  for(let i=0;i<max;i++){b.log.push(...simResolvePair(playerSeq[i]||null,oppSeq[i]||null,b));if(p.hp<=0||o.hp<=0)break;}
-  if(p.paralyzed>0)p.paralyzed=Math.max(0,p.paralyzed-1);if(o.paralyzed>0)o.paralyzed=Math.max(0,o.paralyzed-1);
-  if(p.hp<=0||o.hp<=0){finishSimulatorBattle(b);renderSimulatorArena();return;}
-  b.awaitingSecondAction=false;b.selectedCardId=null;b.selectedBonusCardId=null;
-  const goal=simGoalStatus(b.training,b);
-  if(goal.type==='FINISH_MANA_AT_LEAST' && b.player.mana>=Number(goal.value||0)){b.over=true;b.result='VITORIA_TREINO';saveSimulatorResult(b.training,b);b.log.push('<b>🏆 Objetivo do treinamento concluído: Mana mínima atingida.</b>');}
-  else if(goal.type==='USE_CATEGORY' && goal.achieved){b.over=true;b.result='VITORIA_TREINO';saveSimulatorResult(b.training,b);b.log.push(`<b>🏆 Objetivo do treinamento concluído: ${escapeHtml(goal.label)}.</b>`);}
-  else if(goal.type==='USE_CARD' && goal.achieved){b.over=true;b.result='VITORIA_TREINO';saveSimulatorResult(b.training,b);b.log.push(`<b>🏆 Objetivo do treinamento concluído: ${escapeHtml(goal.label)}.</b>`);}
-  else if((goal.type==='SURVIVE_ROUNDS'&&b.round>=Number(goal.value||0))||((b.training.max_rounds&&round>=Number(b.training.max_rounds)))){
-    b.over=true;b.result=goal.achieved?'VITORIA_TREINO':(o.hp<=0?'VITORIA':'LIMITE');saveSimulatorResult(b.training,b);b.log.push(`<b>${goal.achieved?'🏆 Objetivo do treinamento concluído.':b.result==='VITORIA'?'🏆 Vitória alcançada.':'⏳ Limite do treinamento alcançado.'}</b>`);
-  }else b.round+=1;
-  renderSimulatorArena();
-}
-function finishSimulatorBattle(b){b.over=true;b.result=b.player.hp>0&&b.opponent.hp<=0?'VITORIA':b.player.hp<=0&&b.opponent.hp>0?'DERROTA':'EMPATE';saveSimulatorResult(b.training,b);b.log.push(`<b>${b.result==='VITORIA'?'🏆 Você venceu.':b.result==='DERROTA'?'💀 Você foi derrotado.':'⚔️ Combate encerrado.'}</b>`);}
+    <section class="guide-section progression-section" id="progressao">
+      <div class="guide-heading"><span>04</span><div><p class="eyebrow">PROGRESSÃO</p><h2>Seu lugar no Reino pode mudar.</h2></div></div>
+      <p class="section-lead">Você começa como Mago Júnior. A evolução acontece por exames e períodos específicos do calendário, e cada nova patente representa uma etapa diferente da sua trajetória.</p>
+      <div class="patent-road"><article><b>☪️</b><strong>Júnior</strong><small>Início da jornada</small></article><i>→</i><article><b>⚜️</b><strong>Intermediário</strong><small>Exame dominical • VT</small></article><i>→</i><article><b>🔱</b><strong>Sênior</strong><small>Exame aos sábados • VT</small></article><i>→</i><article><b>⚛️</b><strong>Grão Mago</strong><small>Exame especial • 6 meses</small></article></div>
+      <div class="attribute-table-wrap"><table class="guide-attribute-table"><thead><tr><th>Patente</th><th>❤️ Vida</th><th>♦️ Mana</th><th>Como avançar</th></tr></thead><tbody><tr><td>☪️ Júnior</td><td>200</td><td>400</td><td>Ponto de partida</td></tr><tr><td>⚜️ Intermediário</td><td>300</td><td>600</td><td>Exame aos domingos • VT</td></tr><tr><td>🔱 Sênior</td><td>400</td><td>800</td><td>Exame aos sábados • 2x/mês • VT</td></tr><tr><td>⚛️ Grão Mago</td><td>800</td><td>1600</td><td>Exame especial • 6 em 6 meses</td></tr></tbody></table></div>
+      <div class="progression-note"><p>A cada nível ímpar, o Mago recebe uma nova Ativação. A cada nível par, recebe uma Magia Exclusiva.</p></div>
+    </section>
 
-async function loadAdminSimulatorTrainings(){const list=qs('#adminSimulatorTrainingList');if(!list)return;try{const d=await adminApi('/api/admin/simulator/trainings');const rows=d.trainings||[];state.adminSimulatorTrainings=rows;list.innerHTML=rows.map(t=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>⚔️ ${escapeHtml(t.name)}</b><small>${escapeHtml(t.description||'')} • ${t.active?'ATIVO':'INATIVO'} • ${escapeHtml(simFormatTrainingRules(t.card_rules))}</small></div><div class="editorial-actions"><button type="button" data-sim-admin-edit="${t.id}">✎</button><button type="button" class="delete" data-sim-admin-delete="${t.id}">×</button></div></div></div>`).join('')||'<div class="admin-history-empty">Nenhum treinamento cadastrado.</div>';qsa('[data-sim-admin-edit]').forEach(b=>b.onclick=()=>editAdminSimulatorTraining(Number(b.dataset.simAdminEdit)));qsa('[data-sim-admin-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Desativar este treinamento?'))return;try{await adminApi(`/api/admin/simulator/trainings/${b.dataset.simAdminDelete}`,{method:'DELETE'});await loadAdminSimulatorTrainings();}catch(e){alert(e.message)}});}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
-function setSimAdminForm(t=null){qs('#simTrainingId').value=t?.id||'';qs('#simTrainingName').value=t?.name||'';qs('#simTrainingOpponent').value=t?.opponent_name||'Mago de Treinamento';qs('#simTrainingDifficulty').value=t?.difficulty||'NORMAL';qs('#simTrainingPersonality').value=t?.personality||'ESTRATEGICO';qs('#simTrainingPlayerHp').value=t?.player_hp??200;qs('#simTrainingPlayerMana').value=t?.player_mana??400;qs('#simTrainingOpponentHp').value=t?.opponent_hp??200;qs('#simTrainingOpponentMana').value=t?.opponent_mana??400;qs('#simTrainingAllowedOrigins').value=(t?.card_rules?.allowed_origins||[]).join(', ');qs('#simTrainingAllowedCategories').value=(t?.card_rules?.allowed_categories||[]).join(', ');qs('#simTrainingAllowedCards').value=(t?.card_rules?.allowed_card_ids||[]).join(', ');qs('#simTrainingBlockedCards').value=(t?.card_rules?.blocked_card_ids||[]).join(', ');qs('#simTrainingObjectiveType').value=t?.objective?.type||'WIN';qs('#simTrainingObjectiveValue').value=t?.objective?.value??'';qs('#simTrainingObjectiveLabel').value=t?.objective?.label||'';qs('#simTrainingMaxRounds').value=t?.max_rounds??'';qs('#simTrainingVisibility').value=t?.visibility||'PUBLICO';qs('#simTrainingDescription').value=t?.description||'';qs('#simTrainingActive').checked=Number(t?.active??1)===1;qs('#simTrainingSaveBtn').textContent=t?'Salvar treinamento':'Criar treinamento';qs('#simTrainingError').textContent=t?'Editando treinamento.':'';}
-function editAdminSimulatorTraining(id){const t=(state.adminSimulatorTrainings||[]).find(x=>Number(x.id)===id);if(t)setSimAdminForm(t);}
-function clearAdminSimulatorTraining(){setSimAdminForm(null);}
-function collectSimAdminForm(){const csv=s=>String(s||'').split(',').map(x=>x.trim()).filter(Boolean);const nums=s=>csv(s).filter(x=>/^\d+$/.test(x)).map(Number);let ov=qs('#simTrainingObjectiveType').value,value=qs('#simTrainingObjectiveValue').value.trim();if(['SURVIVE_ROUNDS','FINISH_MANA_AT_LEAST','USE_CARD'].includes(ov)&&/^\d+$/.test(value))value=Number(value);return {name:qs('#simTrainingName').value,description:qs('#simTrainingDescription').value,active:qs('#simTrainingActive').checked,visibility:qs('#simTrainingVisibility').value,opponent_name:qs('#simTrainingOpponent').value,difficulty:qs('#simTrainingDifficulty').value,personality:qs('#simTrainingPersonality').value,player_hp:Number(qs('#simTrainingPlayerHp').value),player_mana:Number(qs('#simTrainingPlayerMana').value),opponent_hp:Number(qs('#simTrainingOpponentHp').value),opponent_mana:Number(qs('#simTrainingOpponentMana').value),card_rules:{allowed_origins:csv(qs('#simTrainingAllowedOrigins').value),allowed_categories:csv(qs('#simTrainingAllowedCategories').value),allowed_card_ids:nums(qs('#simTrainingAllowedCards').value),blocked_card_ids:nums(qs('#simTrainingBlockedCards').value)},objective:{type:ov,value,label:qs('#simTrainingObjectiveLabel').value},max_rounds:qs('#simTrainingMaxRounds').value||null};}
-qs('#adminSimulatorTrainingForm')?.addEventListener('submit',async e=>{e.preventDefault();const id=Number(qs('#simTrainingId').value||0);const err=qs('#simTrainingError');try{const body=collectSimAdminForm();const path=id?`/api/admin/simulator/trainings/${id}`:'/api/admin/simulator/trainings';await adminApi(path,{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});clearAdminSimulatorTraining();await loadAdminSimulatorTrainings();err.textContent='Treinamento salvo.';}catch(ex){err.textContent=ex.message;}});qs('#simTrainingClearBtn')?.addEventListener('click',clearAdminSimulatorTraining);
+    <section class="guide-section cards-guide-section" id="cards-iniciais">
+      <div class="guide-heading"><span>05</span><div><p class="eyebrow">CARDS</p><h2>O combate nasce das cartas que você conquista.</h2></div></div>
+      <div class="guide-prose"><p>O RPG é construído em torno de Cards. Ao entrar, você recebe o conjunto inicial correspondente à sua estrutura de Casa. Depois disso, sua coleção cresce através da participação no Reino: missões, eventos, torneios, organizações, loja e outras oportunidades podem colocar novas habilidades em suas mãos.</p><p>Você não precisa decorar seus Cards antes de começar. O sistema foi pensado para que o conhecimento aumente junto com a sua experiência. O Portal guardará seus Cards e, conforme você avança, poderá acompanhar seu arsenal e seu Poder.</p></div>
+      <div class="guide-flow"><span>🃏 Receber</span><b>→</b><span>⚔️ Utilizar</span><b>→</b><span>🏆 Conquistar</span><b>→</b><span>🃏 Evoluir</span><b>→</b><span>⚡ Aumentar o Poder</span></div>
+    </section>
 
-async function tryMe(){
-  try{
-    const d=await api("/api/me");state.me=d.player;setPlayerNav();
-  }catch{}
-}
-function setViewerModeUI(){
-  const ally=state.me?.account_type==="ALLY";
-  [".player-yuls-section",".player-missions-section",".player-status-section",".player-sheet-section"].forEach(sel=>qsa(sel).forEach(el=>el.style.display=ally?"none":""));
-  const eyebrow=qs("#dashboardEyebrow"),desc=qs("#dashboardDescription");
-  if(ally){if(eyebrow)eyebrow.textContent="PAINEL DO ALIADO";if(desc)desc.textContent="Acompanhe Spade em modo observador: conteúdo liberado, sem interações.";}
-  const statusDesc=qs("#status .subhero p:last-child");
-  if(statusDesc)statusDesc.textContent=ally?"Acompanhe os Status do Reino. Aliados Ocultos possuem acesso somente para leitura.":state.me?"Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.":"Acompanhe os Status publicados pelos Magos de Spade. Entre no Reino para publicar, reagir e comentar.";
-}
-function updateContextNav(){
-  const logged=!!state.me;
-  const canSeeCards=logged;
-  const canSeeNotifications=logged;
-  const canSeeGrimoire=logged&&state.me?.account_type!=="ALLY"&&String(state.me?.grimoire||"").trim();
-  qsa(".player-only-nav").forEach(el=>{
-    const id=el.id;
-    const visible=id==="cardsNav"?canSeeCards:id==="notificationsNav"?canSeeNotifications:id==="grimoireNav"?canSeeGrimoire:logged;
-    el.classList.toggle("is-visible",!!visible);
-    el.setAttribute("aria-hidden",String(!visible));
-  });
-  const simulatorNav=qs("#simulatorNav");
-  if(simulatorNav){const visible=logged&&state.me?.account_type!=="ALLY";simulatorNav.style.display=visible?"":"none";simulatorNav.classList.toggle("is-visible",visible);simulatorNav.setAttribute("aria-hidden",String(!visible));}
-  const adminNav=qs("#adminNav");
-  if(adminNav){
-    adminNav.classList.toggle("is-visible",!!state.admin);
-    adminNav.setAttribute("aria-hidden",String(!state.admin));
-  }
-  const login=qs("#loginNav");
-  if(login) login.setAttribute("aria-label",logged?"Abrir meu painel":"Entrar no Reino");
-  // Keep the navigation anchored at the beginning after dynamic login/logout changes.
-  requestAnimationFrame(()=>{const nav=qs("#nav");if(nav)nav.scrollLeft=0;});
-}
-function setPlayerNav(){
-  const b=qs("#loginNav");
-  b.textContent="Meu painel";b.dataset.page="dashboard";b.onclick=()=>go("dashboard");
-  const badge=qs("#allyModeBadge");if(badge)badge.hidden=state.me?.account_type!=="ALLY";
-  updateContextNav();setViewerModeUI();
-}
-function setLoginNav(){
-  const b=qs("#loginNav");
-  b.textContent="Entrar";b.dataset.page="login";b.onclick=()=>go("login");
-  const badge=qs("#allyModeBadge");if(badge)badge.hidden=true;
-  updateContextNav();setViewerModeUI();
-}
+    <section class="guide-section activities-section" id="atividades">
+      <div class="guide-heading"><span>06</span><div><p class="eyebrow">A VIDA EM SPADE</p><h2>Sempre existe algo acontecendo.</h2></div></div>
+      <div class="guide-activities-grid">
+        <article><span>⚔️</span><h3>Missões</h3><p>Ocorrem às segundas, terças, quintas e sextas. Cada missão oferece um Card, ao menos 50 Yuls e 10 EXP.</p></article>
+        <article><span>🎉</span><h3>Eventos</h3><p>Possuem calendário próprio e podem abrir novas oportunidades de participação e recompensa.</p></article>
+        <article><span>🏆</span><h3>Torneios</h3><p>Podem acontecer em SC, VT ou Semi-VT, dependendo da proposta do torneio.</p></article>
+        <article><span>🎖️</span><h3>Exames</h3><p>Marcam sua evolução de patente e seguem o calendário geral do RPG.</p></article>
+        <article><span>📊</span><h3>Rankings</h3><p>Spade possui ranking interno, Arena Mágica para Júnior e Intermediário e Ranking Superior para Sênior e patentes acima.</p></article>
+        <article><span>🛠️</span><h3>Forja</h3><p>Existem Forjas de Reino e a Forja Geral, com funções diferentes para a criação de Cards.</p></article>
+        <article><span>🏪</span><h3>Loja Mágica</h3><p>Espaço de aquisição de Cards através de Yuls.</p></article>
+        <article><span>🌑</span><h3>Mercado Negro</h3><p>Área especial onde Cards são negociados por Dracmas.</p></article>
+      </div>
+    </section>
 
-qs("#loginForm").addEventListener("submit",async e=>{
-  e.preventDefault();const err=qs("#loginError");err.textContent="";
-  const identifier=qs("#identifier").value.trim();
-  const password=qs("#password").value;
-  if(!identifier||!password){err.textContent="Preencha login e senha.";return}
-  try{
-    const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({identifier,password})});
-    state.me=d.player;setPlayerNav();go("dashboard");
-  }catch(ex){err.textContent=ex.message}
-});
+    <section class="guide-section grimoires-section" id="grimorios">
+      <div class="guide-heading"><span>07</span><div><p class="eyebrow">GRIMÓRIOS</p><h2>Algumas coisas precisam esperar o momento certo.</h2></div></div>
+      <div class="guide-prose"><p>A Torre de Grimórios aparece no Cronograma do Reino e, quando aberta, permite que os Magos interessados coloquem seus nomes para participar do sorteio. É ali que sua relação com um Grimório pode começar.</p><p>No universo de Black Clover, a diferença entre três, quatro e cinco folhas está ligada à raridade e às características especiais do Grimório. Três folhas representam a forma comum; quatro folhas são extremamente raras e estão associadas à boa sorte; cinco folhas estão ligadas ao desespero e à relação com demônios.</p></div>
+      <div class="grimoire-cards"><article><b>🍀 3</b><h3>Folhas</h3><p>Comum</p><small>Fé, esperança e amor.</small></article><article><b>🍀 4</b><h3>Folhas</h3><p>Extremamente raro</p><small>Boa sorte e potencial excepcional.</small></article><article><b>🍀 5</b><h3>Folhas</h3><p>Anormal e temido</p><small>Desespero e ligação com demônios.</small></article></div>
+    </section>
 
-async function logoutPlayer(){
-  const b=qs("#playerLogoutBtn");
-  if(b) b.disabled=true;
-  try{await api("/api/logout",{method:"POST"});}
-  catch(e){ if(b) b.disabled=false; alert(e.message||"Não foi possível sair do painel."); return; }
-  state.me=null; state.dashboardData=null; state.page="home";
-  setLoginNav();
-  go("home");
-}
+    <section class="guide-section world-section" id="outros-reinos">
+      <div class="guide-heading"><span>08</span><div><p class="eyebrow">UM MUNDO MAIOR</p><h2>Spade faz parte de algo maior.</h2></div></div>
+      <div class="world-grid"><article><b>♠️</b><h3>Spade</h3><p>Militarização, competição, organização e crescimento acelerado.</p></article><article><b>♣️</b><h3>Clover</h3><p>Outro Reino do mesmo RPG, com suas próprias Casas, esquadrões e identidade.</p></article><article><b>💎</b><h3>Diamond</h3><p>Um terceiro Reino do cenário, com sua própria estrutura e história.</p></article></div>
+      <p class="world-note">Os Reinos mantêm identidades separadas. Atualmente, os Magos Sênior e superiores atuam nos três e cooperam entre si.</p>
+    </section>
 
-qs("#playerStatusMessage")?.addEventListener("input",updateStatusCounter);
-qs("#playerStatusPublishBtn")?.addEventListener("click",publishPlayerStatus);
-qs("#playerLogoutBtn")?.addEventListener("click",logoutPlayer);
+    <section class="guide-section faq-section" id="duvidas">
+      <div class="guide-heading"><span>09</span><div><p class="eyebrow">PRINCIPAIS DÚVIDAS</p><h2>O que quase todo novato quer saber.</h2></div></div>
+      <div class="faq-grid">
+        <details><summary>Como consigo novas Magias e Cards?</summary><p>Você pode conquistá-los em missões, eventos, torneios, organizações, Loja Mágica, Mercado Negro e outras atividades especiais do RPG.</p></details>
+        <details><summary>Como ganho Yuls?</summary><p>Yuls podem vir de missões, torneios, eventos e da venda de produtos ou serviços para outras pessoas do RPG.</p></details>
+        <details><summary>Como entro em uma organização?</summary><p>Você participa do exame de admissão, que acontece nas segundas. Ao final, caso seja aprovado, recebe propostas e escolhe aquela que preferir.</p></details>
+        <details><summary>Como consigo um Grimório?</summary><p>Acompanhe a abertura da Torre de Grimórios no Cronograma e coloque seu nome quando o período de inscrição for aberto.</p></details>
+        <details><summary>Como compro Cards?</summary><p>A Loja Mágica utiliza Yuls. O Mercado Negro utiliza Dracmas e possui acesso separado.</p></details>
+        <details><summary>O que são Classes Sociais?</summary><p>São categorias de origem definidas na entrada do RPG. Elas representam a condição social inicial e fazem parte da história do personagem.</p></details>
+      </div>
+    </section>
 
-qs("#statusRefreshBtn")?.addEventListener("click",loadStatusBoard);
-qs("#playerCardSearch")?.addEventListener("input",e=>{state.cardSearch=e.target.value;renderPlayerCards(state.playerCards)});
-qs("#playerCardCategoryFilter")?.addEventListener("change",e=>{state.cardFilter=e.target.value;renderPlayerCards(state.playerCards)});
-document.addEventListener("click",e=>{
-  const react=e.target.closest("[data-status-react]"); if(react){toggleStatusReaction(Number(react.dataset.statusReact),react);return;}
-  const comments=e.target.closest("[data-status-comments]"); if(comments){toggleStatusComments(Number(comments.dataset.statusComments));return;}
-});
-document.addEventListener("submit",async e=>{
-  const form=e.target.closest("[data-comment-form]"); if(!form)return; e.preventDefault();
-  const id=Number(form.dataset.commentForm),input=form.querySelector("input"),message=(input?.value||"").trim(); if(!message)return;
-  try{await api(`/api/status/${id}/comments`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message})}); await toggleStatusComments(id);}
-  catch(ex){alert(ex.message)}
-});
-
-qs("#adminRankingRefresh")?.addEventListener("click",loadAdminRankingBattles);qs("#adminReportsRefresh")?.addEventListener("click",loadAdminReports);qs("#adminRankingBattleStatus")?.addEventListener("change",loadAdminRankingBattles);
-qs("#backToDashboard")?.addEventListener("click",()=>go("dashboard"));
-
-function getStoredAdminKey(){
-  try{return sessionStorage.getItem("spade_admin_key")||""}catch{return ""}
-}
-function storeAdminKey(key){
-  try{sessionStorage.setItem("spade_admin_key",key)}catch{}
-}
-function clearStoredAdminKey(){
-  try{sessionStorage.removeItem("spade_admin_key")}catch{}
-}
-async function adminApi(url,options={}){
-  const key=state.adminKey||getStoredAdminKey();
-  state.adminKey=key;
-  options.headers={...(options.headers||{})};
-  if(key) options.headers["x-admin-key"]=key;
-  return api(url,options);
-}
-
-function hasAdminPermission(key){ return state.adminPermissions?.[key] === true || state.adminUser?.legacy === true; }
-function setAdminPermissionVisibility(){
-  const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog","#cardBulkSheetModal"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"],simulator_trainings:["#adminSimulatorPanel"]};
-  Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
-  const security=qs('#adminSecurityPanel'); if(security) security.style.display=hasAdminPermission('settings')?'':'none';
-  const bulkCenter=qs('#adminBulkCenter'); if(bulkCenter) bulkCenter.style.display=(hasAdminPermission('players')||hasAdminPermission('cards')||hasAdminPermission('houses')||hasAdminPermission('hierarchy')||hasAdminPermission('missions')||hasAdminPermission('rankings'))?'':'none';
-  const bulkButtonPerms={bulkCenterPlayersExport:'players',bulkCenterPlayersImport:'players_import',bulkCenterCardsExport:'cards',bulkCenterCardsImport:'cards_import',bulkCenterHousesExport:'houses',bulkCenterHousesImport:'houses_import',bulkCenterHierarchyExport:'hierarchy',bulkCenterHierarchyImport:'hierarchy_import',bulkCenterMissionsExport:'missions',bulkCenterMissionsImport:'missions_import',bulkCenterRankingsExport:'rankings'};
-  Object.entries(bulkButtonPerms).forEach(([id,perm])=>{const el=qs('#'+id);if(el)el.style.display=hasAdminPermission(perm)?'':'none'});
-  const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",attributes:"players",power:"players",visibility:"players",status:"players"};
-  qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
-}
-
-async function refreshAdminSession(){
-  try{
-    const d=await adminApi("/api/admin/me");
-    state.admin=true;state.adminUser=d.admin;state.adminPermissions=d.admin.permissions||{};setAdminNav();
-    if(state.page==="admin-login") go("admin");
-  }catch{
-    state.admin=false;state.adminUser=null;setAdminNav();
-  }
-}
-function setAdminNav(){
-  const b=qs("#adminNav");if(!b)return;
-  b.textContent=state.admin?"👑 Administração":"👑 Administração";
-  b.dataset.page=state.admin?"admin":"admin-login";
-  updateContextNav();
-}
-async function adminLogin(e){
-  e.preventDefault();
-  const err=qs("#adminLoginError");if(err)err.textContent="";
-  const username=qs("#adminUsername")?.value.trim();
-  const password=qs("#adminPassword")?.value||"";
-  if(!username||!password){if(err)err.textContent="Preencha usuário e senha.";return;}
-  try{
-    const d=await api("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
-    state.admin=true;state.adminUser=d.admin;state.adminPermissions=d.admin.permissions||{};state.adminKey=null;clearStoredAdminKey();setAdminNav();
-    qs("#adminLoginForm")?.reset();go("admin");
-  }catch(ex){if(err)err.textContent=ex.message}
-}
-async function editAdminPermissions(id){
-  const editor=qs("#adminPermissionEditor"); if(!editor)return;
-  try{
-    const [defs,data]=await Promise.all([adminApi("/api/admin/permissions/definitions"),adminApi(`/api/admin/permissions/${id}`)]);
-    const admin=(state.adminUserList||[]).find(a=>Number(a.id)===Number(id));
-    const permissions=data.permissions||{};
-    const permissionEntries=Object.entries(defs.permissions||{});
-    const moduleEntries=permissionEntries.filter(([key])=>!/_write$|_import$|_delete$|_assign$|_export$/.test(key));
-    const actionEntries=permissionEntries.filter(([key])=>/_write$|_import$|_delete$|_assign$|_export$/.test(key));
-    const renderPermissionGroup=(title,entries)=>entries.length?`<div class="admin-permission-group"><p class="eyebrow">${title}</p><div class="admin-permission-grid">${entries.map(([key,label])=>`<label class="admin-permission-item"><input type="checkbox" data-perm-key="${escapeHtml(key)}" ${permissions[key]===true?"checked":""}> ${escapeHtml(label)}</label>`).join("")}</div></div>`:"";
-    editor.innerHTML=`<div class="admin-permission-card"><div class="admin-permission-card-head"><div><b>👑 ${escapeHtml(admin?.display_name||admin?.username||`Administrador #${id}`)}</b><small>Primeiro escolha os módulos. Depois, limite as ações sensíveis quando necessário.</small></div><span class="permission-status" id="permissionStatus"></span></div>${renderPermissionGroup("MÓDULOS",moduleEntries)}${renderPermissionGroup("AÇÕES ESPECÍFICAS",actionEntries)}<div class="admin-permission-actions"><button type="button" class="outline small" id="cancelPermissionEdit">Cancelar</button><button type="button" class="gold small" id="savePermissionEdit">Salvar permissões</button></div></div>`;
-    qs("#cancelPermissionEdit").onclick=()=>{editor.innerHTML=`<p class="admin-history-empty">Selecione “Permissões” em um administrador para editar.</p>`};
-    qs("#savePermissionEdit").onclick=async()=>{
-      const out={};qsa("[data-perm-key]").forEach(x=>out[x.dataset.permKey]=x.checked);
-      const status=qs("#permissionStatus");
-      try{await adminApi(`/api/admin/permissions/${id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({permissions:out})});if(status)status.textContent="Permissões salvas.";await loadAdminUsers();setTimeout(()=>{if(status)status.textContent=""},1800)}catch(ex){if(status)status.textContent=ex.message}
-    };
-  }catch(ex){editor.innerHTML=`<p class="admin-history-empty">${escapeHtml(ex.message)}</p>`}
-}
-
-async function loadAdminUsers(){
-  const list=qs("#adminUserList");if(!list)return;
-  try{
-    const d=await adminApi("/api/admin/admins");
-    state.adminUserList=d.admins||[];list.innerHTML=state.adminUserList.map(a=>`<div class="admin-user-row">
-      <div><b>👑 ${escapeHtml(a.display_name||a.username)}</b><small>@${escapeHtml(a.username)} • ${a.active?"Ativo":"Desativado"}${a.last_login?` • Último acesso: ${escapeHtml(String(a.last_login))}`:""}</small></div>
-      <div class="admin-user-actions">${Number(a.id)!==Number(state.adminUser?.id)?`<button type="button" class="outline small" data-admin-perms="${a.id}">Permissões</button><button type="button" class="outline small ${a.active?"danger":""}" data-admin-toggle="${a.id}" data-admin-active="${a.active?0:1}">${a.active?"Desativar":"Reativar"}</button>`:`<span class="admin-user-current">Seu acesso</span>`}</div>
-    </div>`).join("")||`<div class="admin-history-empty">Nenhum administrador cadastrado.</div>`;
-    qsa("[data-admin-perms]").forEach(btn=>btn.onclick=()=>editAdminPermissions(Number(btn.dataset.adminPerms)));
-    qsa("[data-admin-toggle]").forEach(btn=>btn.onclick=async()=>{
-      try{await adminApi(`/api/admin/admins/${btn.dataset.adminToggle}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:Number(btn.dataset.adminActive)===1})});await loadAdminUsers();}
-      catch(ex){alert(ex.message)}
-    });
-  }catch(ex){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(ex.message)}</div>`}
-}
-
-async function loadAdminHouses(){
-  try{
-    const d=await adminApi("/api/admin/houses");
-    state.adminHouses=d.houses||[];
-    const list=qs("#adminHouseList");
-    if(!list)return;
-    list.innerHTML=state.adminHouses.map(h=>`<div class="admin-house-item">
-      <div><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><small>${h.count} membros • ${h.missions} missões • 🪙 ${money(h.yuls)}${h.leader?` • Líder: ${escapeHtml(h.leader)}`:""} • ${escapeHtml(h.status||"ATIVA")}</small></div>
-      <div class="admin-house-item-actions"><button type="button" data-house-edit="${h.id}" title="Editar">✎</button><button type="button" class="delete" data-house-delete="${h.id}" title="Excluir">×</button></div>
-    </div>`).join("")||`<div style="color:#888;font-size:10px;padding:10px">Nenhuma Casa.</div>`;
-    qsa("[data-house-edit]").forEach(b=>b.addEventListener("click",()=>editHouseForm(Number(b.dataset.houseEdit))));
-    qsa("[data-house-delete]").forEach(b=>b.addEventListener("click",()=>deleteHouse(Number(b.dataset.houseDelete))));
-  }catch(e){
-    const list=qs("#adminHouseList");if(list)list.innerHTML=`<div style="color:#8b5050;font-size:10px;padding:10px">${escapeHtml(e.message)}</div>`;
-  }
-}
-function resetHouseForm(){
-  const form=qs("#houseForm");if(!form)return;
-  form.reset();qs("#houseId").value="";qs("#houseEmblem").value="♜";qs("#houseStatus").value="ATIVA";
-  qs("#houseSaveBtn").textContent="Criar Casa";qs("#houseError").textContent="";
-}
-function editHouseForm(id){
-  const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
-  qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseEmblem").value=h.emblem||"♜";
-  qs("#houseLeader").value=h.leader||"";qs("#houseVice").value=h.vice_leader||"";qs("#houseMotto").value=h.motto||"";qs("#houseColor").value=h.color||"";qs("#houseBanner").value=h.banner_url||"";qs("#houseStatus").value=h.status||"ATIVA";qs("#houseDescription").value=h.description||"";qs("#houseHistory").value=h.history||"";qs("#houseGoals").value=h.goals||"";qs("#houseAchievements").value=h.achievements||"";
-  qs("#houseSaveBtn").textContent="Salvar Casa";qs("#houseError").textContent="";
-  qs("#houseName").focus();
-}
-async function deleteHouse(id){
-  const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
-  if(!confirm(`Arquivar ${h.name}? A Casa sairá da estrutura ativa, mas seu histórico será preservado.`))return;
-  try{
-    await adminApi(`/api/admin/houses/${id}`,{method:"DELETE"});
-    if(Number(qs("#houseId").value)===id)resetHouseForm();
-    await loadAdminHouses();await loadHouses();alert("Casa arquivada. O histórico foi preservado.");
-  }catch(e){alert(e.message)}
-}
-
-
-
-async function downloadPlayersSheet(){
-  const btn=qs('#playerBulkSheetDownload')||qs('#exportPlayersBtn');
-  const old=btn?.textContent;
-  if(btn) {btn.disabled=true;btn.textContent='⏳ Gerando planilha...';}
-  try{
-    const options={credentials:'same-origin',headers:{}};
-    const key=state.adminKey||getStoredAdminKey(); if(key) options.headers['x-admin-key']=key;
-    const r=await fetch('/api/admin/players/export.xlsx',options);
-    if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar a planilha.');}
-    const blob=await r.blob();
-    const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='jogadores-spade-atualizacao.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
-  }catch(e){alert(e.message||'Não foi possível baixar a planilha.');}
-  finally{if(btn){btn.disabled=false;btn.textContent=old||'📤 Baixar planilha';}}
-}
-
-function openPlayerBulkSheet(){
-  const modal=qs('#playerBulkSheetModal'); if(!modal)return;
-  modal.hidden=false; modal.style.display='block';
-  state.playerBulkSheet={file:null,preview:null};
-  qs('#playerBulkSheetFile').value='';
-  qs('#playerBulkSheetFileName').textContent='Nenhum arquivo selecionado';
-  qs('#playerBulkSheetPreview').innerHTML='<p>Baixe a planilha atual, edite-a e depois escolha o arquivo aqui.</p>';
-  qs('#playerBulkSheetConfirm').disabled=true;
-  qs('#playerBulkSheetStatus').textContent='';
-}
-function closePlayerBulkSheet(){const m=qs('#playerBulkSheetModal');if(m){m.style.display='none';m.hidden=true}}
-function renderPlayerBulkSheetPreview(data){
-  const box=qs('#playerBulkSheetPreview'); if(!box)return;
-  const rows=data.rows||[], valid=Number(data.valid||0), invalid=Number(data.invalid||0);
-  const summary=`<div class="player-import-summary"><span>${data.total} linhas</span><span class="ok">✅ ${valid} prontas</span><span class="bad">⚠️ ${invalid} com erros</span></div>`;
-  const changed=rows.filter(r=>(r.changes||[]).length);
-  const cols=['ID','Jogador','Alterações','Problemas'];
-  const body=rows.map(r=>{
-    const problems=(r.errors||[]).map(e=>e.message).join(' • ');
-    const changes=(r.changes||[]).map(c=>`<div><b>${escapeHtml(c.label)}:</b> ${escapeHtml(String(c.before))} → ${escapeHtml(String(c.after))}</div>`).join('')||'<span style="color:#888">Sem alterações</span>';
-    return `<tr><td>${escapeHtml(String(r.id??''))}</td><td><b>${escapeHtml(r.nick||'')}</b><small>${escapeHtml(r.house||'')}</small></td><td class="bulk-sheet-changes">${changes}</td><td class="${r.errors?.length?'import-issue-cell':''}">${escapeHtml(problems||'')}</td></tr>`;
-  }).join('');
-  box.innerHTML=summary+`<div class="bulk-sheet-preview-note">${changed.length} jogador(es) com pelo menos uma alteração detectada.</div><div style="overflow:auto"><table><thead><tr>${cols.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
-  qs('#playerBulkSheetConfirm').disabled=invalid>0||valid===0;
-}
-async function previewPlayerBulkSheet(){
-  const file=qs('#playerBulkSheetFile')?.files?.[0]; if(!file)return;
-  state.playerBulkSheet={file,preview:null};
-  qs('#playerBulkSheetFileName').textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;
-  qs('#playerBulkSheetStatus').textContent='Lendo e comparando com o cadastro atual...';
-  qs('#playerBulkSheetConfirm').disabled=true;
-  const form=new FormData();form.append('file',file);
-  try{const data=await adminApi('/api/admin/players/bulk-sheet/preview',{method:'POST',body:form});state.playerBulkSheet.preview=data;renderPlayerBulkSheetPreview(data);qs('#playerBulkSheetStatus').textContent=data.invalid?'Corrija os dados indicados e envie novamente.':'Planilha pronta. Revise a prévia antes de aplicar.';}
-  catch(e){qs('#playerBulkSheetPreview').innerHTML='<p>Não foi possível processar a planilha.</p>';qs('#playerBulkSheetStatus').textContent=e.message;}
-}
-async function confirmPlayerBulkSheet(){
-  const file=state.playerBulkSheet?.file;if(!file)return;
-  if(!confirm(`Aplicar as alterações da planilha a ${Number(state.playerBulkSheet.preview?.total||0)} jogador(es)? Esta ação atualizará exatamente os campos editados.`))return;
-  qs('#playerBulkSheetConfirm').disabled=true;qs('#playerBulkSheetCancel').disabled=true;qs('#playerBulkSheetStatus').textContent='Aplicando alterações em transação única...';
-  const form=new FormData();form.append('file',file);
-  try{const d=await adminApi('/api/admin/players/bulk-sheet',{method:'POST',body:form});qs('#playerBulkSheetStatus').textContent=`✅ ${d.changedPlayers} jogador(es) atualizados • ${d.changedFields} campo(s) alterado(s).`;await initAdmin();setTimeout(closePlayerBulkSheet,900);}
-  catch(e){qs('#playerBulkSheetStatus').textContent=e.message;qs('#playerBulkSheetConfirm').disabled=false;qs('#playerBulkSheetCancel').disabled=false;}
-}
-
-function openPlayerImport(){
-  const modal=qs("#playerImportModal");if(!modal)return;
-  modal.hidden=false;modal.style.display="block";
-  state.playerImport={file:null,preview:null};
-  qs("#playerImportFile").value="";qs("#playerImportFileName").textContent="Nenhum arquivo selecionado";
-  qs("#playerImportPreview").innerHTML="<p>Escolha um arquivo para começar.</p>";
-  qs("#playerImportConfirm").disabled=true;qs("#playerImportStatus").textContent="";
-}
-function closePlayerImport(){const m=qs("#playerImportModal");if(m){m.style.display="none";m.hidden=true}}
-function renderImportPreview(data){
-  const box=qs("#playerImportPreview");if(!box)return;
-  const rows=data.rows||[];
-  const valid=Number(data.valid||0),invalid=Number(data.invalid||0);
-  const summary=`<div class="player-import-summary"><span>${data.total} jogadores</span><span class="ok">✅ ${valid} prontos</span><span class="bad">⚠️ ${invalid} com erros</span></div>`;
-  const cols=["Nick","Login","Casa","Patente","Cargos","Yuls","EXP"];
-  const table=`<div style="overflow:auto"><table><thead><tr><th>Status</th>${cols.map(x=>`<th>${x}</th>`).join("")}<th>Problemas</th></tr></thead><tbody>${
-    rows.map(r=>`<tr>
-      <td class="${r.errors?.length?"import-invalid":"import-valid"}">${r.errors?.length?"❌":"✅"} linha ${r.row}</td>
-      ${[r.nick,r.login,r.house,r.patent,(r.roles||[]).join(" | "),r.yuls,r.exp].map(v=>`<td>${escapeHtml(v??"")}</td>`).join("")}
-      <td class="${r.errors?.length?"import-issue-cell":""}">${escapeHtml((r.errors||[]).map(e=>e.message).join(" • "))}</td>
-    </tr>`).join("")
-  }</tbody></table></div>`;
-  box.innerHTML=summary+table;
-  qs("#playerImportConfirm").disabled=invalid>0||valid===0;
-}
-async function previewPlayerImport(){
-  const file=qs("#playerImportFile")?.files?.[0];
-  if(!file)return;
-  state.playerImport.file=file;
-  qs("#playerImportFileName").textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;
-  qs("#playerImportStatus").textContent="Lendo e validando...";
-  qs("#playerImportConfirm").disabled=true;
-  const form=new FormData();form.append("file",file);
-  try{
-    const data=await adminApi("/api/admin/players/import/preview",{method:"POST",body:form});
-    state.playerImport.preview=data;
-    renderImportPreview(data);
-    qs("#playerImportStatus").textContent=data.invalid?"Corrija os dados indicados e envie novamente.":"Planilha pronta para importação.";
-  }catch(e){qs("#playerImportPreview").innerHTML="<p>Não foi possível processar o arquivo.</p>";qs("#playerImportStatus").textContent=e.message}
-}
-async function confirmPlayerImport(){
-  const file=state.playerImport.file;if(!file)return;
-  qs("#playerImportConfirm").disabled=true;qs("#playerImportCancel").disabled=true;qs("#playerImportStatus").textContent="Importando jogadores...";
-  const form=new FormData();form.append("file",file);
-  try{
-    const data=await adminApi("/api/admin/players/import",{method:"POST",body:form});
-    qs("#playerImportStatus").textContent=`✅ ${data.created} jogadores importados com sucesso.`;
-    await initAdmin();
-    setTimeout(closePlayerImport,700);
-  }catch(e){
-    qs("#playerImportStatus").textContent=e.message;
-    qs("#playerImportConfirm").disabled=false;qs("#playerImportCancel").disabled=false;
-    if(e.issues)renderImportPreview({...state.playerImport.preview,invalid:e.issues.length,valid:0,issues:e.issues});
-  }
-}
-async function loadAdminSchedule(){
-  if(!state.admin)return;
-  try{
-    const d=await adminApi('/api/admin/schedule');
-    state.adminSchedule=d.activities||[];
-    populateScheduleEventSelect();populateScheduleMissionSelect();populateScheduleWinnerSelect();renderAdminSchedule();
-    await loadAdminScheduleChampions('2026-08');
-  }catch(e){const er=qs('#scheduleError');if(er)er.textContent=e.message;}
-}
-function populateScheduleEventSelect(){const el=qs('#scheduleEvent');if(!el)return;const current=el.value;el.innerHTML=`<option value="">Sem evento vinculado</option>`+(state.adminEvents||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.title)}</option>`).join('');if(current)el.value=current;}
-function populateScheduleMissionSelect(){const el=qs('#scheduleMission');if(!el)return;const current=el.value;el.innerHTML=`<option value="">Sem missão vinculada</option>`+(state.adminMissions||[]).map(m=>`<option value="${m.id}">Missão de ${escapeHtml(m.mission_type||'Missão')} — ${escapeHtml(m.start_at?new Date(m.start_at).toLocaleDateString('pt-BR'):'')}</option>`).join('');if(current)el.value=current;}
-function populateScheduleWinnerSelect(){const el=qs('#scheduleWinner');if(!el)return;const current=el.value;el.innerHTML=`<option value="">Sem vencedor cadastrado</option>`+(state.players||[]).map(p=>`<option value="${p.id}">${escapeHtml(p.nick)}${p.house?` • ${escapeHtml(p.house)}`:''}</option>`).join('');if(current)el.value=current;}
-function resetScheduleForm(){const f=qs('#scheduleForm');if(!f)return;f.reset();qs('#scheduleId').value='';qs('#scheduleType').value='ATIVIDADE_ESPECIAL';qs('#scheduleStatus').value='AGENDADA';qs('#scheduleEndDate').value='';qs('#scheduleFeatured').checked=false;qs('#schedulePublished').checked=true;qs('#scheduleSaveBtn').textContent='Criar atividade';qs('#scheduleError').textContent='';}
-function editAdminSchedule(id){const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;qs('#scheduleId').value=a.id;qs('#scheduleTitle').value=a.title||'';qs('#scheduleType').value=a.activity_type||'ATIVIDADE_ESPECIAL';qs('#scheduleStatus').value=a.status||'AGENDADA';qs('#scheduleDate').value=String(a.activity_date||'').slice(0,10);qs('#scheduleEndDate').value=String(a.end_date||a.activity_date||'').slice(0,10);qs('#scheduleStart').value=a.start_time?String(a.start_time).slice(0,5):'';qs('#scheduleEnd').value=a.end_time?String(a.end_time).slice(0,5):'';qs('#scheduleLocation').value=a.location||'';qs('#scheduleLink').value=a.link||'';qs('#scheduleEvent').value=a.event_id?String(a.event_id):'';qs('#scheduleMission').value=a.mission_id?String(a.mission_id):'';qs('#scheduleWinner').value=a.winner_player_id?String(a.winner_player_id):'';qs('#scheduleResult').value=a.result_text||'';qs('#scheduleCycle').value=a.cycle_label||'';qs('#scheduleDescription').value=a.description||'';qs('#scheduleFeatured').checked=Number(a.featured)===1;qs('#schedulePublished').checked=Number(a.published)===1;qs('#scheduleSaveBtn').textContent='Salvar atividade';qs('#scheduleError').textContent='';qs('#scheduleForm').scrollIntoView({behavior:'smooth',block:'center'});}
-function renderAdminSchedule(){const el=qs('#adminScheduleList');if(!el)return;el.innerHTML=(state.adminSchedule||[]).map(a=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(scheduleTypeLabel(a.activity_type))} • ${escapeHtml(scheduleDateLabel(a.activity_date))}${a.end_date&&String(a.end_date).slice(0,10)!==String(a.activity_date).slice(0,10)?` → ${escapeHtml(scheduleDateLabel(a.end_date))}`:''} • ${escapeHtml(a.status||'AGENDADA')}${Number(a.published)?'':' • Não publicado'}${a.result_text?` • ${escapeHtml(a.result_text)}`:''}</small></div><div class="editorial-actions"><button type="button" data-schedule-edit="${a.id}">✎</button><button type="button" class="delete" data-schedule-delete="${a.id}">×</button></div></div></div>`).join('')||`<div style="font-size:10px;color:#888">Nenhuma atividade cadastrada.</div>`;qsa('[data-schedule-edit]').forEach(b=>b.onclick=()=>editAdminSchedule(Number(b.dataset.scheduleEdit)));qsa('[data-schedule-delete]').forEach(b=>b.onclick=()=>deleteAdminSchedule(Number(b.dataset.scheduleDelete)));}
-async function deleteAdminSchedule(id){const a=(state.adminSchedule||[]).find(x=>Number(x.id)===Number(id));if(!a)return;if(!confirm(`Excluir "${a.title}" do cronograma?`))return;try{await adminApi(`/api/admin/schedule/${id}`,{method:'DELETE'});await loadAdminSchedule();await loadSchedule();alert('Atividade excluída.');}catch(e){qs('#scheduleError').textContent=e.message;}}
-async function loadAdminScheduleChampions(period){
-  const list=qs('#adminScheduleChampionsList');if(!list)return;
-  try{const d=await adminApi(`/api/admin/schedule-champions?period=${encodeURIComponent(period)}`);state.adminScheduleChampions=d.champions||[];renderAdminScheduleChampions();}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}
-}
-function renderAdminScheduleChampions(){const list=qs('#adminScheduleChampionsList');if(!list)return;list.innerHTML=(state.adminScheduleChampions||[]).map(c=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>🏆 ${escapeHtml(c.winner_nick)} — ${escapeHtml(c.title)}</b><small>${escapeHtml(c.period_key)} • ${escapeHtml(c.category)}${c.note?` • ${escapeHtml(c.note)}`:''}</small></div><div class="editorial-actions"><button type="button" data-schedule-champion-edit="${c.id}">✎</button><button type="button" class="delete" data-schedule-champion-delete="${c.id}">×</button></div></div></div>`).join('')||`<div style="font-size:10px;color:#888">Nenhum campeão cadastrado.</div>`;qsa('[data-schedule-champion-edit]').forEach(b=>b.onclick=()=>editScheduleChampion(Number(b.dataset.scheduleChampionEdit)));qsa('[data-schedule-champion-delete]').forEach(b=>b.onclick=()=>deleteScheduleChampion(Number(b.dataset.scheduleChampionDelete)));}
-function resetScheduleChampionForm(){qs('#scheduleChampionForm')?.reset();qs('#scheduleChampionId').value='';qs('#scheduleChampionSaveBtn').textContent='Adicionar campeão';qs('#scheduleChampionError').textContent='';}
-function editScheduleChampion(id){const c=(state.adminScheduleChampions||[]).find(x=>Number(x.id)===id);if(!c)return;qs('#scheduleChampionId').value=c.id;qs('#scheduleChampionPeriod').value=c.period_key;qs('#scheduleChampionCategory').value=c.category;qs('#scheduleChampionTitle').value=c.title;qs('#scheduleChampionWinner').value=c.winner_nick;qs('#scheduleChampionNote').value=c.note||'';qs('#scheduleChampionSaveBtn').textContent='Salvar campeão';qs('#scheduleChampionError').textContent='Editando registro.';}
-async function deleteScheduleChampion(id){if(!confirm('Excluir este registro de campeão?'))return;try{await adminApi(`/api/admin/schedule-champions/${id}`,{method:'DELETE'});await loadAdminScheduleChampions(qs('#scheduleChampionPeriod')?.value||'2026-08');await loadScheduleChampions(scheduleMonth);}catch(e){qs('#scheduleChampionError').textContent=e.message;}}
-async function loadAdminMissions(){
-  const list=qs("#adminMissionList");if(!list)return;
-  try{const d=await adminApi("/api/admin/missions");state.adminMissions=d.missions||[];renderAdminMissions();}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
-}
-function toLocalInput(v){const d=new Date(v);if(Number.isNaN(d.getTime()))return "";const z=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;}
-function renderAdminMissions(){
-  const list=qs("#adminMissionList");if(!list)return;
-  list.innerHTML=(state.adminMissions||[]).map(m=>`<div class="admin-mission-item"><div><b>${escapeHtml(missionLabel(m))}</b><small>${escapeHtml(m.status)} • ${escapeHtml(missionDate(m.start_at))} → ${escapeHtml(missionDate(m.end_at))}${m.published?"":" • Não publicada"}</small></div><div class="admin-mission-actions"><button type="button" data-mission-edit="${m.id}">✎</button><button type="button" class="delete" data-mission-cancel="${m.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhuma missão cadastrada.</div>`;
-  qsa("[data-mission-edit]").forEach(b=>b.onclick=()=>editAdminMission(Number(b.dataset.missionEdit)));
-  qsa("[data-mission-cancel]").forEach(b=>b.onclick=async()=>{if(!confirm("Encerrar esta missão sem apagar seu registro?"))return;try{await adminApi(`/api/admin/missions/${b.dataset.missionCancel}`,{method:"DELETE"});await loadAdminMissions();await loadMissions();}catch(e){alert(e.message)}});
-}
-function editAdminMission(id){const m=state.adminMissions.find(x=>Number(x.id)===id);if(!m)return;qs("#adminMissionId").value=m.id;qs("#adminMissionType").value=m.mission_type;qs("#adminMissionStart").value=toLocalInput(m.start_at);qs("#adminMissionEnd").value=toLocalInput(m.end_at);qs("#adminMissionStatus").value=m.status;qs("#adminMissionYuls").value=m.reward_yuls||0;qs("#adminMissionExp").value=m.reward_exp||0;qs("#adminMissionCards").value=m.reward_cards||"";qs("#adminMissionDescription").value=m.description||"";qs("#adminMissionInstructions").value=m.instructions||"";qs("#adminMissionError").textContent="Editando missão.";qs("#adminMissionManager")?.scrollIntoView({behavior:"smooth",block:"center"});}
-function clearAdminMissionForm(){qs("#adminMissionForm")?.reset();qs("#adminMissionId").value="";qs("#adminMissionError").textContent="";qs("#adminMissionStatus").value="AGENDADA";}
-qs("#adminMissionClear")?.addEventListener("click",clearAdminMissionForm);
-qs("#adminMissionForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#adminMissionError");err.textContent="";const body={mission_type:qs("#adminMissionType").value,start_at:qs("#adminMissionStart").value,end_at:qs("#adminMissionEnd").value,status:qs("#adminMissionStatus").value,reward_yuls:Number(qs("#adminMissionYuls").value||0),reward_exp:Number(qs("#adminMissionExp").value||0),reward_cards:qs("#adminMissionCards").value,description:qs("#adminMissionDescription").value,instructions:qs("#adminMissionInstructions").value};const id=qs("#adminMissionId").value;try{await adminApi(id?`/api/admin/missions/${id}`:"/api/admin/missions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminMissionForm();await loadAdminMissions();await loadMissions();alert(id?"Missão atualizada.":"Missão publicada.");}catch(ex){err.textContent=ex.message}});
-
-
-async function loadAdminEconomy(){
-  const list=qs("#adminEconomyList"); if(!list)return;
-  try{
-    const d=await adminApi(`/api/admin/economy${qs("#adminEconomyStatus")?.value?`?status=${encodeURIComponent(qs("#adminEconomyStatus").value)}`:""}`);
-    state.adminEconomy=d.transactions||[];
-    const totals=d.totals||[];
-    const y=totals.find(x=>x.currency==='YULS')||{}, dr=totals.find(x=>x.currency==='DRACMAS')||{};
-    qs("#adminEconomySummary").innerHTML=`<div class="admin-stat"><span>🪙 Yuls pagos</span><b>${money(y.paid||0)}</b></div><div class="admin-stat"><span>⚫ Dracmas pagos</span><b>${money(dr.paid||0)}</b></div><div class="admin-stat"><span>⏳ Pendentes</span><b>${Number(y.pending||0)+Number(dr.pending||0)}</b></div>`;
-    list.innerHTML=state.adminEconomy.map(t=>{
-      const st={AGUARDANDO_APROVACAO:'Aguardando aprovação',APROVADA_AGUARDANDO_PAGAMENTO:'Aguardando pagamento',PAGA:'Paga',ESTORNADA:'Estornada',REJEITADA:'Rejeitada'}[t.status]||t.status;
-      const actions=t.status==='AGUARDANDO_APROVACAO'?`<button class="gold small" data-econ-approve="${t.id}">Aprovar</button><button class="outline dark-outline small" data-econ-reject="${t.id}">Rejeitar</button>`:t.status==='APROVADA_AGUARDANDO_PAGAMENTO'?`<button class="gold small" data-econ-pay="${t.id}">Efetivar pagamento</button><button class="outline dark-outline small" data-econ-reject="${t.id}">Rejeitar</button>`:t.status==='PAGA'?`<button class="outline danger small" data-econ-reverse="${t.id}">Estornar</button>`:'';
-      return `<div class="economy-admin-row"><div><b>${t.currency==='YULS'?'🪙':'⚫'} ${t.amount>0?'+':''}${money(t.amount)} — ${escapeHtml(t.nick)}${escapeHtml(t.number||'')}</b><small>${escapeHtml(st)} • ${escapeHtml(t.reason||'')} • atividade: ${escapeHtml(String(t.activity_date||''))}</small><small>Origem: ${escapeHtml(t.source_type||'ADMINISTRATIVO')}${t.created_by_name?` • lançado por ${escapeHtml(t.created_by_name)}`:''}</small></div><div class="economy-admin-actions">${actions}</div></div>`;
-    }).join("")||`<div class="admin-history-empty">Nenhuma transação encontrada.</div>`;
-    qsa("[data-econ-approve]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econApprove}/approve`,{method:'POST'});await loadAdminEconomy();}catch(e){alert(e.message)}});
-    qsa("[data-econ-pay]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econPay}/pay`,{method:'POST'});await loadAdminEconomy();await initAdmin();}catch(e){alert(e.message)}});
-    qsa("[data-econ-reject]").forEach(b=>b.onclick=async()=>{if(!confirm('Rejeitar esta transação?'))return;try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econReject}/reject`,{method:'POST'});await loadAdminEconomy();}catch(e){alert(e.message)}});
-    qsa("[data-econ-reverse]").forEach(b=>b.onclick=async()=>{if(!confirm('Estornar esta transação? O saldo será revertido e o histórico será preservado.'))return;try{await adminApi(`/api/admin/economy/transactions/${b.dataset.econReverse}/reverse`,{method:'POST'});await loadAdminEconomy();await initAdmin();}catch(e){alert(e.message)}});
-  }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
-}
-function populateEconomyPlayers(){const s=qs('#economyPlayer');if(!s)return;s.innerHTML='<option value="">Jogador</option>'+(state.players||[]).filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))} • ${escapeHtml(p.house||'Sem Casa')}</option>`).join('');}
-
-
-function auditSourceIcon(source){return ({AUDITORIA:'🛡️',JOGADOR:'👤',CARD:'🃏',RANKING:'🏆',CASA:'🏰'})[source]||'📜';}
-function auditStatusLabel(code){const n=Number(code||0);if(n>=200&&n<300)return {label:'Concluído',cls:'ok'};if(n>=400&&n<500)return {label:'Negado',cls:'warn'};if(n>=500)return {label:'Erro',cls:'bad'};return {label:String(n||'—'),cls:'neutral'};}
-function formatAuditDate(v){try{return new Date(v).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}catch{return String(v||'')}}
-function auditHumanAction(x){
-  if(x.source==='AUDITORIA'){
-    const m=String(x.action||'').match(/^(POST|PUT|PATCH|DELETE)\s+\/api\/admin\/(.+)$/i);
-    if(m){const verb={POST:'Criou/alterou',PUT:'Atualizou',PATCH:'Atualizou',DELETE:'Arquivou/removou'}[m[1].toUpperCase()]||m[1];return `${verb} ${m[2]}`;}
-  }
-  return String(x.action||'Registro administrativo');
-}
-async function loadAdminAudit(){
-  const list=qs('#adminAuditList');if(!list)return;
-  try{
-    const params=new URLSearchParams();
-    const q=qs('#adminAuditSearch')?.value?.trim()||'';const source=qs('#adminAuditSource')?.value||'';const from=qs('#adminAuditFrom')?.value||'';const to=qs('#adminAuditTo')?.value||'';
-    if(q)params.set('q',q);if(source)params.set('source',source);if(from)params.set('from',from);if(to)params.set('to',to);params.set('limit','100');
-    const d=await adminApi(`/api/admin/audit?${params.toString()}`);state.adminAudit=d.entries||[];
-    const counts=state.adminAudit.reduce((a,x)=>{const k=x.source||'OUTRO';a[k]=(a[k]||0)+1;return a},{});
-    const sum=qs('#adminAuditSummary'); if(sum)sum.innerHTML=`<span>📜 ${state.adminAudit.length} registros</span><span>🛡️ ${counts.AUDITORIA||0} ações diretas</span><span>🧩 ${state.adminAudit.length-(counts.AUDITORIA||0)} históricos</span>`;
-    list.innerHTML=state.adminAudit.map(x=>{const st=auditStatusLabel(x.status_code);return `<article class="audit-row"><div class="audit-icon">${auditSourceIcon(x.source)}</div><div class="audit-main"><div class="audit-top"><b>${escapeHtml(auditHumanAction(x))}</b><span class="audit-status ${st.cls}">${st.label}</span></div><small>${escapeHtml(x.actor||'Administração')} • ${escapeHtml(String(x.entity||'sistema'))}${x.entity_id?` #${escapeHtml(String(x.entity_id))}`:''} • ${escapeHtml(formatAuditDate(x.created_at))}</small>${x.detail?`<p>${escapeHtml(String(x.detail))}</p>`:''}</div></article>`}).join('')||`<div class="admin-history-empty">Nenhum registro encontrado para esses filtros.</div>`;
-  }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;const sum=qs('#adminAuditSummary');if(sum)sum.innerHTML='';}
-}
-
-function settingRowsToMap(rows){
-  const out={};(rows||[]).forEach(x=>out[x.key]=x.value);return out;
-}
-function prettyEventType(v){return ({JOGO:'🎮 Evento de Jogo',ESPECIAL:'🃏 Evento Especial',TEMPORADA:'🎫 Evento de Temporada',LEGIAO:'⚔️ Evento de Legião'}[v]||v)}
-function renderSettingsChips(targetId,key,items){
-  const el=qs('#'+targetId);if(!el)return;
-  el.innerHTML=(items||[]).map(v=>`<span class="settings-chip"><span>${escapeHtml(key==='event_types'?prettyEventType(v):v)}</span><button type="button" title="Remover" data-settings-remove="${escapeHtml(key)}" data-settings-value="${escapeHtml(v)}">×</button></span>`).join('')||`<span class="admin-history-empty">Nenhum item cadastrado.</span>`;
-}
-function applyPortalSettingsToForms(cfg){
-  const missions=cfg.mission_types||[];
-  const events=cfg.event_types||[];
-  const origins=cfg.card_origins||[];
-  const missionSel=qs('#adminMissionType');
-  if(missionSel){const current=missionSel.value;missionSel.innerHTML=missions.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');if(missions.includes(current))missionSel.value=current;else if(missions[0])missionSel.value=missions[0];}
-  const eventSel=qs('#eventType');
-  if(eventSel){const current=eventSel.value;eventSel.innerHTML=events.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(prettyEventType(v))}</option>`).join('');if(events.includes(current))eventSel.value=current;else if(events[0])eventSel.value=events[0];}
-  state.cardOrigins=origins; if(typeof populateCardSelects==='function')populateCardSelects();
-  if(qs('#settingKingdomName'))qs('#settingKingdomName').value=cfg.kingdom_name||'';
-  if(qs('#settingKingdomMotto'))qs('#settingKingdomMotto').value=cfg.kingdom_motto||'';
-  if(qs('#settingTimezone'))qs('#settingTimezone').value=cfg.timezone||'America/Sao_Paulo';
-  if(qs('#settingFooter'))qs('#settingFooter').value=cfg.footer_text||'';
-}
-async function loadAdminSettings(){
-  const err=qs('#settingsGlobalError');if(err)err.textContent='';
-  try{
-    const d=await adminApi('/api/admin/settings');
-    const cfg=settingRowsToMap(d.settings||[]);state.portalSettings=cfg;applyPortalSettingsToForms(cfg);
-    renderSettingsChips('settingsMissionTypes','mission_types',cfg.mission_types||[]);
-    renderSettingsChips('settingsEventTypes','event_types',cfg.event_types||[]);
-    renderSettingsChips('settingsCardOrigins','card_origins',cfg.card_origins||[]);
-    renderSettingsChips('settingsCardElements','card_elements',cfg.card_elements||[]);
-  }catch(e){if(err)err.textContent=e.message;}
-}
-async function updatePortalSetting(key,value){
-  try{
-    const d=await adminApi(`/api/admin/settings/${encodeURIComponent(key)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value})});
-    state.portalSettings=state.portalSettings||{};state.portalSettings[key]=d.value;applyPortalSettingsToForms(state.portalSettings);
-    renderSettingsChips('settingsMissionTypes','mission_types',state.portalSettings.mission_types||[]);
-    renderSettingsChips('settingsEventTypes','event_types',state.portalSettings.event_types||[]);
-    renderSettingsChips('settingsCardOrigins','card_origins',state.portalSettings.card_origins||[]);
-    renderSettingsChips('settingsCardElements','card_elements',state.portalSettings.card_elements||[]);
-    await loadAdminSettings();
-    return true;
-  }catch(e){const err=qs('#settingsGlobalError');if(err)err.textContent=e.message;else alert(e.message);return false;}
-}
-function addConfiguredValue(key,inputId){
-  const input=qs('#'+inputId);const value=(input?.value||'').trim();if(!value)return;
-  const current=Array.isArray(state.portalSettings?.[key])?state.portalSettings[key].slice():[];
-  const normalized=key==='event_types'?value.toUpperCase():value;
-  if(current.some(x=>String(x).toLowerCase()===normalized.toLowerCase())){alert('Esse item já existe.');return;}
-  current.push(normalized);updatePortalSetting(key,current).then(ok=>{if(ok)input.value='';});
-}
-qsa('[data-settings-add]')?.forEach(btn=>btn.addEventListener('click',()=>{
-  const key=btn.dataset.settingsAdd;const inputId={mission_types:'newMissionType',event_types:'newEventType',card_origins:'newCardOrigin',card_elements:'newCardElement'}[key];if(inputId)addConfiguredValue(key,inputId);
-}));
-document.addEventListener('click',e=>{const b=e.target.closest('[data-settings-remove]');if(!b)return;const key=b.dataset.settingsRemove;const value=b.dataset.settingsValue;const current=Array.isArray(state.portalSettings?.[key])?state.portalSettings[key].slice():[];if(current.length<=1){alert('A configuração precisa manter pelo menos um item.');return;}if(!confirm(`Remover "${value}" da configuração?`))return;updatePortalSetting(key,current.filter(x=>x!==value));});
-qs('#portalIdentityForm')?.addEventListener('submit',async e=>{e.preventDefault();const values={kingdom_name:qs('#settingKingdomName').value,kingdom_motto:qs('#settingKingdomMotto').value,timezone:qs('#settingTimezone').value,footer_text:qs('#settingFooter').value};for(const [k,v] of Object.entries(values)){const ok=await updatePortalSetting(k,v);if(!ok)return;}alert('Identidade do Reino atualizada.');});
-
-async function loadAdminAllies(){
-  const list=qs("#adminAllyList");if(!list)return;
-  try{
-    const d=await adminApi("/api/admin/allies"); state.allies=d.allies||[];
-    list.innerHTML=state.allies.map(a=>`<div class="admin-user-row"><div><b>🤝 ${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)} • ${escapeHtml(a.origin_kingdom||"Reino não informado")}${a.origin_house?` • ${escapeHtml(a.origin_house)}`:""} • ${a.active?"Ativo":"Suspenso"} • ${a.card_count||0} Cards${a.last_login?` • último acesso ${escapeHtml(new Date(a.last_login).toLocaleString("pt-BR"))}`:""}</small></div><div class="admin-user-actions"><button type="button" class="outline small" data-ally-cards="${a.id}">Cards</button><button type="button" class="outline small" data-ally-edit="${a.id}">Editar</button><button type="button" class="outline small ${a.active?"danger":""}" data-ally-toggle="${a.id}" data-ally-active="${a.active?0:1}">${a.active?"Suspender":"Reativar"}</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhum Aliado Oculto cadastrado.</div>`;
-    qsa("[data-ally-edit]").forEach(b=>b.onclick=()=>editAdminAlly(Number(b.dataset.allyEdit)));
-    qsa("[data-ally-toggle]").forEach(b=>b.onclick=async()=>{try{await adminApi(`/api/admin/allies/${b.dataset.allyToggle}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:Number(b.dataset.allyActive)===1})});await loadAdminAllies();}catch(e){alert(e.message)}});
-    qsa("[data-ally-cards]").forEach(b=>b.onclick=()=>openAllyCardManager(Number(b.dataset.allyCards)));
-  }catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
-}
-function clearAdminAllyForm(){const f=qs("#adminAllyForm");if(f)f.reset();qs("#adminAllyId").value="";qs("#adminAllyActive").checked=true;qs("#adminAllyPassword").required=true;qs("#adminAllyError").textContent="";}
-function editAdminAlly(id){const a=(state.allies||[]).find(x=>Number(x.id)===id);if(!a)return;qs("#adminAllyId").value=a.id;qs("#adminAllyUsername").value=a.username||"";qs("#adminAllyDisplayName").value=a.display_name||"";qs("#adminAllyPassword").value="";qs("#adminAllyPassword").required=false;qs("#adminAllyKingdom").value=a.origin_kingdom||"";qs("#adminAllyHouse").value=a.origin_house||"";qs("#adminAllyPatent").value=a.patent||"";qs("#adminAllyRole").value=a.role||"";qs("#adminAllyDescription").value=a.description||"";qs("#adminAllyActive").checked=Number(a.active)===1;qs("#adminAllyError").textContent="Editando aliado.";qs("#adminAlliesPanel")?.scrollIntoView({behavior:"smooth",block:"center"});}
-async function openAllyCardManager(id){
-  state.selectedAllyId=id; const a=(state.allies||[]).find(x=>Number(x.id)===id);
-  qs("#allyCardManager").hidden=false; qs("#allyCardManagerTitle").textContent=`Cards de ${a?.display_name||"Aliado"}`;
-  try{
-    const [cards,cat]=await Promise.all([adminApi(`/api/admin/allies/${id}/cards`),adminApi("/api/admin/cards")]);
-    state.allyCards=cards.cards||[]; const all=cat.cards||[]; const sel=qs("#allyCardSelect"); if(sel)sel.innerHTML='<option value="">Selecionar Card...</option>'+all.filter(c=>Number(c.active??1)!==0).map(c=>`<option value="${c.id}">${escapeHtml(c.name_pt||c.name)}${c.name_jp?` • ${escapeHtml(c.name_jp)}`:""}</option>`).join("");
-    renderAllyAdminCards();
-  }catch(e){qs("#allyCardList").innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`}
-}
-function renderAllyAdminCards(){const el=qs("#allyCardList");if(!el)return;el.innerHTML=(state.allyCards||[]).map(c=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>🃏 ${escapeHtml(c.name_pt||c.name)}</b><small>${escapeHtml(c.category||"Outros")} • ⚡ ${Number(c.power_value||0)} • ${escapeHtml(c.acquisition_name||"Administrativo")}</small></div><div class="editorial-actions"><button type="button" class="delete" data-ally-card-remove="${c.id}">×</button></div></div></div>`).join("")||`<div class="admin-history-empty">Este aliado ainda não possui Cards.</div>`;qsa("[data-ally-card-remove]").forEach(b=>b.onclick=async()=>{if(!confirm("Remover este Card do aliado?"))return;try{await adminApi(`/api/admin/allies/${state.selectedAllyId}/cards/${b.dataset.allyCardRemove}`,{method:"DELETE"});await openAllyCardManager(state.selectedAllyId);await loadAdminAllies();}catch(e){alert(e.message)}});}
-qs("#closeAllyCardManager")?.addEventListener("click",()=>{qs("#allyCardManager").hidden=true;state.selectedAllyId=null;});
-qs("#grantAllyCardBtn")?.addEventListener("click",async()=>{const id=state.selectedAllyId,card=Number(qs("#allyCardSelect")?.value||0);if(!id||!card)return alert("Selecione um Card.");try{await adminApi(`/api/admin/allies/${id}/cards`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({card_id:card,acquisition_name:qs("#allyCardAcquisition")?.value||"Concessão administrativa"})});qs("#allyCardSelect").value="";qs("#allyCardAcquisition").value="";await openAllyCardManager(id);await loadAdminAllies();}catch(e){alert(e.message)}});
-qs("#adminAllyClear")?.addEventListener("click",clearAdminAllyForm);
-qs("#adminAllyForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminAllyId").value;const body={username:qs("#adminAllyUsername").value,display_name:qs("#adminAllyDisplayName").value,password:qs("#adminAllyPassword").value,origin_kingdom:qs("#adminAllyKingdom").value,origin_house:qs("#adminAllyHouse").value,patent:qs("#adminAllyPatent").value,role:qs("#adminAllyRole").value,description:qs("#adminAllyDescription").value,active:qs("#adminAllyActive").checked};const err=qs("#adminAllyError");err.textContent="Salvando...";try{await adminApi(id?`/api/admin/allies/${id}`:"/api/admin/allies",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminAllyForm();await loadAdminAllies();err.textContent="Aliado salvo.";}catch(ex){err.textContent=ex.message;}});
-
-async function loadAdminSystemHealth(){
-  const text=qs('#adminSystemHealthText');
-  const card=qs('#adminSystemHealthCard');
-  if(text) text.textContent='Verificando conexão...';
-  try{
-    const d=await adminApi('/api/admin/health');
-    if(text) text.textContent=`Banco conectado • ${Number(d.latency_ms||0)} ms • versão ${escapeHtml(d.version||'')}`;
-    card?.classList.remove('security-error');
-    card?.classList.add('security-ok');
-  }catch(e){
-    if(text) text.textContent=`Falha na conexão: ${e.message||'erro desconhecido'}`;
-    card?.classList.remove('security-ok');
-    card?.classList.add('security-error');
-  }
-}
-async function downloadAdminBackup(){
-  const b=qs('#adminBackupDownloadBtn');if(b){b.disabled=true;b.dataset.oldText=b.textContent;b.textContent='⏳ Gerando backup...';}
-  try{
-    const options={credentials:'same-origin',headers:{}};const key=state.adminKey||getStoredAdminKey();if(key)options.headers['x-admin-key']=key;
-    const r=await fetch('/api/admin/backup/export.json',options);
-    if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar o backup.');}
-    const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`portal-spade-backup-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
-  }catch(e){alert(e.message||'Não foi possível gerar o backup.');}
-  finally{if(b){b.disabled=false;b.textContent=b.dataset.oldText||'📥 Baixar backup';}}
-}
-function openPlayerBulkFromCenter(){qs('#bulkUpdatePlayersBtn')?.click();}
-function openCardBulkFromCenter(){qs('#importCardsSheetBtn')?.click();}
-function setupAdminSecurityAndBulk(){
-  const bind=(id,fn)=>{const el=qs(id);if(el)el.onclick=fn;};
-  bind('#adminSystemHealthRefresh',loadAdminSystemHealth);
-  bind('#adminBackupDownloadBtn',downloadAdminBackup);
-  bind('#bulkCenterPlayersExport',()=>qs('#exportPlayersBtn')?.click());
-  bind('#bulkCenterPlayersImport',openPlayerBulkFromCenter);
-  bind('#bulkCenterCardsExport',()=>qs('#downloadCardsSheetBtn')?.click());
-  bind('#bulkCenterCardsImport',openCardBulkFromCenter);
-  const playerExport=qs('#bulkCenterPlayersExport'),playerImport=qs('#bulkCenterPlayersImport');
-  const cardExport=qs('#bulkCenterCardsExport'),cardImport=qs('#bulkCenterCardsImport');
-  [playerExport,playerImport].forEach(el=>{if(el)el.style.display=hasAdminPermission('players')?'':'none';});
-  [cardExport,cardImport].forEach(el=>{if(el)el.style.display=hasAdminPermission('cards')?'':'none';});
-}
-
-async function initAdmin(){
-  closePlayerImport();
-  if(hasAdminPermission("rankings")) loadAdminRankingBattles();
-  if(!state.admin)return;
-  setAdminPermissionVisibility();
-  setupAdminSecurityAndBulk();
-  if(hasAdminPermission('settings')) loadAdminSystemHealth();
-  try{
-    if(hasAdminPermission("dashboard")){ const ov=await adminApi("/api/admin/overview"); renderAdminStats(ov); }
-    if(hasAdminPermission("settings")) await loadAdminSettings();
-    if(hasAdminPermission("reports")) await loadAdminReports();
-    if(hasAdminPermission("players")){ const pl=await adminApi("/api/admin/players"); state.players=pl.players||[]; populateAdminFilters();renderAdminList(state.players,qs("#adminSearch")?.value||""); if(state.selectedPlayer) await selectAdminPlayer(state.selectedPlayer.id); }
-    if(hasAdminPermission("cards")) await loadAdminCards();
-    if(hasAdminPermission("economy")){ populateEconomyPlayers(); await loadAdminEconomy(); }
-    if(hasAdminPermission("notifications")){ populateNotificationPlayers(); await loadAdminNotifications(); }
-    if(hasAdminPermission("events")) { try { const d=await adminApi("/api/admin/events"); state.adminEvents=d.events||[]; } catch(e){console.warn(e.message)} }
-    if(hasAdminPermission("schedule")) await loadAdminSchedule();
-    if(hasAdminPermission("missions")) await loadAdminMissions();
-    if(hasAdminPermission("admin_users")) await loadAdminUsers();
-    if(hasAdminPermission("houses")) await loadAdminHouses();
-    if(hasAdminPermission("hierarchy")) await loadAdminHierarchy();
-    if(hasAdminPermission("journal")) await loadAdminArticles();
-    if(hasAdminPermission("library")) await loadAdminLibrary();
-    if(hasAdminPermission("allies")) await loadAdminAllies();
-    if(hasAdminPermission("simulator_trainings")){ await loadAdminSimulatorTrainings(); }
-    if(hasAdminPermission("audit")) await loadAdminAudit();
-  }catch(e){console.error(e)}
-}
-
-
-async function loadAdminReports(){
-  try{
-    const d=await adminApi("/api/admin/reports");
-    const k=[
-      ["👥","Jogadores ativos",d.players.active],
-      ["⏸️","Suspensos",d.players.suspended],
-      ["🃏","Cards ativos",d.cards.active],
-      ["🪙","Yuls em circulação",money(d.economy.yuls)],
-      ["⚫","Dracmas registrados",money(d.economy.dracmas)],
-      ["⚔️","Missões em andamento",d.missions.ongoing],
-      ["🎪","Eventos em andamento",d.events.ongoing],
-      ["⏳","Batalhas aguardando aprovação",d.battles.pending],
-      ["💬","Status publicados hoje",d.statuses.today]
-    ];
-    qs("#adminReportsSummary").innerHTML=k.map(x=>`<div class="report-kpi"><span>${x[0]} ${x[1]}</span><b>${x[2]}</b></div>`).join("");
-    const row=(p,metric)=>`<div class="report-row"><span class="report-rank">${metric.i}</span><div><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")}</small></div><strong>${metric.v}</strong></div>`;
-    qs("#reportTopPower").innerHTML=d.topPower.length?d.topPower.map((p,i)=>row(p,{i:i+1,v:`⚔️ ${Number(p.power||0).toLocaleString("pt-BR")}`})).join(""):"<p class='admin-history-empty'>Sem dados.</p>";
-    qs("#reportTopActivity").innerHTML=d.topActivity.length?d.topActivity.map((p,i)=>row(p,{i:i+1,v:`⭐ ${Number(p.activity||0).toLocaleString("pt-BR")}`})).join(""):"<p class='admin-history-empty'>Sem dados.</p>";
-    qs("#reportHouseStats").innerHTML=d.houseStats.length?`<div class="report-house-table"><div class="report-house-head"><span>Casa</span><span>Membros</span><span>Missões</span><span>Poder</span><span>Yuls</span></div>${d.houseStats.map(h=>`<div class="report-house-row"><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><span>${h.members}</span><span>${h.missions}</span><span>${Number(h.power||0).toLocaleString("pt-BR")}</span><span>🪙 ${money(h.yuls)}</span></div>`).join("")}</div>`:"<p class='admin-history-empty'>Nenhuma Casa cadastrada.</p>";
-    qs("#reportUpdatedAt").textContent=`Atualizado em ${new Date().toLocaleString("pt-BR")}`;
-  }catch(e){
-    const el=qs("#adminReportsSummary"); if(el) el.innerHTML=`<div class="report-error">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function renderAdminStats(ov){
-  const cards=[["👥","Jogadores",ov.players],["🏰","Casas",ov.houses],["📰","Notícias",ov.news],["📖","Edições",ov.editions],["🪙","Yuls em circulação",money(ov.yuls)],["🔐","Sem senha",ov.withoutPassword]];
-  qs("#adminStats").innerHTML=cards.map(c=>`<div class="admin-stat"><span>${c[0]} ${c[1]}</span><b>${c[2]}</b></div>`).join("");
-}
-
-function renderAdminList(players,term){
-  const t=String(term||"").trim().toLowerCase();
-  const f=state.adminFilters;
-  let filtered=(players||[]).filter(p=>{
-    const text=`${p.nick||""} ${p.number||""} ${p.identifier||""} ${p.house||""}`.toLowerCase();
-    if(t&&!text.includes(t))return false;
-    if(f.house&&String(p.house||"")!==String(f.house))return false;
-    if(f.patent&&String(p.patent||"")!==String(f.patent))return false;
-    if(f.visibility!==""&&String(Number(p.public_profile))!==String(f.visibility))return false;
-    if(f.status!==""&&String(Number(p.active ?? 1))!==String(f.status))return false;
-    if(f.role&&!((p.roles||[]).map(r=>String(r.id)).includes(String(f.role))))return false;
-    return true;
-  });
-
-  filtered.sort((a,b)=>{
-    if(f.sort==="missions")return Number(b.missions||0)-Number(a.missions||0);
-    if(f.sort==="yuls")return Number(b.yuls||0)-Number(a.yuls||0);
-    if(f.sort==="power")return Number(b.power||0)-Number(a.power||0);
-    if(f.sort==="ranking")return (Number(a.ranking||999999)-Number(b.ranking||999999));
-    if(f.sort==="updated")return new Date(b.updated_at||0)-new Date(a.updated_at||0);
-    return `${a.nick||""}`.localeCompare(`${b.nick||""}`,"pt-BR");
-  });
-
-  qs("#playerCountLabel").textContent=`${filtered.length} visíveis`;
-
-  qs("#adminPlayerList").innerHTML=filtered.length
-    ? filtered.map(p=>`<button class="admin-player ${state.selectedPlayer?.id===p.id?"selected":""}" data-player-id="${p.id}" type="button">
-        <span class="player-select-wrap" data-stop-row-click><input class="player-select" type="checkbox" data-player-check="${p.id}" ${state.selectedPlayers.has(Number(p.id))?"checked":""}></span>
-        <span><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent||"Sem patente")} · ${(p.roles||[]).map(r=>escapeHtml(r.name)).join(", ")||"sem cargos"} · ${p.has_password?"🔐 senha definida":"⚠️ sem senha"} · ${Number(p.active??1)?"🟢 ativo":"⛔ suspenso"}</small></span>
-        <span class="player-yuls">🪙 ${money(p.yuls)}</span>
-      </button>`).join("")
-    : `<div style="padding:30px;text-align:center;color:#888;font-size:11px">Nenhum jogador encontrado.</div>`;
-
-  qsa(".admin-player").forEach(b=>b.onclick=()=>selectAdminPlayer(Number(b.dataset.playerId)));
-  qsa("[data-player-check]").forEach(c=>{
-    c.onclick=e=>e.stopPropagation();
-    c.onchange=e=>{
-      const id=Number(e.target.dataset.playerCheck);
-      if(e.target.checked)state.selectedPlayers.add(id);else state.selectedPlayers.delete(id);
-      renderAdminList(state.players,qs("#adminSearch").value);
-    };
-  });
-  updateBulkCount();
-}
-function populateAdminFilters(){
-  const houses=[...new Set((state.players||[]).map(p=>p.house).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-  const patents=[...new Set((state.players||[]).map(p=>p.patent).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-  const roleList=state.adminHierarchy?.roles||[];
-
-  const h=qs("#adminHouseFilter"),p=qs("#adminPatentFilter"),r=qs("#adminRoleFilter");
-  if(h)h.innerHTML=`<option value="">Todas as Casas</option>`+houses.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
-  if(p)p.innerHTML=`<option value="">Todas as Patentes</option>`+patents.map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
-  if(r)r.innerHTML=`<option value="">Todos os Cargos</option>`+roleList.map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("");
-  if(h)h.value=state.adminFilters.house||""; if(p)p.value=state.adminFilters.patent||""; if(r)r.value=state.adminFilters.role||""; const st=qs("#adminStatusFilter"); if(st)st.value=state.adminFilters.status||"";
-}
-
-function getFilteredAdminPlayers(){
-  const q=(qs("#adminSearch")?.value||"").trim().toLowerCase();
-  let list=[...(state.players||[])];
-  const f=state.adminFilters||{};
-  if(q)list=list.filter(p=>`${p.nick||""} ${p.number||""} ${p.identifier||""} ${p.house||""}`.toLowerCase().includes(q));
-  if(f.house)list=list.filter(p=>String(p.house||"")===String(f.house));
-  if(f.patent)list=list.filter(p=>String(p.patent||"")===String(f.patent));
-  if(f.role)list=list.filter(p=>(p.roles||[]).some(r=>Number(r.id)===Number(f.role)));
-  if(f.visibility!=="")list=list.filter(p=>Number(p.public_profile??1)===Number(f.visibility));
-  if(f.status!=="")list=list.filter(p=>Number(p.active??1)===Number(f.status));
-  const sort=f.sort||"nick";
-  const numeric=k=>(a,b)=>Number(b[k]||0)-Number(a[k]||0);
-  if(sort==="missions")list.sort(numeric("missions"));
-  else if(sort==="yuls")list.sort(numeric("yuls"));
-  else if(sort==="power")list.sort(numeric("power"));
-  else if(sort==="ranking")list.sort((a,b)=>(Number(a.ranking||999999)-Number(b.ranking||999999)));
-  else if(sort==="updated")list.sort((a,b)=>new Date(b.updated_at||0)-new Date(a.updated_at||0));
-  else list.sort((a,b)=>String(a.nick||"").localeCompare(String(b.nick||""),"pt-BR"));
-  return list;
-}
-
-function updateBulkCount(){
-  const el=qs("#bulkSelectedCount");
-  if(el)el.textContent=`${state.selectedPlayers.size} ${state.selectedPlayers.size===1?"selecionado":"selecionados"}`;
-}
-
-function openExportVisiblePlayers(){
-  const ids=[...new Set(getFilteredAdminPlayers().map(p=>Number(p.id)).filter(Boolean))];
-  if(!ids.length){alert("Nenhum jogador visível para exportar.");return;}
-  const qsIds=ids.join(",");
-  const url=`/api/admin/players/export.xlsx?ids=${encodeURIComponent(qsIds)}`;
-  fetch(url,{headers:{"x-admin-key":state.adminKey||getStoredAdminKey()}}).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||"Não foi possível gerar a planilha.");return r.blob();}).then(blob=>{const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download="jogadores-spade-visiveis.xlsx";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);}).catch(e=>alert(e.message));
-}
-
-function openBulkModal(type){
-  const ids=[...state.selectedPlayers].filter(id=>state.players.some(p=>Number(p.id)===id));
-  if(!ids.length){alert("Selecione pelo menos um jogador.");return;}
-  let title="",body="";
-  if(type==="yuls")title="🪙 Movimentar Yuls",body=`<div class="bulk-modal-grid"><select id="bulkYulsMode"><option value="add">Adicionar Yuls</option><option value="remove">Retirar Yuls</option></select><input id="bulkYulsAmount" type="number" min="1" placeholder="Valor"><textarea id="bulkYulsReason" placeholder="Motivo"></textarea></div>`;
-  if(type==="cards"){
-    const catalog=(state.adminCards||[]).filter(c=>Number(c.active)===1);
-    body=`<div class="bulk-card-distribution"><div class="bulk-modal-grid">
-      <select id="bulkCardSelect">${catalog.map(c=>`<option value="${c.id}">${escapeHtml(c.name)} — ${escapeHtml(c.category)}</option>`).join("")||`<option value="">Nenhum card ativo</option>`}</select>
-      <select id="bulkCardSourceType"><option value="MISSAO">🎯 Missão</option><option value="EVENTO">🎉 Evento</option><option value="LOJA">🛒 Loja</option><option value="PATENTE">🎖️ Patente</option><option value="OUTRO">◆ Outra origem</option></select>
-      <input id="bulkCardSourceName" placeholder="Nome da missão/evento/origem">
-    </div><p class="bulk-card-help">O mesmo card será lançado para todos os selecionados. Se algum jogador já possuir o card, ele será apenas informado como ignorado.</p></div>`;
-  }
-  if(type==="house")title="🏰 Alterar Casa",body=`<div class="bulk-modal-grid"><select id="bulkHouse">${(state.adminHouses||[]).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select></div>`;
-  if(type==="patent")title="🎖️ Alterar Patente",body=`<div class="bulk-modal-grid"><select id="bulkPatent">${(state.adminHierarchy?.patents||[]).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select></div>`;
-  if(type==="roles")title="👑 Definir Cargos",body=`<div class="bulk-role-options">${(state.adminHierarchy?.roles||[]).map(x=>`<label class="role-option"><input type="checkbox" name="bulkRoleIds" value="${x.id}"><span><b>${escapeHtml(x.name)}</b><small>${x.salary>0?`🪙 ${money(x.salary)}`:""}</small></span></label>`).join("")||`<span style="font-size:10px;color:#888">Nenhum cargo cadastrado.</span>`}</div>`;
-  if(type==="missions")title="📋 Ajustar Missões",body=`<div class="bulk-modal-grid"><select id="bulkMissionMode"><option value="add">Adicionar missões</option><option value="set">Definir quantidade</option></select><input id="bulkMissionAmount" type="number" min="0" placeholder="Quantidade"></div>`;
-  if(type==="attributes"){
-    title="📊 Ajustar atributos";
-    body=`<div class="bulk-modal-grid"><select id="bulkAttribute"><option value="hp">❤️ HP</option><option value="mana">♦️ Mana</option><option value="exp">⭐ EXP</option><option value="achievements">🏆 Conquistas</option><option value="ranking">📈 Ranking</option><option value="grimoire">📖 Grimório</option></select><div id="bulkAttributeFields"></div></div><p class="bulk-card-help">A alteração será aplicada a todos os selecionados. Para EXP, você pode adicionar ou definir o valor. Para Grimório, informe nome e nível.</p>`;
-  }
-  if(type==="power")title="⚔️ Recalcular Força",body=`<p class="bulk-card-help">A Força será recalculada automaticamente com base nos Cards atualmente vinculados a cada jogador.</p>`;
-  if(type==="visibility")title="👁️ Visibilidade",body=`<div class="bulk-modal-grid"><select id="bulkVisibility"><option value="1">Tornar público</option><option value="0">Ocultar perfil</option></select></div>`;
-  if(type==="status")title="🔐 Acesso ao Portal",body=`<div class="bulk-modal-grid"><select id="bulkActive"><option value="1">🟢 Ativar acesso</option><option value="0">⛔ Suspender acesso</option></select></div><p class="bulk-card-help">Suspender preserva o cadastro, Cards, economia, missões e histórico.</p>`;
-
-  const modal=document.createElement("div");
-  modal.className="bulk-modal-backdrop";modal.id="bulkModal";
-  modal.innerHTML=`<div class="bulk-modal"><h3>${title}</h3><p>${ids.length} jogador(es) selecionado(s). A alteração será aplicada a todos.</p>${body}<div class="bulk-modal-actions"><button type="button" class="outline dark-outline" id="bulkCancel">Cancelar</button><button type="button" class="gold" id="bulkConfirm">Aplicar</button></div></div>`;
-  document.body.appendChild(modal);
-  qs("#bulkCancel").onclick=()=>modal.remove();
-  if(type==="attributes"){
-    const renderFields=()=>{
-      const field=qs("#bulkAttribute")?.value, box=qs("#bulkAttributeFields"); if(!box)return;
-      if(field==="grimoire") box.innerHTML=`<input id="bulkGrimoireName" placeholder="Nome do Grimório"><input id="bulkGrimoireLevel" type="number" min="1" max="999" value="1" placeholder="Nível">`;
-      else if(field==="exp") box.innerHTML=`<select id="bulkExpMode"><option value="add">Adicionar EXP</option><option value="set">Definir EXP</option></select><input id="bulkAttributeAmount" type="number" min="0" placeholder="Valor">`;
-      else box.innerHTML=`<input id="bulkAttributeAmount" type="number" min="0" placeholder="Novo valor">`;
-    };
-    qs("#bulkAttribute").onchange=renderFields; renderFields();
-  }
-  qs("#bulkConfirm").onclick=()=>submitBulkAction(type,ids,modal);
-}
-
-async function submitBulkAction(type,ids,modal){
-  let action="",payload={player_ids:ids};
-  if(type==="yuls"){
-    payload.amount=Math.round(Number(qs("#bulkYulsAmount").value||0));
-    payload.reason=qs("#bulkYulsReason").value.trim()||"Movimentação administrativa em massa";
-    action=qs("#bulkYulsMode").value==="add"?"add_yuls":"remove_yuls";
-  }
-  if(type==="cards"){
-    payload.card_id=Number(qs("#bulkCardSelect").value||0);
-    payload.acquisition_type=qs("#bulkCardSourceType").value;
-    payload.acquisition_name=qs("#bulkCardSourceName").value.trim();
-    try{
-      const r=await adminApi("/api/admin/cards/distribute",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-      modal.remove();state.selectedPlayers.clear();await initAdmin();
-      const skipped=(r.skipped||[]).map(x=>`${x.nick}: ${x.reason}`).join("\n");
-      alert(`Card distribuído para ${r.added.length} jogador(es).${skipped?`\n\nIgnorados:\n${skipped}`:""}`);
-    }catch(e){alert(e.message)}
-    return;
-  }
-  if(type==="house"){action="set_house";payload.house_id=Number(qs("#bulkHouse").value)}
-  if(type==="patent"){action="set_patent";payload.patent_id=Number(qs("#bulkPatent").value)}
-  if(type==="roles"){action="set_roles";payload.role_ids=[...modal.querySelectorAll('input[name="bulkRoleIds"]:checked')].map(x=>Number(x.value))}
-  if(type==="missions"){action=qs("#bulkMissionMode").value==="add"?"add_missions":"set_missions";payload.amount=Math.round(Number(qs("#bulkMissionAmount").value||0))}
-  if(type==="attributes"){
-    const field=qs("#bulkAttribute")?.value;
-    if(field==="grimoire"){
-      action="set_grimoire";payload.grimoire=qs("#bulkGrimoireName")?.value?.trim()||"";payload.grimoire_level=Math.round(Number(qs("#bulkGrimoireLevel")?.value||0));
-    }else if(field==="exp"){
-      action=qs("#bulkExpMode").value==="add"?"add_exp":"set_exp";payload.amount=Math.round(Number(qs("#bulkAttributeAmount").value||0));
-    }else{
-      action={hp:"set_hp",mana:"set_mana",achievements:"set_achievements",ranking:"set_ranking"}[field];payload.amount=Math.round(Number(qs("#bulkAttributeAmount").value||0));
-    }
-  }
-  if(type==="power"){action="set_power"}
-  if(type==="visibility"){action="set_public";payload.public_profile=Number(qs("#bulkVisibility").value)}
-  if(type==="status"){action="set_active";payload.active=Number(qs("#bulkActive").value)}
-
-  try{
-    await adminApi("/api/admin/players/bulk",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,...payload})});
-    modal.remove();state.selectedPlayers.clear();await initAdmin();alert("Ação aplicada com sucesso.");
-  }catch(e){alert(e.message)}
-}
-
-async function selectAdminPlayer(id){
-  try{
-    const [d,m,h,c]=await Promise.all([
-      adminApi(`/api/admin/players/${id}`),
-      adminApi(`/api/admin/players/${id}/missions`),
-      adminApi(`/api/admin/players/${id}/history`),
-      adminApi(`/api/admin/players/${id}/cards`)
-    ]);
-    state.selectedPlayer={...d.player,history:d.history,missions:m.missions,adminHistory:h.admin,yulsHistory:h.yuls,cards:c.cards||[],cardHistory:h.cards||[]};
-    renderAdminList(state.players,qs("#adminSearch").value);
-    renderEditor(state.selectedPlayer);
-  }catch(e){alert(e.message)}
-}
-
-function adminTabButton(key,label,active=false){
-  return `<button type="button" class="admin-tab ${active?"active":""}" data-admin-tab="${key}">${label}</button>`;
-}
-
-function adminPlayerRankPosition(p,key){
-  const rows=state.players||[];
-  const score=Number(p?.[key]||0);
-  return 1 + rows.filter(x=>Number(x.active??1)===1 && Number(x.public_profile??1)===1 && Number(x[key]||0)>score).length;
-}
-
-function renderOverviewPanel(p){
-  const cardCount=Number(p.cardSummary?.count ?? (p.cards||[]).length);
-  const cardPower=Number(p.cardSummary?.power ?? (p.cards||[]).reduce((sum,c)=>sum+Number(c.power_value||0),0));
-  const powerRank=Number(p.power||0)>0?adminPlayerRankPosition(p,"power"):0;
-  const scRank=Number(p.skill_sc||0)>0?adminPlayerRankPosition(p,"skill_sc"):0;
-  const vtRank=Number(p.skill_vt||0)>0?adminPlayerRankPosition(p,"skill_vt"):0;
-  const recentMissions=(p.missions||[]).slice(0,3);
-  const rolesCount=(p.roles||[]).length;
-  return `<div class="central-player-summary">
-    <div class="central-player-identity"><div><p class="eyebrow">FICHA CENTRAL</p><h3>${escapeHtml(displayPlayerName(p))}</h3><p>#${Number(p.id)} • ${escapeHtml(p.identifier||"Sem login")}</p></div><div class="central-player-badges"><span class="admin-status-pill ${p.public_profile?"ok":"off"}">${p.public_profile?"● Público":"● Oculto"}</span><span class="admin-status-pill ${Number(p.active??1)?"ok":"off"}">${Number(p.active??1)?"🟢 Ativo":"⛔ Suspenso"}</span></div></div>
-    <div class="central-stat-grid">
-      <button type="button" class="central-stat-card" data-jump-admin-tab="overview"><span>❤️ HP</span><b>${Number(p.hp||0)}</b><small>Vida atual</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="overview"><span>♦️ Mana</span><b>${Number(p.mana||0)}</b><small>Mana atual</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="economy"><span>🪙 Yuls</span><b>${money(p.yuls)}</b><small>Saldo</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="cards"><span>🃏 Cards</span><b>${cardCount}</b><small>⚔️ ${cardPower} poder</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="grimoire"><span>📖 Grimório</span><b>Nível ${Number(p.grimoire_level||1)}</b><small>${escapeHtml(p.grimoire||"Não definido")}</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="grimoire"><span>⭐ EXP</span><b>${money(p.exp||0)}%</b><small>Progresso</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="rankings"><span>🎯 Skill SC</span><b>${Number(p.skill_sc||0)}</b><small>${scRank?`#${scRank}`:"Sem posição"}</small></button>
-      <button type="button" class="central-stat-card" data-jump-admin-tab="rankings"><span>⚡ Skill VT</span><b>${Number(p.skill_vt||0)}</b><small>${vtRank?`#${vtRank}`:"Sem posição"}</small></button>
-    </div>
+    <section class="guide-section final-welcome">
+      <div class="final-welcome-card">
+        <p class="eyebrow">AGORA VOCÊ SABE POR ONDE COMEÇAR</p>
+        <h2>O Reino está diante de você.</h2>
+        <p>Não é necessário conhecer tudo de uma vez. Entre em uma Casa, faça sua primeira missão, descubra seus Cards e deixe que o restante do Reino se revele enquanto sua história avança.</p>
+        <div class="actions"><button class="gold" data-page="login">Entrar no Reino</button><button class="outline" data-page="casas">Conhecer as Casas</button></div>
+      </div>
+    </section>
   </div>
-  <div class="central-player-info-grid">
-    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">IDENTIDADE</p><h4>Dados principais</h4></div></div><div class="central-info-lines"><div><span>🏰 Casa</span><b>${escapeHtml(p.house||"Não definida")}</b></div><div><span>🎖️ Patente</span><b>${escapeHtml(p.patent||"Não definida")}</b></div><div><span>👑 Cargos</span><b>${rolesCount}</b></div><div><span>🪙 Dracmas</span><b>${money(p.dracmas||0)}</b></div></div></section>
-    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">RANKINGS</p><h4>Posições atuais</h4></div><button type="button" class="text-button" data-jump-admin-tab="rankings">Ver detalhes →</button></div><div class="central-ranking-list"><div><span>⚔️ Poder</span><b>${powerRank?`#${powerRank}`:"—"}</b></div><div><span>🟥 Skill SC</span><b>${scRank?`#${scRank}`:"—"}</b></div><div><span>🟦 Skill VT</span><b>${vtRank?`#${vtRank}`:"—"}</b></div><div><span>🏆 Ranking manual</span><b>${Number(p.ranking||0)>0?`#${Number(p.ranking)}`:"—"}</b></div></div></section>
-    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">ATIVIDADE</p><h4>Resumo recente</h4></div></div><div class="central-activity-list"><div><span>📋 Missões</span><b>${Number(p.missions||0)}</b></div><div><span>🏆 Conquistas</span><b>${Number(p.achievements||0)}</b></div>${recentMissions.length?recentMissions.map(m=>`<div class="central-activity-mini"><span>${escapeHtml(m.title)}</span><small>${escapeHtml(m.status||"")}</small></div>`).join(""):`<div class="central-empty-mini">Nenhuma missão registrada.</div>`}</div></section>
-    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">ATALHOS</p><h4>Acessar áreas da ficha</h4></div></div><div class="central-shortcuts"><button type="button" class="outline small" data-jump-admin-tab="cards">🃏 Cards</button><button type="button" class="outline small" data-jump-admin-tab="missions">⚔️ Missões</button><button type="button" class="outline small" data-jump-admin-tab="roles">👑 Cargos</button>${String(p.grimoire||"").trim()?`<button type="button" class="outline small" data-jump-admin-tab="grimoire">📖 Grimório</button>`:""}<button type="button" class="outline small" data-jump-admin-tab="status">📢 Status</button><button type="button" class="outline small" data-jump-admin-tab="history">📜 Histórico</button></div></section>
+</section>
+<section class="page" id="jornal">
+  <div class="subhero journal-subhero">
+    <div class="journal-kicker">THE KING MAGAZINE</div>
+    <h1>O jornal do <em>Reino Spade.</em></h1>
+    <p>Onde os acontecimentos deixam de ser apenas lembranças e passam a fazer parte da história.</p>
   </div>
-  <div class="central-edit-section"><div class="central-edit-head"><div><p class="eyebrow">EDIÇÃO</p><h4>Dados cadastrais</h4><p>Os campos abaixo continuam sendo a fonte de edição da ficha.</p></div></div><form id="editPlayerForm"><div class="form-grid">
-    ${field("Nick","nick",p.nick)}
-    ${field("Número interno","number",p.number)}
-    ${field("Nova senha","password","","password")}
-    ${field("Casa","house",p.house)}
-    ${selectField("Patente","patent",p.patent,state.adminHierarchy?.patents||[],"name")}
-    ${rolesMultiField(p.roles||[],state.adminHierarchy?.roles||[])}
-    ${field("Grimório","grimoire",p.grimoire)}
-    ${field("❤️ HP","hp",p.hp,"number")}
-    ${field("♦️ Mana","mana",p.mana,"number")}
-    ${field("🪙 Yuls","yuls",p.yuls,"number")}
-    ${field("📋 Missões","missions",p.missions,"number")}
-    ${field("🏆 Conquistas","achievements",p.achievements,"number")}
-    ${field("Ranking","ranking",p.ranking,"number")}
-    ${field("⚔️ Força","power",p.power,"number")}
-    <div class="field full"><label>Acesso ao Portal</label><select name="active"><option value="1" ${Number(p.active??1)?"selected":""}>Ativo — pode entrar</option><option value="0" ${!Number(p.active??1)?"selected":""}>Suspenso — sem acesso</option></select></div>
-    <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
-  </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">${Number(p.active??1)?"Suspender acesso":"Reativar acesso"}</button></div><div class="error" id="editError"></div></form></div>`;
-}
+  <div class="content journal-home-content">
+    <div class="journal-edition-hero" id="journalFeature"></div>
 
-function renderRankingPanel(p){
-  const powerRank=Number(p.power||0)>0?adminPlayerRankPosition(p,"power"):0;
-  const scRank=Number(p.skill_sc||0)>0?adminPlayerRankPosition(p,"skill_sc"):0;
-  const vtRank=Number(p.skill_vt||0)>0?adminPlayerRankPosition(p,"skill_vt"):0;
-  return `<div class="central-ranking-panel"><div class="central-info-card full-width"><div class="central-info-head"><div><p class="eyebrow">RANKINGS DO JOGADOR</p><h4>Posições calculadas</h4><p>As posições de Poder, Skill SC e Skill VT seguem os mesmos registros públicos usados pelo Portal. O ranking manual continua sendo o valor cadastrado na ficha.</p></div></div><div class="central-ranking-grid"><div><span>⚔️ Poder</span><b>${powerRank?`#${powerRank}`:"—"}</b><small>${Number(p.power||0)} pontos</small></div><div><span>🟥 Skill SC</span><b>${scRank?`#${scRank}`:"—"}</b><small>${Number(p.skill_sc||0)} pontos</small></div><div><span>🟦 Skill VT</span><b>${vtRank?`#${vtRank}`:"—"}</b><small>${Number(p.skill_vt||0)} pontos</small></div><div><span>🏆 Ranking</span><b>${Number(p.ranking||0)>0?`#${Number(p.ranking)}`:"—"}</b><small>Valor cadastrado</small></div></div></div><div class="central-info-card full-width"><div class="central-info-head"><div><p class="eyebrow">HISTÓRICO DE RANKING</p><h4>Últimos registros</h4></div></div><div class="central-ranking-history-placeholder">Os registros detalhados de batalhas continuam na área de Rankings. Esta ficha consolida apenas os dados já disponíveis para o jogador.</div></div></div>`;
-}
+    <div class="journal-contents-grid">
+      <section class="panel journal-contents-panel">
+        <div class="section-head compact-head"><div><p class="eyebrow">NESTA EDIÇÃO</p><h2>Índice</h2></div></div>
+        <div id="journalContents" class="journal-contents"></div>
+      </section>
+      <aside class="journal-letter panel">
+        <p class="eyebrow">ABERTURA</p>
+        <h3 id="journalLetterTitle">Uma história começa quando alguém decide registrá-la.</h3>
+        <p id="journalLetterText">Spade já tem acontecimentos suficientes para merecer memória. O The King Magazine existe para guardar aquilo que o Reino não pode esquecer.</p>
+        <button class="outline small" type="button" id="journalReadEditorial">Ler editorial</button>
+      </aside>
+    </div>
 
-function renderStatusPanel(p){
-  const statuses=p.statuses||[];
-  return `<div class="central-status-panel"><div class="central-info-card full-width"><div class="central-info-head"><div><p class="eyebrow">MURAL DO JOGADOR</p><h4>Histórico de Status</h4><p>Somente os Status que já foram registrados para este jogador.</p></div><button type="button" class="text-button" data-status-refresh-jump="history">Ir para histórico →</button></div><div class="central-status-list">${statuses.length?statuses.map(s=>`<article class="central-status-item"><div><b>${escapeHtml(String(s.status_date||""))}</b><small>${escapeHtml(String(s.updated_at||s.created_at||""))}</small></div><p>${escapeHtml(s.message||"")}</p></article>`).join(""):`<div class="central-empty-mini">Este jogador ainda não possui Status registrados.</div>`}</div></div></div>`;
-}
+    <section class="journal-timeline-section">
+      <div class="section-head"><div><p class="eyebrow">LINHA DO TEMPO</p><h2>Os primeiros capítulos</h2></div><span>O Reino em movimento.</span></div>
+      <div id="journalTimeline" class="journal-timeline"></div>
+    </section>
 
-function renderEconomyPanel(p){
-  const hist=(p.history||[]).map(h=>`<div class="history-row"><span>${escapeHtml(h.reason||"Movimentação")}<br><small>${escapeHtml(String(h.created_at||""))}</small></span><b class="${h.amount>=0?"plus":"minus"}">${h.amount>=0?"+":""}${money(h.amount)} → ${money(h.balance_after)}</b></div>`).join("")||`<div class="admin-history-empty">Nenhuma movimentação registrada.</div>`;
-  return `<div class="yuls-box" style="margin-top:0"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><div><h4>🪙 Movimentação de Yuls</h4><small>Saldo atual: <b>${money(p.yuls||0)} Yuls</b></small></div><button class="outline dark-outline small" id="zeroYulsBtn" type="button">⟲ Zerar Yuls</button></div><div class="yuls-form"><input id="yulsAmount" type="number" step="1" placeholder="+100 ou -100"><input id="yulsReason" placeholder="Motivo (pagamento, multa, recompensa...)"><button class="gold" id="yulsBtn" type="button">Lançar</button></div><p class="admin-editor-note">Zerar o saldo cria um ajuste financeiro auditável e preserva todo o histórico.</p><div class="history">${hist}</div></div>`;
-}
+    <section class="journal-feature-section">
+      <div class="section-head"><div><p class="eyebrow">REPORTAGENS</p><h2>As histórias de Spade</h2></div><span>Leia por assunto.</span></div>
+      <div id="journalStories" class="journal-stories"></div>
+    </section>
 
-function renderMissionsPanel(p){
-  const list=(p.missions||[]).map(m=>`<div class="admin-mission-row"><span><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.status)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""}${m.reward_yuls?` • 🪙 ${money(m.reward_yuls)}`:""} • ${escapeHtml(String(m.completed_at||""))}</small></span><button type="button" data-mission-delete="${m.id}">Excluir</button></div>`).join("")||"<div class='admin-history-empty'>Nenhuma missão registrada.</div>";
-  return `<div class="admin-mission-box"><h4>⚔️ Registrar missão</h4><div class="mission-form-grid"><input id="missionTitle" class="wide" placeholder="Nome da missão"><input id="missionType" placeholder="Tipo (Missão, Evento...)"><input id="missionRank" placeholder="Rank"><select id="missionStatus"><option>Concluída</option><option>Falha</option><option>Cancelada</option><option>Em andamento</option></select><input id="missionReward" type="number" min="0" step="1" placeholder="Recompensa em Yuls"><input id="missionDate" type="date" value="${new Date().toISOString().slice(0,10)}"><textarea id="missionNotes" class="wide" placeholder="Observações (opcional)"></textarea></div><div class="mission-form-actions"><button class="gold" id="missionBtn" type="button">Registrar missão</button></div><div class="history" style="margin-top:16px"><div class="eyebrow">HISTÓRICO DE MISSÕES</div><div class="admin-mission-history">${list}</div></div></div>`;
-}
+    <section class="journal-numbers-section">
+      <div class="section-head"><div><p class="eyebrow">O REINO EM NÚMEROS</p><h2>Spade hoje</h2></div><span>Dados do Portal.</span></div>
+      <div id="editorialStats" class="editorial-stats"></div>
+      <div class="journal-numbers-grid">
+        <div class="panel journal-house-leaders"><p class="eyebrow">CASAS</p><h3>Quem está se movimentando?</h3><div id="editorialHouses"></div></div>
+        <div class="panel journal-voices"><p class="eyebrow">VOZES DE SPADE</p><h3>O Reino também fala.</h3><div id="editorialVoices"></div><button class="outline small" data-page="status" type="button">Ver mural completo</button></div>
+      </div>
+    </section>
 
-function renderAdminPlayerCardsPanel(p){
-  const inventory=p.cards||[];
-  const catalog=(state.adminCards||[]).filter(c=>Number(c.active)===1);
-  const options=catalog.map(c=>`<option value="${c.id}">${escapeHtml(c.name)} — ${escapeHtml(c.category)}</option>`).join("");
-  const missionOptions=(p.missions||[]).map(m=>`<option value="${m.id}">${escapeHtml(m.title)}${m.completed_at?` • ${escapeHtml(String(m.completed_at))}`:""}</option>`).join("");
-  const patentOptions=(state.adminHierarchy?.patents||[]).map(x=>`<option value="${x.name}">${escapeHtml(x.name)}</option>`).join("");
+    <section class="journal-next-section">
+      <div class="journal-next-card">
+        <div><p class="eyebrow">PRÓXIMO CAPÍTULO</p><h2>A história continua.</h2><p>O Jornal registra o que aconteceu. O Cronograma, os Eventos e o Mural mostram o que está acontecendo agora.</p></div>
+        <div class="actions"><button class="gold small" data-page="cronograma">Ver cronograma</button><button class="outline small" data-page="eventos">Ver eventos</button><button class="outline small" data-page="ranking">Ver rankings</button></div>
+      </div>
+    </section>
 
-  const list=inventory.length
-    ? inventory.map(c=>`<div class="admin-card-row">
-        <div>
-          <b>#${Number(c.id)} • ${escapeHtml(c.name)}</b>
-          <small>#${Number(c.id)} • ${escapeHtml(c.category)}${c.cost?` • ${escapeHtml(c.cost)}`:""} • Poder ${Number(c.power_value||0)} • ${Number(c.quantity||1)} unidade • ${escapeHtml(acquisitionLabel(c))}</small>
-        </div>
-        <div class="admin-card-row-actions"><button type="button" class="outline dark-outline small" data-admin-card-view="${c.id}">👁</button><button type="button" class="card-remove-btn" data-admin-card-remove="${c.id}">Retirar</button></div>
-      </div>`).join("")
-    : `<div class="admin-history-empty">Este jogador ainda não possui cards.</div>`;
+    <div class="section-head journal-section-head" style="margin-top:45px"><div><p class="eyebrow">ARQUIVO</p><h2>Edições</h2></div></div>
+    <div id="editions" class="edition-grid"></div>
 
-  return `<div>
-    <p class="admin-editor-note">Cada card é único no inventário. O catálogo oficial permanece separado da posse: o mesmo Card pode pertencer a vários jogadores e aliados.</p>
-    <div class="player-cards-stats admin-inventory-stats"><span><small>CARDS</small><b>${inventory.length}</b></span><span><small>PODER</small><b>${inventory.reduce((sum,c)=>sum+Number(c.power_value||0),0)}</b></span><span><small>CATEGORIAS</small><b>${cardCategoryList(inventory).length}</b></span></div>
-    <div class="admin-card-add">
-      <select id="adminCardSelect">${options||`<option value="">Nenhum card ativo cadastrado</option>`}</select>
-      <select id="adminCardMode"><option value="add">Adicionar card</option></select>
-      <select id="adminCardSourceType">
-        <option value="MISSAO">🎯 Missão</option>
-        <option value="EVENTO">🎉 Evento</option>
-        <option value="LOJA">🛒 Loja</option>
-        <option value="PATENTE">🎖️ Patente</option>
-        <option value="OUTRO">◆ Outra origem</option>
+    <div class="section-head journal-section-head" style="margin-top:45px"><div><p class="eyebrow">NOTÍCIAS</p><h2>Últimos acontecimentos</h2></div></div>
+    <div id="journalNews" class="news-grid journal-news-grid"></div>
+  </div>
+</section><section class="page" id="biblioteca">
+  <div class="subhero library-subhero">
+    <p class="eyebrow">ARQUIVO DO REINO</p>
+    <h1>Biblioteca de <em>Spade.</em></h1>
+    <p>Uma biblioteca em camadas: área, coleção, material, seção, subtópico e item. Escolha um caminho e aprofunde a consulta sem sair da tela.</p>
+  </div>
+  <div class="content library-page-content library-v3">
+    <div class="library-v3-search-wrap">
+      <div class="library-v3-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="librarySearch" class="search" type="search" autocomplete="off" placeholder="Pesquisar qualquer regra, capítulo, card, artigo ou assunto...">
+        <button id="librarySearchClear" class="library-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button>
+      </div>
+      <div class="library-v3-search-note"><span>BUSCA GLOBAL</span><small>Encontre um termo e abra o material diretamente.</small></div>
+    </div>
+
+    <div class="library-v3-heading">
+      <div><p class="eyebrow">EXPLORADOR</p><h2>Escolha por onde começar</h2></div>
+      <span id="libraryTopicHint">5 áreas do arquivo</span>
+    </div>
+
+    <div id="libraryGrid" class="library-v3-root-grid" aria-live="polite"></div>
+    <div id="libraryTopicHeader" class="library-v3-status" hidden></div>
+  </div>
+</section>
+<section class="page" id="comunicados">
+  <div class="subhero">
+    <p class="eyebrow">MURAL OFICIAL</p>
+    <h1>Comunicados do <em>Reino.</em></h1>
+    <p>Avisos e decisões oficiais publicados pela administração do Reino Spade.</p>
+  </div>
+  <div class="content">
+    <div id="announcementFeature"></div>
+    <div class="section-head" style="margin-top:38px"><div><p class="eyebrow">ARQUIVO</p><h2>Comunicados</h2></div></div>
+    <div id="announcementList" class="announcement-list"></div>
+  </div>
+</section>
+<section class="page" id="notificacoes">
+  <div class="subhero compact"><p class="eyebrow">CENTRAL DO JOGADOR</p><h1>Notificações & <em>Alertas.</em></h1><p>Uma caixa única para acompanhar avisos importantes, decisões e lembretes do Reino.</p></div>
+  <div class="content"><div class="notification-toolbar"><button class="outline small" id="markAllNotifications" type="button">✓ Marcar todas como lidas</button><span id="notificationSummary"></span></div><div id="notificationList" class="notification-list"></div></div>
+</section>
+<section class="page" id="status">
+  <div class="subhero">
+    <p class="eyebrow">MURAL DO REINO</p>
+    <h1>Status do <em>Reino.</em></h1>
+    <p>Compartilhe uma mensagem por dia e acompanhe o que seus companheiros estão fazendo.</p>
+  </div>
+  <div class="content">
+    <div class="status-page-toolbar">
+      <div class="panel status-rules"><span>♠</span><div><b>Um status por dia</b><small>Você pode publicar e atualizar o seu status de hoje.</small></div></div>
+      <button class="outline dark-outline" type="button" id="statusRefreshBtn">↻ Atualizar mural</button>
+    </div>
+    <div id="statusBoard" class="status-board"></div>
+  </div>
+</section>
+<section class="page" id="missoes">
+  <div class="subhero">
+    <p class="eyebrow">ATIVIDADES DO REINO</p>
+    <h1>Missões de <em>Spade.</em></h1>
+    <p>Atividades oficiais com período, instruções e recompensas. Missões não possuem título.</p>
+  </div>
+  <div class="content">
+    <div id="missionActiveFeature"></div>
+    <div class="event-filter-bar"><input class="search" id="missionSearch" placeholder="Pesquisar por tipo de missão..."><select class="admin-filter" id="missionStatusFilter"><option value="">Todos os status</option><option value="EM_ANDAMENTO">Em andamento</option><option value="AGENDADA">Agendadas</option><option value="CONCLUIDA">Concluídas</option></select></div>
+    <div id="missionGrid" class="mission-grid"></div>
+  </div>
+</section><section class="page" id="eventos">
+  <div class="subhero">
+    <p class="eyebrow">AGENDA DO REINO</p>
+    <h1>Eventos de <em>Spade.</em></h1>
+    <p>Competições, eventos especiais, temporadas e missões de Legião em um só lugar.</p>
+  </div>
+  <div class="content">
+    <div id="eventFeature"></div>
+    <div class="event-filter-bar">
+      <input class="search" id="eventSearch" placeholder="Pesquisar evento...">
+      <select class="admin-filter" id="eventTypeFilter">
+        <option value="">Todos os tipos</option>
+        <option value="JOGO">Jogo</option><option value="ESPECIAL">Especial</option>
+        <option value="TEMPORADA">Temporada</option><option value="LEGIAO">Legião</option>
       </select>
-      <input id="adminCardSourceName" placeholder="Nome da origem" style="display:none">
-      <select id="adminCardMission" style="display:block"><option value="">Selecione a missão</option>${missionOptions}</select>
-      <select id="adminCardPatent" style="display:none"><option value="">Selecione a patente</option>${patentOptions}</select>
-      <button class="gold" id="adminCardApply" type="button">Adicionar</button>
+      <select class="admin-filter" id="eventStatusFilter">
+        <option value="">Todos os status</option><option value="ATIVO">Ativos</option>
+        <option value="PLANEJADO">Próximos</option><option value="ENCERRADO">Encerrados</option>
+      </select>
     </div>
-    <div class="eyebrow" style="margin:10px 0">INVENTÁRIO ATUAL</div>
-    <div class="admin-player-cards">${list}</div>
-  </div>`;
-}
-
-function updateAdminCardSourceFields(){
-  const type=qs("#adminCardSourceType")?.value||"MISSAO";
-  const mission=qs("#adminCardMission"),patent=qs("#adminCardPatent"),name=qs("#adminCardSourceName");
-  if(mission)mission.style.display=type==="MISSAO"?"block":"none";
-  if(patent)patent.style.display=type==="PATENTE"?"block":"none";
-  if(name)name.style.display=(type==="EVENTO"||type==="LOJA"||type==="OUTRO")?"block":"none";
-}
-
-async function applyAdminCardChange(){
-  if(!state.selectedPlayer)return;
-  const cardId=Number(qs("#adminCardSelect")?.value||0);
-  const sourceType=qs("#adminCardSourceType")?.value||"MISSAO";
-  if(!cardId){alert("Cadastre ou selecione um card.");return}
-
-  let acquisition_id="",acquisition_name="";
-  if(sourceType==="MISSAO"){
-    acquisition_id=qs("#adminCardMission")?.value||"";
-    if(!acquisition_id){alert("Selecione a missão que concedeu o card.");return}
-  }else if(sourceType==="PATENTE"){
-    acquisition_name=qs("#adminCardPatent")?.value||"";
-    if(!acquisition_name){alert("Selecione a patente que concedeu o card.");return}
-  }else{
-    acquisition_name=(qs("#adminCardSourceName")?.value||"").trim();
-    if(!acquisition_name){alert("Informe a origem da aquisição.");return}
-  }
-
-  try{
-    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/cards`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        card_id:cardId,mode:"add",
-        acquisition_type:sourceType,
-        acquisition_id:acquisition_id,
-        acquisition_name:acquisition_name
-      })
-    });
-    await selectAdminPlayer(state.selectedPlayer.id);
-    alert("Card adicionado ao inventário.");
-  }catch(e){alert(e.message)}
-}
-
-async function removeAdminCard(cardId){
-  if(!state.selectedPlayer)return;
-  const c=(state.selectedPlayer.cards||[]).find(x=>Number(x.id)===Number(cardId));
-  if(!c)return;
-  if(!confirm(`Retirar o card "${c.name}" deste jogador?`))return;
-  try{
-    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/cards`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({card_id:Number(cardId),mode:"remove"})
-    });
-    await selectAdminPlayer(state.selectedPlayer.id);
-    alert("Card retirado do inventário.");
-  }catch(e){alert(e.message)}
-}
-
-
-function renderRolesPanel(p){
-  return `<div class="panel" style="box-shadow:none;padding:0;border:0;background:transparent">
-    <p class="admin-editor-note">Selecione todos os cargos que pertencem ao jogador. A alteração é salva junto com a ficha.</p>
-    ${rolesMultiField(p.roles||[],state.adminHierarchy?.roles||[])}
-  </div>`;
-}
-
-function renderHistoryPanel(p){
-  const entries=[];
-  (p.adminHistory||[]).forEach(h=>entries.push({kind:h.action,title:h.action,desc:h.description,date:h.created_at}));
-  (p.yulsHistory||[]).forEach(h=>entries.push({kind:"YULS",title:"Movimentação de Yuls",desc:`${h.amount>=0?"+":""}${money(h.amount)} • ${h.reason||"Movimentação"} • saldo ${money(h.balance_after)}`,date:h.created_at}));
-  (p.missions||[]).forEach(m=>entries.push({kind:"MISSÃO",title:"Missão",desc:`${m.title} • ${m.status}${m.reward_yuls?` • recompensa ${money(m.reward_yuls)}`:""}`,date:m.completed_at||m.created_at}));
-  (p.cardHistory||[]).forEach(c=>entries.push({kind:"CARD",title:`Card ${c.action==="ADQUIRIDO"?"adquirido":"removido"}`,desc:`${c.card_name}${c.action==="ADQUIRIDO"&&c.acquisition_name?` • origem: ${c.acquisition_name}`:""}`,date:c.created_at}));
-  entries.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
-  return `<div class="admin-history-list">${entries.length?entries.map(e=>`<div class="admin-history-entry"><span class="admin-history-dot"></span><div><b>${escapeHtml(e.title)}</b><p>${escapeHtml(e.desc)}</p><small>${escapeHtml(String(e.date||""))}</small></div></div>`).join(""):`<div class="admin-history-empty">Nenhum histórico registrado.</div>`}</div>`;
-}
-
-function renderAdminGrimoirePageItem(pg){
-  const kind=Number(pg.level_number)%2===1?"ATIVAÇÃO":"MAGIA EXCLUSIVA";
-  return `<div class="admin-grimoire-row"><div><b>Nível ${pg.level_number} • ${kind}</b><small>${escapeHtml(pg.magic_name)}</small>${pg.description?`<p>${escapeHtml(pg.description)}</p>`:""}</div><div class="admin-grimoire-actions"><button type="button" class="outline small" data-grimoire-edit="${pg.id}">Editar</button><button type="button" class="outline danger small" data-grimoire-delete="${pg.id}">Excluir</button></div></div>`;
-}
-function renderAdminGrimoirePanel(p){
-  const pages=p.grimoirePages||[];
-  const level=Math.max(1,Number(p.grimoire_level||1)), exp=Number(p.exp||0);
-  const thresholds={1:120,2:200,3:300,4:450,5:500,6:650,7:700};
-  const next=thresholds[level]||null;
-  const fixed=[['MISSAO_LUTA','⚔️ Missão de Luta',10],['MISSAO_RECRUTA','👥 Missão de Recruta',15],['EVENTO_PARTICIPACAO','🎪 Participação em Evento',2],['TORNEIO_PARTICIPACAO','🏆 Participação em Torneio',5],['EXAME_VENCEDOR','🎖️ Vencedor do Exame',12],['EVENTO_VITORIA','🏆 Vitória em Evento',7],['TORNEIO_VITORIA','🏆 Vitória em Torneio',20],['RANKING_VITORIA','⚔️ Vitória em Luta de Ranking',2],['JUIZ_INTER','⚖️ Juiz — Intermediário/Torneio',4],['JUIZ_SENIOR','⚖️ Juiz — Exame Sênior',8],['ORGANIZAR_EXAME','📋 Organizar Exame',10],['EMPREGO','💼 Emprego/Cargo',null],['EVENTO_ESPECIAL','✨ Premiação Especial',null]];
-  const opts=fixed.map(r=>`<option value="${r[0]}">${escapeHtml(r[1])}${r[2]===null?' — valor variável':` — ${r[2]}%`}</option>`).join('');
-  const list=pages.length?pages.map(renderAdminGrimoirePageItem).join(''):"<div class='admin-history-empty'>Nenhuma magia registrada no Grimório.</div>";
-  const hist=(p.expHistory||[]).map(h=>`<div class="history-row"><span><b>${h.upgraded?'🔝 Upgrade de Grimório':'✨ EXP registrada'}</b><br><small>${escapeHtml(h.source_code||'AJUSTE')}${h.source_detail?` • ${escapeHtml(h.source_detail)}`:''} • ${escapeHtml(h.reason||'')}</small><br><small>${escapeHtml(String(h.created_at||''))}</small></span><b class="plus">+${money(h.amount)}% → ${money(h.exp_after)}% (N${h.level_after})</b></div>`).join('')||`<div class="admin-history-empty">Nenhuma movimentação de EXP registrada.</div>`;
-  return `<div><div class="exp-box"><div class="exp-box-head"><div><p class="eyebrow">📖 PROGRESSÃO DO GRIMÓRIO</p><h4>Nível ${level} • ${money(exp)}% EXP</h4><small>${next?`Próximo nível: ${level+1} em ${money(next)}%`:'Sem próximo requisito cadastrado.'}</small></div><div class="exp-mini-progress"><span style="width:${next?Math.min(100,Math.round(exp/next*100)):100}%"></span></div></div><form id="adminExpForm" class="exp-admin-form"><select id="adminExpSource">${opts}</select><input id="adminExpCustom" type="number" min="1" step="1" placeholder="EXP (%)" disabled><input id="adminExpDetail" placeholder="Evento, missão, torneio ou referência"><input id="adminExpReason" class="wide" placeholder="Observação / motivo"><button class="gold" type="submit">＋ Registrar EXP</button><div class="error" id="adminExpError"></div></form><div class="exp-rules-grid">${fixed.map(r=>`<span><b>${escapeHtml(r[1])}</b><small>${r[2]===null?'Variável':`${r[2]}%`}</small></span>`).join('')}</div><div class="eyebrow" style="margin-top:18px">HISTÓRICO DE EXP</div><div class="history">${hist}</div></div><p class="admin-editor-note">O sistema associa automaticamente níveis ímpares a Ativações e níveis pares a Magias Exclusivas. Cadastre as páginas que o Mago conquista conforme a evolução. A EXP é acumulada em porcentagem e volta a zero quando o requisito do próximo nível é alcançado.</p><form id="adminGrimoireForm" class="admin-form"><input type="hidden" id="adminGrimoireId"><input id="adminGrimoireLevel" type="number" min="1" placeholder="Nível" required><input id="adminGrimoireName" class="full" placeholder="Nome da magia" required><textarea id="adminGrimoireDescription" class="full" placeholder="Descrição / efeito da magia"></textarea><input id="adminGrimoireOrder" type="number" value="0" placeholder="Ordem"><div class="editor-actions"><button class="gold" type="submit">＋ Salvar página</button><button class="outline dark-outline" type="button" id="adminGrimoireClear">Limpar</button></div><div class="error" id="adminGrimoireError"></div></form><div class="eyebrow" style="margin-top:18px">PÁGINAS REGISTRADAS</div><div class="admin-grimoire-list">${list}</div></div>`;
-}
-
-function renderEditor(p){
-  qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">EDITANDO JOGADOR</p><h3>${escapeHtml(displayPlayerName(p))}</h3><p>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent||"Sem patente")}</p></div><button class="icon-button" type="button" id="closeEditor">×</button></div>
-  <div class="admin-tabs">
-    ${adminTabButton("overview","Resumo",true)}
-    ${adminTabButton("economy","Economia")}
-    ${adminTabButton("missions","Missões")}
-    ${adminTabButton("cards","Cards")}
-    ${adminTabButton("rankings","🏆 Rankings")}
-    ${adminTabButton("roles","Cargos")}
-    ${String(p.grimoire||"").trim()?adminTabButton("grimoire","📖 Grimório"):""}
-    ${adminTabButton("status","📢 Status")}
-    ${adminTabButton("history","Histórico")}
+    <div id="eventGrid" class="event-grid"></div>
   </div>
-  <div class="admin-tab-panel active" data-admin-tab-panel="overview">${renderOverviewPanel(p)}</div>
-  <div class="admin-tab-panel" data-admin-tab-panel="economy">${renderEconomyPanel(p)}</div>
-  <div class="admin-tab-panel" data-admin-tab-panel="missions">${renderMissionsPanel(p)}</div>
-  <div class="admin-tab-panel" data-admin-tab-panel="cards">${renderAdminPlayerCardsPanel(p)}</div>
-  <div class="admin-tab-panel" data-admin-tab-panel="rankings">${renderRankingPanel(p)}</div>
-  <div class="admin-tab-panel" data-admin-tab-panel="roles">${renderRolesPanel(p)}</div>
-  ${String(p.grimoire||"").trim()?`<div class="admin-tab-panel" data-admin-tab-panel="grimoire">${renderAdminGrimoirePanel(p)}</div>`:""}
-  <div class="admin-tab-panel" data-admin-tab-panel="status">${renderStatusPanel(p)}</div>
-  <div class="admin-tab-panel" data-admin-tab-panel="history">${renderHistoryPanel(p)}</div>`;
-
-  const empty=`<div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados, lançar Yuls, registrar missões ou administrar seus cargos.</p></div>`;
-  qs("#closeEditor").addEventListener("click",()=>{state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);qs("#adminEditor").innerHTML=empty});
-
-  const activateAdminTab=(key)=>{
-    const tab=qsa("[data-admin-tab]").find(x=>x.dataset.adminTab===key);
-    if(!tab)return;
-    qsa("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));
-    qsa("[data-admin-tab-panel]").forEach(x=>x.classList.toggle("active",x.dataset.adminTabPanel===key));
-    tab.scrollIntoView?.({behavior:"smooth",block:"nearest",inline:"center"});
-  };
-  qsa("[data-admin-tab]").forEach(tab=>tab.onclick=()=>activateAdminTab(tab.dataset.adminTab));
-  qsa("[data-jump-admin-tab]").forEach(b=>b.addEventListener("click",()=>activateAdminTab(b.dataset.jumpAdminTab)));
-  qsa("[data-status-refresh-jump]").forEach(b=>b.addEventListener("click",()=>activateAdminTab(b.dataset.statusRefreshJump)));
-
-  qs("#editPlayerForm").addEventListener("submit",savePlayer);
-  qs("#deletePlayerBtn").addEventListener("click",deleteSelectedPlayer);
-  qs("#yulsBtn").addEventListener("click",launchYuls);
-  qs("#zeroYulsBtn")?.addEventListener("click",zeroSelectedPlayerYuls);
-  qs("#missionBtn").addEventListener("click",launchMission);
-  qs("#adminCardApply")?.addEventListener("click",applyAdminCardChange);
-  qs("#adminCardSourceType")?.addEventListener("change",updateAdminCardSourceFields);
-  updateAdminCardSourceFields();
-  qsa("[data-admin-card-remove]").forEach(b=>b.addEventListener("click",()=>removeAdminCard(Number(b.dataset.adminCardRemove))));
-  qsa("[data-admin-card-view]").forEach(b=>b.addEventListener("click",()=>openCardDetailModal(Number(b.dataset.adminCardView),true)));
-  qsa("[data-mission-delete]").forEach(b=>b.addEventListener("click",()=>deleteMission(Number(b.dataset.missionDelete))));
-  qs("#adminExpSource")?.addEventListener("change",()=>{const src=qs("#adminExpSource")?.value||"",custom=qs("#adminExpCustom");const fixed={MISSAO_LUTA:10,MISSAO_RECRUTA:15,EVENTO_PARTICIPACAO:2,TORNEIO_PARTICIPACAO:5,EXAME_VENCEDOR:12,EVENTO_VITORIA:7,TORNEIO_VITORIA:20,RANKING_VITORIA:2,JUIZ_INTER:4,JUIZ_SENIOR:8,ORGANIZAR_EXAME:10};const val=fixed[src];if(custom){custom.disabled=val===undefined;custom.value=val===undefined?"":String(val);}});
-  qs("#adminExpForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#adminExpError");err.textContent="";const src=qs("#adminExpSource")?.value||"AJUSTE",fixed={MISSAO_LUTA:10,MISSAO_RECRUTA:15,EVENTO_PARTICIPACAO:2,TORNEIO_PARTICIPACAO:5,EXAME_VENCEDOR:12,EVENTO_VITORIA:7,TORNEIO_VITORIA:20,RANKING_VITORIA:2,JUIZ_INTER:4,JUIZ_SENIOR:8,ORGANIZAR_EXAME:10},amount=Number(fixed[src] ?? (qs("#adminExpCustom")?.value || 0));try{const d=await adminApi(`/api/admin/players/${p.id}/exp`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,source_code:src,source_detail:qs("#adminExpDetail")?.value||"",reason:qs("#adminExpReason")?.value||""})});await selectAdminPlayer(p.id);alert(d.upgraded?`EXP registrada e Grimório elevado para o nível ${d.level}. A nova página pode ser registrada.`:"EXP registrada.");}catch(ex){err.textContent=ex.message}});
-  qs("#adminGrimoireForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminGrimoireId").value;const err=qs("#adminGrimoireError");err.textContent="";try{await adminApi(id?`/api/admin/grimoire/${id}`:`/api/admin/grimoire/${p.id}`,{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({level_number:Number(qs("#adminGrimoireLevel").value),magic_name:qs("#adminGrimoireName").value,description:qs("#adminGrimoireDescription").value,sort_order:Number(qs("#adminGrimoireOrder").value||0)})});await selectAdminPlayer(p.id);alert(id?"Página atualizada.":"Página do grimório registrada.")}catch(ex){err.textContent=ex.message}});
-  qs("#adminGrimoireClear")?.addEventListener("click",()=>{qs("#adminGrimoireId").value="";qs("#adminGrimoireLevel").value="";qs("#adminGrimoireName").value="";qs("#adminGrimoireDescription").value="";qs("#adminGrimoireOrder").value="0";});
-  qsa("[data-grimoire-edit]").forEach(b=>b.addEventListener("click",()=>{const pg=(p.grimoirePages||[]).find(x=>Number(x.id)===Number(b.dataset.grimoireEdit));if(!pg)return;qs("#adminGrimoireId").value=pg.id;qs("#adminGrimoireLevel").value=pg.level_number;qs("#adminGrimoireName").value=pg.magic_name;qs("#adminGrimoireDescription").value=pg.description||"";qs("#adminGrimoireOrder").value=pg.sort_order||0;qs("#adminGrimoireForm")?.scrollIntoView({behavior:"smooth",block:"center"});}));
-  qsa("[data-grimoire-delete]").forEach(b=>b.addEventListener("click",async()=>{if(!confirm("Excluir esta página do Grimório?"))return;try{await adminApi(`/api/admin/grimoire/${b.dataset.grimoireDelete}`,{method:"DELETE"});await selectAdminPlayer(p.id);}catch(ex){alert(ex.message)}}));
-}
-function rolesMultiField(selected,items){
-  const ids=new Set((selected||[]).map(x=>String(typeof x==="object"?x.id:x)));
-  const options=(items||[]).map(x=>`<label class="role-option"><input type="checkbox" name="role_ids" value="${escapeHtml(x.id)}" ${ids.has(String(x.id))?"checked":""}><span><b>${escapeHtml(x.name)}</b><small>${x.salary>0?`🪙 ${money(x.salary)}`:"Remuneração não informada"}</small></span></label>`).join("");
-  return `<div class="field full"><label>Cargos (pode selecionar vários)</label><div class="roles-editor"><div class="roles-editor-title">Selecione todos os cargos do jogador</div><div class="roles-picker">${options||`<span style="font-size:10px;color:#888">Nenhum cargo cadastrado.</span>`}</div></div></div>`;
-}
-function selectField(label,name,value,items,key){
-  const options=(items||[]).map(x=>`<option value="${escapeHtml(x[key]||"")}" ${String(x[key]||"")===String(value||"")?"selected":""}>${escapeHtml(x.name||x[key]||"")}</option>`).join("");
-  return `<div class="field"><label>${label}</label><select name="${name}"><option value="">Não definido</option>${options}</select></div>`;
-}
-function field(label,name,value,type="text"){
-  return `<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${escapeHtml(value??"")}"></div>`;
-}
-async function savePlayer(e){
-  e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
-  b.role_ids=[...e.target.querySelectorAll('input[name="role_ids"]:checked')].map(x=>Number(x.value));
-  try{
-    const d=await adminApi(`/api/admin/players/${state.selectedPlayer.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    state.selectedPlayer={...d.player,history:state.selectedPlayer.history};
-    await initAdmin();
-    await selectAdminPlayer(state.selectedPlayer.id);
-    alert("Jogador atualizado com sucesso.");
-  }catch(ex){qs("#editError").textContent=ex.message}
-}
-
-async function zeroSelectedPlayerYuls(){
-  if(!state.selectedPlayer)return;
-  const current=Number(state.selectedPlayer.yuls||0);
-  if(current===0){alert("Este jogador já está com 0 Yuls.");return}
-  if(!confirm(`Zerar os ${money(current)} Yuls de ${displayPlayerName(state.selectedPlayer)}?\n\nA operação será registrada no histórico financeiro e não apagará as movimentações anteriores.`))return;
-  const reason=prompt("Motivo do acerto de saldo:","Acerto de saldo para transferência");
-  if(reason===null)return;
-  try{
-    const d=await adminApi(`/api/admin/players/${state.selectedPlayer.id}/yuls/reset`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason:reason.trim()||"Acerto de saldo para transferência"})});
-    await selectAdminPlayer(state.selectedPlayer.id);
-    alert(d.changed?`Saldo zerado. ${money(current)} Yuls foram registrados como ajuste.`:d.message);
-    if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}
-  }catch(ex){alert(ex.message)}
-}
-
-async function launchYuls(){
-  const amount=Number(qs("#yulsAmount").value),reason=qs("#yulsReason").value.trim();
-  if(!Number.isFinite(amount)||amount===0){alert("Informe uma quantidade diferente de zero.");return}
-  try{
-    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/yuls`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,reason})});
-    await selectAdminPlayer(state.selectedPlayer.id);alert("Movimentação registrada.");
-    if(state.me && Number(state.me.id)===Number(state.selectedPlayer.id)){ await refreshDashboardStateOnly(); }
-  }catch(ex){alert(ex.message)}
-}
-async function launchMission(){
-  if(!state.selectedPlayer)return;
-  const title=qs("#missionTitle").value.trim();
-  const mission_type=qs("#missionType").value.trim()||"Missão";
-  const mission_rank=qs("#missionRank").value.trim();
-  const status=qs("#missionStatus").value;
-  const reward_yuls=Number(qs("#missionReward").value||0);
-  const completed_at=qs("#missionDate").value;
-  const notes=qs("#missionNotes").value.trim();
-  if(!title){alert("Informe o nome da missão.");return}
-  if(!Number.isFinite(reward_yuls)||reward_yuls<0){alert("Recompensa inválida.");return}
-  try{
-    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/missions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,mission_type,mission_rank,status,reward_yuls,completed_at,notes})});
-    await selectAdminPlayer(state.selectedPlayer.id);
-    alert(status==="Concluída"?"Missão registrada e contagem atualizada.":"Missão registrada.");
-    if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}
-  }catch(ex){alert(ex.message)}
-}
-
-async function deleteMission(missionId){
-  if(!confirm("Excluir esta missão? Se ela estiver concluída, a contagem e a recompensa serão desfeitas."))return;
-  try{await adminApi(`/api/admin/players/${state.selectedPlayer.id}/missions/${missionId}`,{method:"DELETE"});await selectAdminPlayer(state.selectedPlayer.id);alert("Missão excluída.");if(state.me&&Number(state.me.id)===Number(state.selectedPlayer.id)){await refreshDashboardStateOnly();}}catch(ex){alert(ex.message)}
-}
-
-async function deleteSelectedPlayer(){
-  if(!state.selectedPlayer)return;
-  const active=Number(state.selectedPlayer.active??1);
-  const next=active?0:1;
-  const action=next?"reativar":"suspender";
-  if(!confirm(`Deseja ${action} o acesso de ${displayPlayerName(state.selectedPlayer)}? O cadastro e o histórico serão preservados.`))return;
-  try{
-    await adminApi(`/api/admin/players/${state.selectedPlayer.id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:next})});
-    await initAdmin(); await selectAdminPlayer(state.selectedPlayer.id);
-    alert(next?"Acesso reativado.":"Acesso suspenso.");
-  }catch(ex){alert(ex.message)}
-}
-
-function openNewPlayer(){
-  state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);
-  qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">NOVO CADASTRO</p><h3>Novo jogador</h3><p>Crie o acesso usando Nick, número interno e senha.</p></div><button class="icon-button" id="closeEditor" type="button">×</button></div>
-  <form id="newAdminPlayerForm"><div class="form-grid">
-  ${field("Nick","nick","")}${field("Número","number","01")}${field("Senha inicial","password","","password")}${field("Casa","house","")}${selectField("Patente","patent","Cavaleiro Mágico Junior",state.adminHierarchy?.patents||[], "name")}${rolesMultiField([],state.adminHierarchy?.roles||[])}${field("Grimório","grimoire","")}${field("❤️ HP","hp",200,"number")}${field("♦️ Mana","mana",400,"number")}${field("🪙 Yuls","yuls",0,"number")}${field("📋 Missões","missions",0,"number")}${field("🏆 Conquistas","achievements",0,"number")}${field("Ranking manual","ranking",0,"number")}${field("⚔️ Força","power",0,"number")}
-  </div><div class="editor-actions"><button class="gold" type="submit">Cadastrar jogador</button></div><div class="error" id="newPlayerError"></div></form>`;
-  qs("#closeEditor").addEventListener("click",()=>renderEditor({nick:"",number:"",history:[],missions:[],public_profile:1}));
-  qs("#newAdminPlayerForm").addEventListener("submit",async e=>{
-    e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
-    b.role_ids=[...e.target.querySelectorAll('input[name="role_ids"]:checked')].map(x=>Number(x.value));
-    try{const d=await adminApi("/api/admin/players",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});await initAdmin();await selectAdminPlayer(d.player.id);alert("Jogador cadastrado.");}
-    catch(ex){qs("#newPlayerError").textContent=ex.message}
-  });
-}
-
-qs("#adminSearch").addEventListener("input",e=>renderAdminList(state.players,e.target.value));
-["adminHouseFilter","adminPatentFilter","adminRoleFilter","adminVisibilityFilter","adminStatusFilter","adminSort"].forEach(id=>{
-  const el=qs("#"+id);if(!el)return;
-  el.onchange=()=>{
-    if(id==="adminHouseFilter")state.adminFilters.house=el.value;
-    if(id==="adminPatentFilter")state.adminFilters.patent=el.value;
-    if(id==="adminRoleFilter")state.adminFilters.role=el.value;
-    if(id==="adminVisibilityFilter")state.adminFilters.visibility=el.value;
-    if(id==="adminStatusFilter")state.adminFilters.status=el.value;
-    if(id==="adminSort")state.adminFilters.sort=el.value;
-    renderAdminList(state.players,qs("#adminSearch").value);
-  };
-});
-qs("#selectAllPlayersBtn").onclick=()=>{
-  const checks=[...qs("#adminPlayerList").querySelectorAll("[data-player-check]")];
-  checks.forEach(c=>state.selectedPlayers.add(Number(c.dataset.playerCheck)));
-  renderAdminList(state.players,qs("#adminSearch").value);
-};
-qs("#clearAllPlayersBtn").onclick=()=>{
-  state.selectedPlayers.clear();
-  renderAdminList(state.players,qs("#adminSearch").value);
-};
-qsa("[data-bulk-action]").forEach(b=>b.onclick=()=>openBulkModal(b.dataset.bulkAction));
-qs("#newPlayerBtn").addEventListener("click",openNewPlayer);
-qs("#refreshAdminBtn").addEventListener("click",initAdmin);
-qs("#adminAuditRefresh")?.addEventListener("click",loadAdminAudit);
-["adminAuditSearch","adminAuditSource","adminAuditFrom","adminAuditTo"].forEach(id=>qs("#"+id)?.addEventListener(id==="adminAuditSearch"?"input":"change",()=>{clearTimeout(window.__auditTimer);window.__auditTimer=setTimeout(loadAdminAudit,id==="adminAuditSearch"?250:0)}));
-qs("#adminEconomyRefresh")?.addEventListener("click",loadAdminEconomy);
-qs("#adminEconomyStatus")?.addEventListener("change",loadAdminEconomy);
-qs("#adminEconomyForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs('#adminEconomyError');err.textContent='';const body={player_id:Number(qs('#economyPlayer').value),currency:qs('#economyCurrency').value,amount:Number(qs('#economyAmount').value),activity_date:qs('#economyDate').value,source_type:qs('#economySource').value.trim()||'ADMINISTRATIVO',reason:qs('#economyReason').value.trim()};try{await adminApi('/api/admin/economy/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});e.target.reset();await loadAdminEconomy();alert('Transação criada e enviada para aprovação.');}catch(ex){err.textContent=ex.message}});
-qs("#newsForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/news",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Notícia publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
-qs("#editionForm")?.addEventListener("submit",async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());try{await adminApi("/api/admin/editions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();alert("Edição publicada.");await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();}catch(ex){alert(ex.message)}});
-qs("#adminLoginForm")?.addEventListener("submit",adminLogin);
-qs("#adminUserForm")?.addEventListener("submit",async e=>{
-  e.preventDefault();const err=qs("#adminUserError");if(err)err.textContent="";
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  try{await adminApi("/api/admin/admins",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();await loadAdminUsers();alert("Administrador criado com sucesso.");}
-  catch(ex){if(err)err.textContent=ex.message}
-});
-qs("#exitAdminPanelBtn")?.addEventListener("click",()=>{go("home")});
-qs("#logoutAdminBtn").addEventListener("click",async()=>{try{await api("/api/admin/logout",{method:"POST"})}catch{} state.admin=false;state.adminUser=null;state.adminKey=null;clearStoredAdminKey();state.selectedPlayer=null;setAdminNav();go("home")});
-
-qs("#houseForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  try{
-    if(b.id){
-      await adminApi(`/api/admin/houses/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    }else{
-      await adminApi("/api/admin/houses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    }
-    resetHouseForm();await loadAdminHouses();await loadHouses();alert("Casa salva com sucesso.");
-  }catch(ex){qs("#houseError").textContent=ex.message}
-});
-qs("#houseCancelBtn").addEventListener("click",resetHouseForm);
-
-qs("#patentForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  try{
-    if(b.id) await adminApi(`/api/admin/patents/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    else await adminApi("/api/admin/patents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    resetPatentForm();await loadAdminHierarchy();await loadHierarchy();alert("Patente salva com sucesso.");
-  }catch(ex){qs("#patentError").textContent=ex.message}
-});
-qs("#patentCancelBtn").addEventListener("click",resetPatentForm);
-
-qs("#exportPlayersBtn")?.addEventListener("click",downloadPlayersSheet);
-qs("#exportVisiblePlayersBtn")?.addEventListener("click",openExportVisiblePlayers);
-qs("#bulkUpdatePlayersBtn")?.addEventListener("click",openPlayerBulkSheet);
-qs("#playerBulkSheetDownload")?.addEventListener("click",downloadPlayersSheet);
-qs("#closePlayerBulkSheet")?.addEventListener("click",closePlayerBulkSheet);
-qs("#playerBulkSheetCancel")?.addEventListener("click",closePlayerBulkSheet);
-qs("#playerBulkSheetFile")?.addEventListener("change",previewPlayerBulkSheet);
-qs("#playerBulkSheetConfirm")?.addEventListener("click",confirmPlayerBulkSheet);
-qs("#downloadCardsSheetBtn")?.addEventListener("click",downloadCardsSheet);
-qs("#importCardsSheetBtn")?.addEventListener("click",openCardBulkSheet);
-qs("#cardBulkSheetDownload")?.addEventListener("click",downloadCardsSheet);
-qs("#closeCardBulkSheet")?.addEventListener("click",closeCardBulkSheet);
-qs("#cardBulkSheetCancel")?.addEventListener("click",closeCardBulkSheet);
-qs("#cardBulkSheetFile")?.addEventListener("change",previewCardBulkSheet);
-qs("#cardBulkSheetConfirm")?.addEventListener("click",confirmCardBulkSheet);
-qs("#adminCardSearch")?.addEventListener("input",e=>{state.cardCatalogSearch=e.target.value;renderAdminCardCatalog();});
-qs("#adminCardCatalogFilter")?.addEventListener("change",e=>{state.cardCatalogCategory=e.target.value;renderAdminCardCatalog();});
-qs("#adminCardStatusFilter")?.addEventListener("change",e=>{state.cardCatalogStatus=e.target.value;renderAdminCardCatalog();});
-qs("#cardCatalogSelectVisible")?.addEventListener("click",selectVisibleCards);
-qs("#cardCatalogClearSelection")?.addEventListener("click",clearCardSelection);
-qs("#cardCatalogExportSelected")?.addEventListener("click",exportSelectedCards);
-qs("#cardCatalogBulkAction")?.addEventListener("click",runCardBulkAction);
-qs("#closeCardDetail")?.addEventListener("click",closeCardDetailModal);
-qs("#closeCardDetailFooter")?.addEventListener("click",closeCardDetailModal);
-qs("#cardDetailModal")?.addEventListener("click",e=>{if(e.target.id==="cardDetailModal")closeCardDetailModal();});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&qs("#cardDetailModal")?.classList.contains("open"))closeCardDetailModal();});
-qs("#bulkCenterPlayersExport")?.addEventListener("click",()=>downloadPlayersSheet());
-qs("#bulkCenterPlayersImport")?.addEventListener("click",openPlayerBulkSheet);
-qs("#bulkCenterCardsExport")?.addEventListener("click",()=>downloadCardsSheet());
-qs("#bulkCenterCardsImport")?.addEventListener("click",openCardBulkSheet);
-qs("#bulkCenterHousesExport")?.addEventListener("click",()=>downloadDomainBulkSheet("houses"));
-qs("#bulkCenterHousesImport")?.addEventListener("click",()=>openDomainBulkSheet("houses"));
-qs("#bulkCenterHierarchyExport")?.addEventListener("click",()=>downloadDomainBulkSheet("hierarchy"));
-qs("#bulkCenterHierarchyImport")?.addEventListener("click",()=>openDomainBulkSheet("hierarchy"));
-qs("#bulkCenterMissionsExport")?.addEventListener("click",()=>downloadDomainBulkSheet("missions"));
-qs("#bulkCenterMissionsImport")?.addEventListener("click",()=>openDomainBulkSheet("missions"));
-qs("#bulkCenterRankingsExport")?.addEventListener("click",()=>downloadDomainBulkSheet("rankings"));
-qs("#domainBulkSheetFile")?.addEventListener("change",previewDomainBulkSheet);
-qs("#domainBulkSheetCancel")?.addEventListener("click",closeDomainBulkSheet);
-qs("#closeDomainBulkSheet")?.addEventListener("click",closeDomainBulkSheet);
-qs("#domainBulkSheetConfirm")?.addEventListener("click",confirmDomainBulkSheet);
-qs("#importPlayersBtn").addEventListener("click",openPlayerImport);
-qs("#closePlayerImport").addEventListener("click",closePlayerImport);
-qs("#playerImportCancel").addEventListener("click",closePlayerImport);
-qs("#playerImportFile").addEventListener("change",previewPlayerImport);
-qs("#playerImportConfirm").addEventListener("click",confirmPlayerImport);
-qs("#roleForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries()); b.active=qs("#roleActive").checked?1:0;
-  try{
-    if(b.id) await adminApi(`/api/admin/roles/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    else await adminApi("/api/admin/roles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    resetRoleForm();await loadAdminHierarchy();await loadHierarchy();alert("Cargo salvo com sucesso.");
-  }catch(ex){qs("#roleError").textContent=ex.message}
-});
-qs("#roleCancelBtn").addEventListener("click",resetRoleForm);
-
-async function loadAdminCards(){
-  try{
-    const d=await adminApi("/api/admin/cards");
-    state.adminCards=d.cards||[];state.cardCategories=d.categories||[];state.cardOrigins=d.origins||[];state.cardElementTypes=d.element_types||[];state.cardCostTypes=d.cost_types||[];state.cardDamageTypes=d.damage_types||[];state.cardStatuses=d.statuses||[];
-    renderAdminCardCatalog();
-  }catch(e){console.error(e)}
-}
-
-function populateCardSelects(){
-  const cat=qs("#adminCardCategory"),origin=qs("#cardOrigin"),damageType=qs("#cardDamageType"),catalogCat=qs("#adminCardCatalogFilter");
-  if(cat)cat.innerHTML=(state.cardCategories||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
-  if(origin)origin.innerHTML=(state.cardOrigins||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
-  if(damageType)damageType.innerHTML=(state.cardDamageTypes||["DANO_BRUTO","DANO_CONTINUO","DANO_DIRETO","SEM_DANO"]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x.replaceAll('_',' '))}</option>`).join("");
-  if(catalogCat){
-    const current=state.cardCatalogCategory||"";
-    catalogCat.innerHTML=`<option value="">Todas as categorias</option>`+(state.cardCategories||[]).map(x=>`<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join("");
-    catalogCat.value=current;
-  }
-  const statusFilter=qs('#adminCardStatusFilter');
-  if(statusFilter) statusFilter.value=state.cardCatalogStatus||"";
-}
-function resetCardForm(){
-  const f=qs("#cardForm");if(!f)return;f.reset();qs("#cardId").value="";if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value="Automático";populateCardSelects();
-  qs("#adminCardCategory").value="Outros";qs("#cardOrigin").value="Exclusivo";qs("#cardElementType").value="NAO_ELEMENTAL";qs("#cardCostType").value="SEM_CUSTO";qs("#cardDamageType").value="SEM_DANO";qs("#cardStatus").value="ATIVO";qs("#cardPower").value=0;qs("#cardDamage").value=0;qs("#cardSaveBtn").textContent="Criar card";qs("#cardError").textContent="";
-}
-function editCardForm(id){
-  const c=state.adminCards.find(x=>Number(x.id)===id);if(!c)return;
-  qs("#cardId").value=c.id;if(qs("#cardInternalNumber"))qs("#cardInternalNumber").value=String(c.id);qs("#cardNamePt").value=c.name_pt||c.name||"";qs("#cardNameJp").value=c.name_jp||"";populateCardSelects();qs("#adminCardCategory").value=c.category||"Outros";qs("#cardOrigin").value=c.origin||"Exclusivo";qs("#cardElementType").value=c.element_type||"NAO_ELEMENTAL";qs("#cardElement").value=c.element||"";qs("#cardCostType").value=c.cost_type||"SEM_CUSTO";qs("#cardCost").value=c.cost||"";qs("#cardPower").value=c.power_value||0;qs("#cardDamage").value=c.damage_value||0;qs("#cardDamageType").value=c.damage_type||"SEM_DANO";qs("#cardOrder").value=c.sort_order||0;qs("#cardStatus").value=c.status||"ATIVO";qs("#cardDescription").value=c.description||"";qs("#cardSaveBtn").textContent="Salvar card";qs("#cardError").textContent="";qs("#cardNamePt").focus();
-}
-function updateCardCatalogBulkBar(){
-  const bar=qs('#cardCatalogBulkBar'),count=qs('#cardCatalogSelectedCount');
-  if(!bar||!count)return;
-  const n=state.selectedCardIds?.size||0;
-  bar.hidden=n===0;
-  count.textContent=`${n} ${n===1?'Card selecionado':'Cards selecionados'}`;
-}
-function clearCardSelection(){state.selectedCardIds=new Set();renderAdminCardCatalog();}
-function selectVisibleCards(){
-  const visible=[...(state.adminCards||[])].filter(c=>{
-    const term=String(state.cardCatalogSearch||'').trim().toLowerCase();
-    const category=String(state.cardCatalogCategory||'');
-    const status=String(state.cardCatalogStatus||'');
-    if(category&&String(c.category||'')!==category)return false;
-    if(status&&String(c.status||'ATIVO')!==status)return false;
-    if(!term)return true;
-    return `${c.id} ${c.name_pt||c.name} ${c.name_jp||''} ${c.category||''} ${c.origin||''} ${c.element||''} ${c.description||''}`.toLowerCase().includes(term);
-  });
-  const set=new Set(state.selectedCardIds||[]);visible.forEach(c=>set.add(Number(c.id)));state.selectedCardIds=set;renderAdminCardCatalog();
-}
-async function exportSelectedCards(){
-  const ids=[...(state.selectedCardIds||[])].map(Number).filter(Boolean);
-  if(!ids.length)return alert('Selecione pelo menos um Card.');
-  try{
-    const key=state.adminKey||getStoredAdminKey();const r=await fetch(`/api/admin/cards/export.xlsx?ids=${encodeURIComponent(ids.join(','))}`,{headers:key?{'x-admin-key':key}:{},credentials:'same-origin'});
-    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||'Não foi possível exportar os Cards selecionados.');}
-    const blob=await r.blob(),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='cards-spade-selecionados.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);
-  }catch(e){alert(e.message)}
-}
-async function runCardBulkAction(){
-  const ids=[...(state.selectedCardIds||[])].map(Number).filter(Boolean);
-  if(!ids.length)return alert('Selecione pelo menos um Card.');
-  const modal=document.createElement('div');modal.className='bulk-modal-backdrop';modal.id='cardMassActionModal';
-  modal.innerHTML=`<div class="bulk-modal"><h3>⚙ Ação em massa nos Cards</h3><p>${ids.length} Card(s) selecionado(s).</p><div class="bulk-modal-grid"><select id="cardMassAction"><option value="ATIVAR">🟢 Ativar Cards</option><option value="INATIVAR">⛔ Inativar Cards</option><option value="CATEGORIA">🏷️ Alterar categoria</option></select><select id="cardMassCategory" style="display:none">${(state.cardCategories||[]).map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}</select></div><p class="bulk-card-help">Apenas o status ou a categoria dos Cards será alterado. O Nº interno permanece imutável.</p><div class="bulk-modal-actions"><button type="button" class="outline dark-outline" id="cardMassCancel">Cancelar</button><button type="button" class="gold" id="cardMassConfirm">Aplicar</button></div></div>`;
-  document.body.appendChild(modal);
-  const action=qs('#cardMassAction'),cat=qs('#cardMassCategory');action.onchange=()=>{cat.style.display=action.value==='CATEGORIA'?'':'none';};
-  qs('#cardMassCancel').onclick=()=>modal.remove();
-  qs('#cardMassConfirm').onclick=async()=>{
-    const a=action.value, category=cat.value;
-    if(a==='CATEGORIA'&&!category)return alert('Escolha uma categoria.');
-    const label=a==='ATIVAR'?'ativar':a==='INATIVAR'?'inativar':`mover para a categoria "${category}"`;
-    if(!confirm(`Confirmar ${label} ${ids.length} Card(s)?`))return;
-    qs('#cardMassConfirm').disabled=true;
-    try{const d=await adminApi('/api/admin/cards/bulk-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({card_ids:ids,action:a,category})});modal.remove();state.selectedCardIds=new Set();await loadAdminCards();alert(`${d.updated||0} Card(s) atualizado(s).`);}catch(e){qs('#cardMassConfirm').disabled=false;alert(e.message)}
-  };
-}
-async function openCardDistributionModal(cardId){
-  if(!hasAdminPermission('cards_assign'))return alert('Você não possui permissão para vincular Cards a jogadores.');
-  const card=(state.adminCards||[]).find(c=>Number(c.id)===Number(cardId));if(!card)return;
-  const modal=qs('#cardDistributionModal');if(!modal)return;
-  try{
-    const d=await adminApi('/api/admin/cards/distribution-targets');
-    state.cardDistribution={cardId:Number(cardId),players:d.players||[],selectedPlayers:new Set(),house:'',search:'',mode:'add'};
-    renderCardDistributionModal();modal.hidden=false;
-  }catch(e){alert(e.message)}
-}
-function cardDistributionFilteredPlayers(){
-  const d=state.cardDistribution||{players:[]},q=String(d.search||'').toLowerCase().trim(),house=String(d.house||'');
-  return (d.players||[]).filter(p=>(!house||String(p.house||'')===house)&&(!q||`${p.nick} ${p.number} ${p.house} ${p.patent}`.toLowerCase().includes(q)));
-}
-function renderCardDistributionModal(){
-  const modal=qs('#cardDistributionModal');if(!modal)return;const d=state.cardDistribution||{},card=(state.adminCards||[]).find(c=>Number(c.id)===Number(d.cardId));if(!card)return;
-  const houses=[...new Set((d.players||[]).map(p=>p.house).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR')),filtered=cardDistributionFilteredPlayers(),selected=d.selectedPlayers||new Set();
-  modal.innerHTML=`<div class="card-distribution-shell" role="dialog" aria-modal="true" aria-labelledby="cardDistributionTitle"><header class="card-distribution-head"><div><p class="eyebrow">🃏 DISTRIBUIÇÃO EM MASSA</p><h3 id="cardDistributionTitle">#${Number(card.id)} • ${escapeHtml(card.name_pt||card.name)}</h3><p>${Number(selected.size)} jogador(es) selecionado(s).</p></div><button type="button" class="icon-button" id="cardDistributionClose">×</button></header><main class="card-distribution-body"><div class="card-distribution-controls"><select id="cardDistributionMode"><option value="add" ${d.mode==='add'?'selected':''}>＋ Adicionar Card</option><option value="remove" ${d.mode==='remove'?'selected':''}>− Remover Card</option></select><select id="cardDistributionHouse"><option value="">Todas as Casas</option>${houses.map(h=>`<option value="${escapeHtml(h)}" ${d.house===h?'selected':''}>${escapeHtml(h)}</option>`).join('')}</select><input id="cardDistributionSearch" class="wide" placeholder="Pesquisar jogador, número, casa ou patente..." value="${escapeHtml(d.search||'')}"></div>${d.mode==='add'?`<div class="card-distribution-controls" style="margin-top:8px"><select id="cardDistributionSourceType"><option value="OUTRO">Outra origem</option><option value="MISSAO">🎯 Missão</option><option value="EVENTO">🎉 Evento</option><option value="LOJA">🛒 Loja</option><option value="PATENTE">🎖️ Patente</option></select><input id="cardDistributionSourceName" placeholder="Origem / observação" value="Distribuição administrativa em massa"></div>`:''}<div class="card-distribution-targets">${filtered.length?filtered.map(p=>`<label class="card-distribution-target"><input type="checkbox" data-card-distribution-player="${Number(p.id)}" ${selected.has(Number(p.id))?'checked':''}><span><b>${escapeHtml(p.nick)}</b><small>#${escapeHtml(p.number||String(p.id))} • ${escapeHtml(p.house||'Sem Casa')}${p.patent?` • ${escapeHtml(p.patent)}`:''}</small></span></label>`).join(''):`<div class="card-detail-empty">Nenhum jogador corresponde aos filtros.</div>`}</div><div class="card-distribution-summary"><b>${Number(selected.size)} selecionado(s)</b> • ${filtered.length} jogador(es) visíveis.<br><button type="button" class="outline dark-outline small" id="cardDistributionSelectVisible" style="margin-top:7px">☑ Selecionar visíveis</button><button type="button" class="outline dark-outline small" id="cardDistributionClear" style="margin-top:7px;margin-left:6px">Limpar seleção</button></div></main><footer class="card-distribution-foot"><span>${d.mode==='add'?'Os jogadores que já possuem o Card serão ignorados.':'Somente jogadores que possuem o Card serão alterados.'}</span><div class="card-distribution-foot-actions"><button type="button" class="outline dark-outline" id="cardDistributionCancel">Cancelar</button><button type="button" class="gold" id="cardDistributionConfirm">${d.mode==='add'?'Adicionar Card':'Remover Card'}</button></div></footer></div>`;
-  qs('#cardDistributionClose').onclick=closeCardDistributionModal;qs('#cardDistributionCancel').onclick=closeCardDistributionModal;
-  qs('#cardDistributionMode').onchange=e=>{state.cardDistribution.mode=e.target.value;renderCardDistributionModal();};
-  qs('#cardDistributionHouse').onchange=e=>{state.cardDistribution.house=e.target.value;renderCardDistributionModal();};
-  qs('#cardDistributionSearch').oninput=e=>{state.cardDistribution.search=e.target.value;renderCardDistributionModal();setTimeout(()=>{const input=qs('#cardDistributionSearch');if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}},0);};
-  qsa('[data-card-distribution-player]').forEach(cb=>cb.onchange=e=>{const id=Number(e.target.dataset.cardDistributionPlayer);if(e.target.checked)selected.add(id);else selected.delete(id);state.cardDistribution.selectedPlayers=selected;renderCardDistributionModal();});
-  qs('#cardDistributionSelectVisible').onclick=()=>{filtered.forEach(p=>selected.add(Number(p.id)));state.cardDistribution.selectedPlayers=selected;renderCardDistributionModal();};
-  qs('#cardDistributionClear').onclick=()=>{state.cardDistribution.selectedPlayers=new Set();renderCardDistributionModal();};
-  qs('#cardDistributionConfirm').onclick=submitCardDistribution;
-}
-function closeCardDistributionModal(){const modal=qs('#cardDistributionModal');if(modal){modal.hidden=true;modal.innerHTML='';}}
-async function submitCardDistribution(){
-  const d=state.cardDistribution||{},ids=[...(d.selectedPlayers||[])].map(Number).filter(Boolean);if(!ids.length)return alert('Selecione pelo menos um jogador.');
-  const sourceType=qs('#cardDistributionSourceType')?.value||'OUTRO',sourceName=qs('#cardDistributionSourceName')?.value.trim()||'Distribuição administrativa em massa';
-  const action=d.mode==='remove'?'remover':'adicionar';
-  if(!confirm(`Confirmar ${action} do Card #${Number(d.cardId)} para ${ids.length} jogador(es)?`))return;
-  const btn=qs('#cardDistributionConfirm');if(btn)btn.disabled=true;
-  try{
-    const payload={player_ids:ids,card_id:Number(d.cardId),mode:d.mode,acquisition_type:sourceType,acquisition_name:sourceName};
-    const r=await adminApi('/api/admin/cards/distribute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    closeCardDistributionModal();await loadAdminCards();if(state.selectedPlayer&&ids.includes(Number(state.selectedPlayer.id)))await selectAdminPlayer(state.selectedPlayer.id);
-    const skipped=(r.skipped||[]).slice(0,12).map(x=>`${x.nick}: ${x.reason}`).join('\n');
-    alert(`${r.changed?.length||0} jogador(es) alterado(s).${skipped?`\n\nIgnorados:\n${skipped}`:''}`);
-  }catch(e){if(btn)btn.disabled=false;alert(e.message)}
-}
-
-function renderAdminCardCatalog(){
-  const list=qs("#adminCardCatalogList");if(!list)return;populateCardSelects();
-  const term=String(state.cardCatalogSearch||"").trim().toLowerCase();
-  const category=String(state.cardCatalogCategory||"");
-  const status=String(state.cardCatalogStatus||"");
-  const cards=(state.adminCards||[]).filter(c=>{
-    if(category && String(c.category||"")!==category)return false;
-    if(status && String(c.status||"ATIVO")!==status)return false;
-    if(!term)return true;
-    return `${c.id} ${c.name_pt||c.name} ${c.name_jp||""} ${c.category||""} ${c.origin||""} ${c.element||""} ${c.description||""}`.toLowerCase().includes(term);
-  });
-  const canLink=hasAdminPermission('cards_write'),canAssign=hasAdminPermission('cards_assign'),canEdit=hasAdminPermission('cards_write');
-  const canSelect=canEdit||canAssign;
-  list.innerHTML=cards.map(c=>`<div class="card-catalog-item ${state.selectedCardIds?.has(Number(c.id))?'card-catalog-item-selected':''}"><div class="card-catalog-left">${canSelect?`<input class="card-catalog-select" type="checkbox" data-card-check="${Number(c.id)}" ${state.selectedCardIds?.has(Number(c.id))?'checked':''} aria-label="Selecionar Card #${Number(c.id)}">`:''}<div class="card-catalog-main"><b>#${escapeHtml(String(c.id))} • ${escapeHtml(c.name_pt||c.name)}</b><small>${c.name_jp?escapeHtml(c.name_jp)+" • ":""}${escapeHtml(c.category)} • Poder ${Number(c.power_value||0)} • Dano ${Number(c.damage_value||0)} (${escapeHtml((c.damage_type||'SEM_DANO').replaceAll('_',' '))}) • ${escapeHtml(c.origin)} • ${c.players} jogador(es)}${Number(c.library_links||0)?` • 📚 ${Number(c.library_links)} regra(s)`:''}${c.element_type==="ELEMENTAL"&&c.element?` • ${escapeHtml(c.element)}`:""}${c.status!=="ATIVO"?" • INATIVO":""}</small></div></div><div class="card-catalog-actions"><button type="button" data-card-view="${c.id}">👁</button>${canEdit?`<button type="button" data-card-edit="${c.id}">✎</button>`:''}${canLink?`<button type="button" title="Vincular à Biblioteca" data-card-library="${c.id}">📚</button>`:''}${canAssign?`<button type="button" title="Distribuir para jogadores" data-card-distribute="${c.id}">👥</button>`:''}${canEdit?`<button type="button" class="delete" data-card-delete="${c.id}">×</button>`:''}</div></div>`).join("")||`<div class="admin-history-empty">Nenhum card corresponde aos filtros.</div>`;
-  qsa("[data-card-check]").forEach(b=>b.onchange=e=>{const id=Number(e.target.dataset.cardCheck),set=new Set(state.selectedCardIds||[]);if(e.target.checked)set.add(id);else set.delete(id);state.selectedCardIds=set;updateCardCatalogBulkBar();b.closest('.card-catalog-item')?.classList.toggle('card-catalog-item-selected',e.target.checked);});
-  qsa("[data-card-view]").forEach(b=>b.onclick=()=>openCardDetailModal(Number(b.dataset.cardView),true));
-  qsa("[data-card-edit]").forEach(b=>b.onclick=()=>editCardForm(Number(b.dataset.cardEdit)));
-  qsa("[data-card-library]").forEach(b=>b.onclick=()=>openCardLibraryManager(Number(b.dataset.cardLibrary)));
-  qsa("[data-card-distribute]").forEach(b=>b.onclick=()=>openCardDistributionModal(Number(b.dataset.cardDistribute)));
-  qsa("[data-card-delete]").forEach(b=>b.onclick=()=>deleteCard(Number(b.dataset.cardDelete)));
-  updateCardCatalogBulkBar();
-}
-
-function cardDetailMetaLabel(type){return ({MANA:"♦️ Mana",VIDA:"❤️ Vida",SEM_CUSTO:"Sem custo"})[type]||type||"Sem custo";}
-function cardDetailDamageLabel(c){const t=String(c.damage_type||"SEM_DANO");return t==="SEM_DANO"?"Sem dano":`${Number(c.damage_value||0)} • ${t.replaceAll('_',' ')}`;}
-function renderCardDetailBody(data,isAdmin){
-  const c=data.card||data;
-  const links=data.library_links||c.library_links||[];
-  const linkSection=links.length?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">📚 BIBLIOTECA</p><h3>Regras relacionadas</h3></div><strong>${links.length}</strong></div><div class="card-library-link-list">${links.map(l=>`<button type="button" class="card-library-link" data-card-library-open="${Number(l.library_item_id)}" data-card-library-section="${escapeHtml(l.section_title||'')}" data-card-library-child="${escapeHtml(l.child_title||'')}"><span>📖</span><span><b>${escapeHtml(l.library_title||'Material da Biblioteca')}</b><small>${escapeHtml(l.path_label||[l.section_title,l.child_title].filter(Boolean).join(' › ')||'Abrir material')}</small></span><i>→</i></button>`).join('')}</div>${isAdmin&&hasAdminPermission('cards_write')?`<div class="editor-actions" style="margin-top:10px"><button type="button" class="outline dark-outline small" data-card-library-manage="${Number(c.id)}">⚙ Gerenciar vínculos</button></div>`:''}</section>`:`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">📚 BIBLIOTECA</p><h3>Regras relacionadas</h3></div></div><div class="card-detail-empty">Este Card ainda não possui uma regra da Biblioteca vinculada.</div>${isAdmin&&hasAdminPermission('cards_write')?`<div class="editor-actions" style="margin-top:10px"><button type="button" class="outline dark-outline small" data-card-library-manage="${Number(c.id)}">＋ Vincular à Biblioteca</button></div>`:''}</section>`;
-  const holderRows=isAdmin?`<section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">POSSE DO CARD</p><h3>Jogadores</h3></div><strong>${Number(data.players?.length||0)}</strong></div>${data.players?.length?`<div class="card-holder-list">${data.players.map(p=>`<button type="button" class="card-holder-row card-holder-button" data-card-holder-player="${Number(p.id)}"><div><b>${escapeHtml(p.nick)}</b><small>#${Number(p.id)} • ${escapeHtml(p.house||"Sem Casa")}${p.patent?` • ${escapeHtml(p.patent)}`:""}</small></div><span>${Number(p.quantity||1)} un. →</span></button>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum jogador possui este Card.</div>`}</section><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">ALIADOS</p><h3>Contas de aliado</h3></div><strong>${Number(data.allies?.length||0)}</strong></div>${data.allies?.length?`<div class="card-holder-list">${data.allies.map(a=>`<div class="card-holder-row"><div><b>${escapeHtml(a.display_name)}</b><small>@${escapeHtml(a.username)}</small></div><span>Aliado</span></div>`).join('')}</div>`:`<div class="card-detail-empty">Nenhum aliado possui este Card.</div>`}</section>`:"";
-  return `${possession}<div class="card-detail-hero"><div class="card-detail-icon">${c.element_type==="ELEMENTAL"?escapeHtml(c.element||"✦"):"✦"}</div><div><div class="card-detail-tags"><span>${escapeHtml(c.category||"Outros")}</span><span>${c.element_type==="ELEMENTAL"?"ELEMENTAL":"NÃO ELEMENTAL"}</span><span>${escapeHtml(c.status||"ATIVO")}</span></div><h3>${escapeHtml(c.name_pt||c.name)}</h3>${c.name_jp?`<p>${escapeHtml(c.name_jp)}</p>`:""}</div></div><div class="card-detail-stats"><div><small>Nº interno</small><b>#${Number(c.id)}</b></div><div><small>Custo</small><b>${escapeHtml(c.cost||"—")}</b><span>${escapeHtml(cardDetailMetaLabel(c.cost_type))}</span></div><div><small>Poder</small><b>${Number(c.power_value||0)}</b></div><div><small>Dano</small><b>${escapeHtml(cardDetailDamageLabel(c))}</b></div><div><small>Origem</small><b>${escapeHtml(c.origin||"Exclusivo")}</b></div></div><section class="card-detail-section"><div class="card-detail-section-head"><div><p class="eyebrow">DESCRIÇÃO</p><h3>Efeito do Card</h3></div></div><div class="card-detail-description">${escapeHtml(c.description||"Descrição não cadastrada.").replace(/\n/g,"<br>")}</div></section>${linkSection}${holderRows}`;
-}
-function bindCardDetailLibraryButtons(){
-  qsa('[data-card-library-open]').forEach(b=>b.onclick=()=>openLibraryFromCard({library_item_id:Number(b.dataset.cardLibraryOpen),section_title:b.dataset.cardLibrarySection||'',child_title:b.dataset.cardLibraryChild||''}));
-  qsa('[data-card-library-manage]').forEach(b=>b.onclick=()=>openCardLibraryManager(Number(b.dataset.cardLibraryManage)));
-  qsa('[data-card-holder-player]').forEach(b=>b.onclick=async()=>{
-    const playerId=Number(b.dataset.cardHolderPlayer||0);
-    if(!playerId||!state.admin)return;
-    closeCardDetailModal();
-    await selectAdminPlayer(playerId);
-  });
-}
-async function openCardDetailModal(id,isAdmin=true){
-  const modal=qs("#cardDetailModal");if(!modal)return;
-  let local=(state.adminCards||[]).find(c=>Number(c.id)===Number(id)) || (state.playerCards||[]).find(c=>Number(c.id)===Number(id));
-  if(!local && !isAdmin){
-    try{const d=await api(`/api/cards/${Number(id)}`);local=d.card;}
-    catch(e){alert(e.message||"Não foi possível carregar o Card.");return;}
-  }
-  if(!local)return;
-  modal.hidden=false;modal.classList.add("open");document.body.classList.add("card-detail-open");
-  qs("#cardDetailTitle").textContent=`#${Number(local.id)} • ${local.name_pt||local.name}`;qs("#cardDetailSubtitle").textContent=isAdmin?"Catálogo oficial e possuidores do Card.":"Detalhes do Card.";qs("#cardDetailBody").innerHTML=renderCardDetailBody({card:local,players:[],allies:[]},false);bindCardDetailLibraryButtons();
-  if(isAdmin){
-    try{const d=await adminApi(`/api/admin/cards/${Number(id)}/details`);state.cardDetail=d;qs("#cardDetailBody").innerHTML=renderCardDetailBody(d,true);qs("#cardDetailSubtitle").textContent=`${Number(d.holders_total||0)} conta(s) possuem este Card.`;bindCardDetailLibraryButtons();}
-    catch(e){qs("#cardDetailBody").innerHTML=`<div class="card-detail-empty">${escapeHtml(e.message||"Não foi possível carregar os possuidores do Card.")}</div>`;}
-  }
-}
-
-function closeCardDetailModal(){const modal=qs("#cardDetailModal");if(!modal)return;modal.classList.remove("open");modal.hidden=true;document.body.classList.remove("card-detail-open");state.cardDetail=null;}
-
-function cardLibraryNormalizeText(v){return String(v||'').trim();}
-async function openCardLibraryManager(cardId){
-  if(!hasAdminPermission('cards_write'))return alert('Você não possui permissão para vincular Cards à Biblioteca.');
-  const card=(state.adminCards||[]).find(c=>Number(c.id)===Number(cardId));
-  if(!card)return;
-  const modal=ensureCardLibraryManager();
-  state.cardLibraryManager={cardId:Number(cardId),links:[],materials:[]};
-  modal.classList.add('open');modal.hidden=false;document.body.classList.add('card-library-manager-open');
-  renderCardLibraryManager();
-  try{
-    const [linksR,libR]=await Promise.all([adminApi(`/api/admin/cards/${Number(cardId)}/library-links`),api('/api/library')]);
-    state.cardLibraryManager.links=linksR.links||[];
-    state.cardLibraryManager.materials=libR.items||[];
-    renderCardLibraryManager();
-  }catch(e){qs('#cardLibraryManagerStatus').textContent=e.message||'Não foi possível carregar os vínculos.';}
-}
-function ensureCardLibraryManager(){
-  let modal=qs('#cardLibraryManagerModal');
-  if(modal)return modal;
-  modal=document.createElement('div');modal.id='cardLibraryManagerModal';modal.className='card-library-manager-modal';modal.hidden=true;
-  document.body.appendChild(modal);return modal;
-}
-function closeCardLibraryManager(){const modal=qs('#cardLibraryManagerModal');if(!modal)return;modal.classList.remove('open');modal.hidden=true;document.body.classList.remove('card-library-manager-open');state.cardLibraryManager={cardId:null,links:[],materials:[]};}
-function cardLibraryMaterialOptions(){
-  const {materials}=state.cardLibraryManager;return materials.map(m=>`<option value="${Number(m.id)}">${escapeHtml(m.title)}</option>`).join('');
-}
-function populateCardLibraryPathSelectors(){
-  const mat=qs('#cardLibraryMaterial');if(!mat)return;
-  const current=mat.value;mat.innerHTML=`<option value="">Escolher material…</option>${cardLibraryMaterialOptions()}`;if(current)mat.value=current;populateCardLibrarySection();
-}
-function populateCardLibrarySection(){
-  const mat=qs('#cardLibraryMaterial'),sec=qs('#cardLibrarySection'),child=qs('#cardLibraryChild'),ref=qs('#cardLibraryPath');
-  if(!mat||!sec||!child)return;
-  const item=state.cardLibraryManager.materials.find(x=>Number(x.id)===Number(mat.value));
-  const outline=item?parseLibraryHierarchy(item):{sections:[]};
-  sec.innerHTML=`<option value="">Material inteiro</option>`+outline.sections.map((x,i)=>`<option value="${i}">${escapeHtml(x.title)}</option>`).join('');
-  child.innerHTML='<option value="">Seção inteira</option>';
-  if(ref)ref.value='';
-  populateCardLibraryChild();
-}
-function populateCardLibraryChild(){
-  const mat=qs('#cardLibraryMaterial'),sec=qs('#cardLibrarySection'),child=qs('#cardLibraryChild'),ref=qs('#cardLibraryPath');
-  if(!mat||!sec||!child)return;
-  const item=state.cardLibraryManager.materials.find(x=>Number(x.id)===Number(mat.value));
-  const outline=item?parseLibraryHierarchy(item):{sections:[]};
-  const sidx=sec.value===''?null:Number(sec.value);const section=sidx===null?null:outline.sections[sidx];
-  const currentChild=child.value;
-  child.innerHTML='<option value="">Seção inteira</option>'+(section?.children||[]).map((x,i)=>`<option value="${i}">${escapeHtml(x.title)}</option>`).join('');
-  if(currentChild && section?.children?.[Number(currentChild)]) child.value=currentChild;
-  if(ref){const parts=[];if(section)parts.push(section.title);const cidx=child.value===''?null:Number(child.value);if(cidx!==null&&section?.children?.[cidx])parts.push(section.children[cidx].title);ref.value=parts.join(' › ');}
-}
-function renderCardLibraryManager(){
-  const modal=ensureCardLibraryManager();const id=state.cardLibraryManager.cardId;const card=(state.adminCards||[]).find(c=>Number(c.id)===Number(id));if(!card)return;
-  const links=state.cardLibraryManager.links||[];
-  modal.innerHTML=`<div class="card-library-manager-shell" role="dialog" aria-modal="true" aria-labelledby="cardLibraryManagerTitle"><header><div><p class="eyebrow">📚 VÍNCULOS DO CARD</p><h2 id="cardLibraryManagerTitle">#${Number(card.id)} • ${escapeHtml(card.name_pt||card.name)}</h2><p>Relacione este Card a um material, seção ou subtópico da Biblioteca.</p></div><button type="button" class="library-explorer-close" id="cardLibraryManagerClose">×</button></header><main><div class="card-library-manager-form"><select id="cardLibraryMaterial"><option value="">Carregando materiais…</option></select><select id="cardLibrarySection"><option value="">Material inteiro</option></select><select id="cardLibraryChild"><option value="">Seção inteira</option></select><button type="button" class="gold small" id="cardLibraryAddBtn">＋ Vincular</button></div><input id="cardLibraryPath" class="card-library-manager-status" readonly placeholder="Caminho do vínculo"><div id="cardLibraryManagerStatus" class="card-library-manager-status"></div><div class="card-library-manager-list">${links.length?links.map(l=>`<div class="card-library-manager-row"><div><b>${escapeHtml(l.library_title||'Material')}</b><small>${escapeHtml(l.path_label||[l.section_title,l.child_title].filter(Boolean).join(' › ')||'Material inteiro')} • vínculo #${Number(l.id)}</small></div><button type="button" class="outline danger small" data-card-library-remove="${Number(l.id)}">Remover</button></div>`).join(''):`<div class="card-detail-empty">Nenhuma regra vinculada a este Card.</div>`}</div></main><footer><span>Um Card pode estar relacionado a várias regras da Biblioteca.</span><button type="button" class="outline dark-outline small" id="cardLibraryManagerDone">Fechar</button></footer></div>`;
-  qs('#cardLibraryManagerClose').onclick=closeCardLibraryManager;qs('#cardLibraryManagerDone').onclick=closeCardLibraryManager;
-  qs('#cardLibraryMaterial').onchange=()=>{populateCardLibrarySection();};
-  qs('#cardLibrarySection').onchange=()=>{populateCardLibraryChild();};
-  qs('#cardLibraryChild').onchange=()=>{populateCardLibraryChild();};
-  qs('#cardLibraryAddBtn').onclick=addCardLibraryLink;
-  qsa('[data-card-library-remove]').forEach(b=>b.onclick=()=>removeCardLibraryLink(Number(b.dataset.cardLibraryRemove)));
-  populateCardLibraryPathSelectors();
-  if((state.cardLibraryManager.materials||[]).length===0)qs('#cardLibraryManagerStatus').textContent='Nenhum material publicado disponível.';
-}
-async function addCardLibraryLink(){
-  const materialId=Number(qs('#cardLibraryMaterial')?.value||0);if(!materialId)return alert('Escolha um material da Biblioteca.');
-  const item=state.cardLibraryManager.materials.find(x=>Number(x.id)===materialId);if(!item)return;
-  const outline=parseLibraryHierarchy(item);const secVal=qs('#cardLibrarySection')?.value||'';const childVal=qs('#cardLibraryChild')?.value||'';
-  const section=secVal===''?null:outline.sections[Number(secVal)];const child=childVal===''?null:section?.children?.[Number(childVal)];
-  if(childVal!==''&&!child)return alert('Subtópico inválido.');
-  const body={library_item_id:materialId,section_title:section?.title||'',child_title:child?.title||'',path_label:[section?.title,child?.title].filter(Boolean).join(' › '),sort_order:0};
-  const status=qs('#cardLibraryManagerStatus');if(status)status.textContent='Salvando…';
-  try{const d=await adminApi(`/api/admin/cards/${Number(state.cardLibraryManager.cardId)}/library-links`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});state.cardLibraryManager.links=[...(state.cardLibraryManager.links||[]),d.link];if(status)status.textContent='Vínculo salvo.';renderCardLibraryManager();}
-  catch(e){if(status)status.textContent=e.message||'Erro ao vincular.';}
-}
-async function removeCardLibraryLink(linkId){
-  const cardId=Number(state.cardLibraryManager.cardId);if(!cardId||!linkId)return;if(!confirm('Remover este vínculo da Biblioteca?'))return;
-  try{await adminApi(`/api/admin/cards/${cardId}/library-links/${linkId}`,{method:'DELETE'});state.cardLibraryManager.links=(state.cardLibraryManager.links||[]).filter(x=>Number(x.id)!==linkId);renderCardLibraryManager();}
-  catch(e){alert(e.message||'Erro ao remover vínculo.');}
-}
-async function openLibraryFromCard(link){
-  try{
-    if(!(state.libraryAllItems||[]).length){const d=await api('/api/library');state.libraryAllItems=d.items||[];state.libraryItems=d.items||[];}
-    const items=state.libraryAllItems||[];const libItem=items.find(x=>Number(x.id)===Number(link.library_item_id));
-    if(!libItem){alert('O material relacionado não está disponível na Biblioteca pública.');return;}
-    const key=Object.entries(LIBRARY_TOPICS).find(([_,t])=>t.category===libItem.category)?.[0]||'all';
-    const topicItems=libraryItemsForTopic(items,key);const itemIndex=topicItems.findIndex(x=>Number(x.id)===Number(libItem.id));
-    if(itemIndex<0){alert('Não foi possível localizar o material na área da Biblioteca.');return;}
-    const outline=parseLibraryHierarchy(libItem);const sectionTitle=cardLibraryNormalizeText(link.section_title);const childTitle=cardLibraryNormalizeText(link.child_title);
-    closeCardDetailModal();
-    if(sectionTitle){const sidx=outline.sections.findIndex(s=>cardLibraryNormalizeText(s.title)===sectionTitle);if(sidx>=0){if(childTitle){const cidx=(outline.sections[sidx].children||[]).findIndex(c=>cardLibraryNormalizeText(c.title)===childTitle);if(cidx>=0)return openLibraryExplorer({level:'child',topicKey:key,itemIndex,sectionIndex:sidx,childIndex:cidx,item:libItem,outline});}return openLibraryExplorer({level:'section',topicKey:key,itemIndex,sectionIndex:sidx,item:libItem,outline});}}
-    openLibraryExplorer({level:'material',topicKey:key,itemIndex});
-  }catch(e){alert(e.message||'Não foi possível abrir a regra relacionada.');}
-}
-
-async function deleteCard(id){const c=(state.adminCards||[]).find(x=>Number(x.id)===id);if(!c)return;if(!confirm(`Excluir o card "${c.name_pt||c.name}"?`))return;try{await adminApi(`/api/admin/cards/${id}`,{method:"DELETE"});if(Number(qs("#cardId").value)===id)resetCardForm();await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);alert("Card excluído.");}catch(e){alert(e.message)}}
-
-async function loadAdminEvents(){
-  try{
-    const d=await adminApi("/api/admin/events");
-    state.adminEvents=d.events||[];
-    renderAdminEvents();
-    populateEventSelects();
-  }catch(e){console.error(e)}
-}
-function resetEventForm(){
-  const f=qs("#eventAdminForm");if(!f)return;f.reset();
-  qs("#eventId").value="";qs("#eventType").value="JOGO";qs("#eventStatus").value="PLANEJADO";
-  qs("#eventPublished").checked=true;qs("#eventFeatured").checked=false;
-  qs("#eventSaveBtn").textContent="Criar evento";qs("#eventError").textContent="";
-}
-function editAdminEvent(id){
-  const e=state.adminEvents.find(x=>Number(x.id)===id);if(!e)return;
-  qs("#eventId").value=e.id;qs("#eventTitle").value=e.title;qs("#eventType").value=e.event_type;
-  qs("#eventStatus").value=e.status;qs("#eventStart").value=String(e.start_date||"").slice(0,10);qs("#eventEnd").value=String(e.end_date||"").slice(0,10);
-  qs("#eventImage").value=e.image_url||"";qs("#eventDescription").value=e.description||"";qs("#eventRules").value=e.rules||"";
-  qs("#eventPublished").checked=!!e.published;qs("#eventFeatured").checked=!!e.featured;qs("#eventSaveBtn").textContent="Salvar evento";
-}
-function renderAdminEvents(){
-  const list=qs("#adminEventList");if(!list)return;
-  list.innerHTML=(state.adminEvents||[]).map(e=>`<div class="editorial-item">
-    <div class="editorial-item-head"><div><b>${escapeHtml(e.title)}</b><small>${escapeHtml(eventTypeLabel(e.event_type))} • ${escapeHtml(eventStatusLabel(e.status))} • ${e.participants} participante(s) • ${e.actions} ação(ões)}</small></div>
-    <div class="editorial-actions"><button type="button" data-event-edit="${e.id}">✎</button><button type="button" class="delete" data-event-delete="${e.id}">×</button></div></div>
-  </div>`).join("")||`<div style="font-size:10px;color:#888">Nenhum evento cadastrado.</div>`;
-  qsa("[data-event-edit]").forEach(b=>b.onclick=()=>editAdminEvent(Number(b.dataset.eventEdit)));
-  qsa("[data-event-delete]").forEach(b=>b.onclick=()=>deleteAdminEvent(Number(b.dataset.eventDelete)));
-}
-async function deleteAdminEvent(id){
-  const e=state.adminEvents.find(x=>Number(x.id)===id);if(!e)return;
-  if(!confirm(`Excluir o evento "${e.title}"?`))return;
-  try{await adminApi(`/api/admin/events/${id}`,{method:"DELETE"});await loadAdminEvents();alert("Evento excluído.")}catch(e){alert(e.message)}
-}
-function populateEventSelects(){
-  const sels=["eventActionEventSelect","eventRewardEventSelect","eventPlayerEventSelect","eventResultEventSelect"];
-  const html=(state.adminEvents||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.title)}</option>`).join("");
-  sels.forEach(id=>{const el=qs("#"+id);if(el)el.innerHTML=html});
-  if(state.selectedEventId){sels.forEach(id=>{const el=qs("#"+id);if(el)el.value=String(state.selectedEventId)})}
-  if(!state.selectedEventId&&state.adminEvents?.[0]){state.selectedEventId=Number(state.adminEvents[0].id)}
-  if(state.adminEvents?.[0])loadEventAdminDetails(state.selectedEventId||Number(state.adminEvents[0].id));
-}
-async function loadEventAdminDetails(eventId){
-  if(!eventId)return;state.selectedEventId=Number(eventId);
-  try{
-    const [a,r,p]=await Promise.all([
-      adminApi(`/api/admin/events/${eventId}/actions`),
-      adminApi(`/api/admin/events/${eventId}/rewards`),
-      adminApi(`/api/admin/events/${eventId}/players`)
-    ]);
-    renderEventActions(a.actions||[]);
-    renderEventRewards(r.rewards||[]);
-    renderEventPlayers(p.players||[]);
-    populateEventPlayerPicker();
-    await loadAdminResults(eventId);
-  }catch(e){console.error(e)}
-}
-function renderEventActions(actions){
-  const el=qs("#adminEventActionList");if(!el)return;
-  el.innerHTML=(actions||[]).map(a=>`<div class="admin-event-card"><div><b>${escapeHtml(a.name)}</b><small>${a.points} pontos • ${escapeHtml(a.description||"")}</small></div><button type="button" class="delete" data-event-action-delete="${a.id}">×</button></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma ação cadastrada.</div>`;
-  qsa("[data-event-action-delete]").forEach(b=>b.onclick=async()=>{if(confirm("Excluir esta ação?")){try{await adminApi(`/api/admin/event-actions/${b.dataset.eventActionDelete}`,{method:"DELETE"});await loadEventAdminDetails(state.selectedEventId)}catch(e){alert(e.message)}}});
-}
-function renderEventRewards(rewards){
-  const el=qs("#adminEventRewardList");if(!el)return;
-  el.innerHTML=(rewards||[]).map(r=>`<div class="admin-event-card"><div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.category)} • ${r.points_cost} pontos${r.description?` • ${escapeHtml(r.description)}`:""}</small></div><button type="button" class="delete" data-event-reward-delete="${r.card_id}">×</button></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma recompensa vinculada.</div>`;
-  qsa("[data-event-reward-delete]").forEach(b=>b.onclick=async()=>{if(confirm("Remover esta recompensa?")){try{await adminApi(`/api/admin/events/${state.selectedEventId}/rewards/${b.dataset.eventRewardDelete}`,{method:"DELETE"});await loadEventAdminDetails(state.selectedEventId)}catch(e){alert(e.message)}}});
-}
-function populateEventPlayerPicker(){
-  const el=qs("#eventParticipantPicker");if(!el)return;
-  el.innerHTML=(state.players||[]).map(p=>`<label class="edition-picker-item"><input type="checkbox" data-event-player-pick="${p.id}"><span><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")} • ${escapeHtml(p.patent||"Sem patente")}</small></span></label>`).join("")||`<div style="font-size:10px;color:#888">Nenhum jogador.</div>`;
-}
-function renderEventPlayers(players){
-  const list=qs("#eventParticipantList");if(!list)return;
-  list.innerHTML=(players||[]).map(p=>`<div class="event-participant-row"><div><b>${escapeHtml(displayPlayerName(p))}</b><small>${escapeHtml(p.house||"Sem Casa")} • ${escapeHtml(p.patent||"Sem patente")}</small></div><span class="event-points-badge">${p.points} pts</span><span style="font-size:8px;color:#777">🪙 ${money(p.yuls)} • ✨ ${p.exp}</span><span style="font-size:8px;color:#777">📋 ${p.missions}</span></div>`).join("")||`<div class="admin-history-empty">Nenhum participante.</div>`;
-  const sel=qs("#eventRewardPlayer"),sel2=qs("#eventActionPlayer"),sel3=qs("#eventCardRewardPlayer");
-  const opts=(players||[]).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))} • ${p.points} pts</option>`).join("");
-  if(sel)sel.innerHTML=opts||`<option value="">Nenhum participante</option>`;
-  if(sel2)sel2.innerHTML=opts||`<option value="">Nenhum participante</option>`;
-  if(sel3)sel3.innerHTML=opts||`<option value="">Nenhum participante</option>`;
-  // Actions and active cards available for this event.
-  loadEventActionSelect();
-  loadEventGrantCardSelect(players||[]);
-}
-async function loadEventGrantCardSelect(players){
-  const sel=qs("#eventGrantCard");if(!sel)return;
-  const opts=(state.adminCards||[]).filter(c=>Number(c.active)===1)
-    .map(c=>`<option value="${c.id}">${escapeHtml(c.name)} — ${escapeHtml(c.category)}</option>`).join("");
-  sel.innerHTML=opts||`<option value="">Nenhum card ativo</option>`;
-  if(!qs("#eventCardRewardPlayer")?.value && players?.[0])qs("#eventCardRewardPlayer").value=String(players[0].id);
-}
-
-async function loadEventActionSelect(){
-  const sel=qs("#eventActionForPlayer");if(!sel)return;
-  try{
-    const d=await adminApi(`/api/admin/events/${state.selectedEventId}/actions`);
-    sel.innerHTML=(d.actions||[]).map(a=>`<option value="${a.id}">${escapeHtml(a.name)} • +${a.points} pts</option>`).join("")||`<option value="">Nenhuma ação</option>`;
-  }catch(e){}
-}
-
-async function loadAdminResults(eventId){
-  const id=Number(eventId||state.selectedEventId);if(!id)return;
-  try{const d=await adminApi(`/api/admin/events/${id}/results`);state.adminResults=d.results||[];renderAdminResults(state.adminResults)}catch(e){const er=qs("#eventResultError");if(er)er.textContent=e.message}
-}
-function renderAdminResults(results){
-  const el=qs("#eventResultSlots");if(!el)return;
-  const bySlot=new Map((results||[]).map(r=>[r.slot,r]));
-  const slots=[["WINNER_1","🥇 1º Vencedor","winner",false],["WINNER_2","🥈 2º Vencedor","winner",false],["WINNER_3","🥉 3º Vencedor","winner",false],["HONOR_1","🏅 Menção Honrosa 1","honor",true],["HONOR_2","🏅 Menção Honrosa 2","honor",true],["HONOR_3","🏅 Menção Honrosa 3","honor",true]];
-  const opts=(state.players||[]).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))} • ${escapeHtml(p.house||"Sem Casa")}</option>`).join("");
-  el.innerHTML=slots.map(([slot,label,cls,isHonor])=>{const r=bySlot.get(slot);return `<div class="event-result-slot ${cls}" data-result-slot="${slot}"><label>${label}</label><select data-result-player="${slot}"><option value="">Selecionar jogador</option>${opts}</select>${isHonor?`<div class="event-result-fixed">Reconhecimento • sem premiação</div><span></span>`:`<div class="event-result-fixed">🪙 ${slot==="WINNER_1"?100:slot==="WINNER_2"?80:50} Yuls fixos</div><input data-result-exp="${slot}" type="number" min="0" placeholder="EXP">`}</div>`}).join("");
-  slots.forEach(([slot])=>{const r=bySlot.get(slot);if(!r)return;const sel=qs(`[data-result-player="${slot}"]`);if(sel)sel.value=String(r.player_id);const ex=qs(`[data-result-exp="${slot}"]`);if(ex)ex.value=r.reward_exp||0})
-}
-async function saveAdminResults(){
-  const id=Number(qs("#eventResultEventSelect")?.value||0);if(!id)return;
-  const results=[...qs("#eventResultSlots").querySelectorAll("[data-result-slot]")].map(row=>{const slot=row.dataset.resultSlot;const player_id=Number(row.querySelector(`[data-result-player="${slot}"]`)?.value||0);const ex=Number(row.querySelector(`[data-result-exp="${slot}"]`)?.value||0);return {slot,player_id,reward_exp:slot.startsWith("WINNER_")?ex:0}}).filter(x=>x.player_id>0);
-  try{await adminApi(`/api/admin/events/${id}/results`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({results})});await loadAdminResults(id);qs("#eventResultError").textContent="";alert("Resultado salvo.")}catch(e){qs("#eventResultError").textContent=e.message}
-}
-async function publishAdminResults(){
-  const id=Number(qs("#eventResultEventSelect")?.value||0);if(!id)return;
-  if(!confirm("Publicar este resultado? Os vencedores receberão 100, 80 e 50 Yuls. As Menções Honrosas não recebem premiação."))return;
-  try{await adminApi(`/api/admin/events/${id}/results/publish`,{method:"POST"});await loadAdminResults(id);alert("Resultado publicado e premiações aplicadas aos vencedores.")}catch(e){qs("#eventResultError").textContent=e.message}
-}
-
-function activateEditionEditor(){
-  const tab=qsa(".journal-editor-tab").find(x=>x.dataset.editorTab==="edition");
-  if(!tab)return;
-  qsa(".journal-editor-tab").forEach(x=>x.classList.toggle("active",x===tab));
-  qsa("[data-editor-panel]").forEach(x=>x.classList.toggle("active",x.dataset.editorPanel==="edition"));
-  const id=Number(qs("#editorEditionSelect")?.value||state.editorEditionId||0);
-  if(id) loadEditionComposition(id);
-}
-
-async function loadAdminArticles(){
-  try{
-    const [a,e]=await Promise.all([
-      adminApi("/api/admin/articles"),
-      adminApi("/api/admin/editions")
-    ]);
-    state.adminArticles=a.articles||[];
-    state.adminEditions=e.editions||[];
-    renderAdminArticles();
-    renderAdminEditions();
-    populateEditorEditionSelect();
-    if(state.editorEditionId)await loadEditionComposition(state.editorEditionId);
-    if(!qs("#articleId")?.value) activateEditionEditor();
-  }catch(e){console.error(e)}
-}
-
-function resetArticleForm(){
-  const f=qs("#articleForm");if(!f)return;
-  f.reset();
-  qs("#articleId").value="";
-  qs("#articleCategory").value="RPG";
-  qs("#articleDate").value=new Date().toISOString().slice(0,10);
-  if(qs("#articleImageFile"))qs("#articleImageFile").value="";refreshMediaPreview("articleImage","articleImagePreview");
-  qs("#articlePublished").checked=true;
-  qs("#articleSaveBtn").textContent="Criar matéria";
-  qs("#articleError").textContent="";
-}
-function editArticle(id){
-  const a=(state.adminArticles||[]).find(x=>Number(x.id)===id);if(!a)return;
-  qs("#articleId").value=a.id;qs("#articleTitle").value=a.title;qs("#articleSubtitle").value=a.subtitle||"";
-  qs("#articleAuthor").value=a.author||"";qs("#articleCategory").value=a.category||"RPG";
-  qs("#articleDate").value=String(a.date||"").slice(0,10);qs("#articleImage").value=a.image_url||"";if(qs("#articleImageFile"))qs("#articleImageFile").value="";refreshMediaPreview("articleImage","articleImagePreview");
-  qs("#articleExcerpt").value=a.excerpt||"";qs("#articleBody").value=a.body||"";
-  qs("#articlePublished").checked=!!a.published;
-  qs("#articleSaveBtn").textContent="Salvar matéria";qs("#articleError").textContent="";
-  qs("#articleTitle").focus();
-  qsa(".journal-editor-tab").forEach(x=>x.classList.toggle("active",x.dataset.editorTab==="article"));
-  qsa("[data-editor-panel]").forEach(x=>x.classList.toggle("active",x.dataset.editorPanel==="article"));
-}
-function renderAdminArticles(){
-  const list=qs("#adminArticleList");if(!list)return;
-  list.innerHTML=(state.adminArticles||[]).map(a=>`<div class="editorial-item article-item" data-article-item="${a.id}">
-    <div class="editorial-item-head"><div><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.category||"RPG")} • ${escapeHtml(a.author||"Redação")} • ${escapeHtml(String(a.date||""))}${a.published?"":" • Rascunho"}</small></div>
-    <div class="editorial-actions"><button type="button" data-article-edit="${a.id}">✎</button><button type="button" class="delete" data-article-delete="${a.id}">×</button></div></div>
-  </div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma matéria cadastrada.</div>`;
-  qsa("[data-article-edit]").forEach(b=>b.onclick=()=>editArticle(Number(b.dataset.articleEdit)));
-  qsa("[data-article-delete]").forEach(b=>b.onclick=()=>deleteArticle(Number(b.dataset.articleDelete)));
-}
-async function deleteArticle(id){
-  const a=(state.adminArticles||[]).find(x=>Number(x.id)===id);if(!a)return;
-  if(!confirm(`Excluir definitivamente a matéria "${a.title}"?\n\nEla será removida do banco de matérias e, se estiver em alguma edição, também será retirada dessas composições.`))return;
-  try{
-    await adminApi(`/api/admin/articles/${id}`,{method:"DELETE"});
-    if(Number(qs("#articleId")?.value||0)===id) resetArticleForm();
-    await loadAdminArticles();
-    alert("Matéria excluída definitivamente.");
-  }catch(e){alert(e.message)}
-}
-
-function populateEditorEditionSelect(){
-  const el=qs("#editorEditionSelect");if(!el)return;
-  el.innerHTML=`<option value="">Selecione uma edição</option>`+(state.adminEditions||[]).map(e=>`<option value="${e.id}">${escapeHtml(e.edition||"Edição")} — ${escapeHtml(e.title)}</option>`).join("");
-  if(state.editorEditionId)el.value=String(state.editorEditionId);
-  if(!state.editorEditionId&&state.adminEditions?.[0]){state.editorEditionId=Number(state.adminEditions[0].id);el.value=String(state.editorEditionId);}
-}
-async function loadEditionComposition(id){
-  if(!id)return;
-  state.editorEditionId=Number(id);
-  try{
-    const d=await adminApi(`/api/admin/editions/${id}/articles`);
-    const selected=new Map((d.articles||[]).map(a=>[Number(a.id),a]));
-    renderEditionPicker(selected);
-    renderEditionOrder(selected);
-  }catch(e){qs("#editionCompositionError").textContent=e.message}
-}
-function renderEditionPicker(selected){
-  const el=qs("#editionArticlePicker");if(!el)return;
-  el.innerHTML=(state.adminArticles||[]).map(a=>`<label class="edition-picker-item">
-    <input type="checkbox" data-edition-pick="${a.id}" ${selected.has(Number(a.id))?"checked":""}>
-    <span><b>${escapeHtml(a.title)}</b><small>${escapeHtml(a.category||"RPG")} • ${escapeHtml(a.author||"Redação")}</small></span>
-  </label>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma matéria cadastrada.</div>`;
-  qsa("[data-edition-pick]").forEach(c=>c.onchange=()=>syncEditionOrderFromPicker());
-}
-function syncEditionOrderFromPicker(){
-  const selectedIds=[...qs("#editionArticlePicker").querySelectorAll("[data-edition-pick]:checked")].map(x=>Number(x.dataset.editionPick));
-  const current=new Map([...qs("#editionArticleOrder").querySelectorAll("[data-edition-order]")].map(el=>[Number(el.dataset.editionOrder),Number(el.querySelector("input")?.value||0)]));
-  const selected=new Map();
-  selectedIds.forEach((id,i)=>selected.set(id,current.has(id)?current.get(id):(i+1)*10));
-  renderEditionOrder(selected);
-}
-function renderEditionOrder(selected){
-  const el=qs("#editionArticleOrder");if(!el)return;
-  const items=[...(selected||new Map()).entries()]
-    .map(([id,order])=>({a:(state.adminArticles||[]).find(x=>Number(x.id)===id),order}))
-    .filter(x=>x.a)
-    .sort((a,b)=>Number(a.order)-Number(b.order)||a.a.title.localeCompare(b.a.title,"pt-BR"));
-  el.innerHTML=items.length?items.map((x,i)=>`<div class="edition-order-item" data-edition-row="${x.a.id}">
-    <b>${escapeHtml(x.a.title)}</b><input type="number" value="${Number(x.order)||((i+1)*10)}" aria-label="Ordem">
-    <button type="button" data-edition-up="${x.a.id}">↑</button><button type="button" data-edition-down="${x.a.id}">↓</button>
-  </div>`).join(""):`<div class="admin-history-empty">Nenhuma matéria selecionada.</div>`;
-  qsa("[data-edition-up]").forEach(b=>b.onclick=()=>moveEditionArticle(Number(b.dataset.editionUp),-1));
-  qsa("[data-edition-down]").forEach(b=>b.onclick=()=>moveEditionArticle(Number(b.dataset.editionDown),1));
-}
-function moveEditionArticle(id,direction){
-  const rows=[...qs("#editionArticleOrder").querySelectorAll("[data-edition-row]")];
-  const idx=rows.findIndex(x=>Number(x.dataset.editionRow)===id);
-  const target=idx+direction;if(idx<0||target<0||target>=rows.length)return;
-  const parent=rows[0].parentElement;
-  if(direction<0)parent.insertBefore(rows[idx],rows[target]);
-  else parent.insertBefore(rows[target],rows[idx]);
-  [...parent.querySelectorAll("[data-edition-row]")].forEach((row,i)=>row.querySelector("input").value=(i+1)*10);
-}
-async function saveEditionComposition(){
-  const id=Number(qs("#editorEditionSelect")?.value||0);
-  if(!id){alert("Cadastre uma edição primeiro.");return}
-  const articles=[...qs("#editionArticleOrder").querySelectorAll("[data-edition-row]")].map(row=>({
-    article_id:Number(row.dataset.editionRow),
-    sort_order:Math.round(Number(row.querySelector("input").value||0))
-  }));
-  try{
-    await adminApi(`/api/admin/editions/${id}/articles`,{
-      method:"PUT",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({articles})
-    });
-    qs("#editionCompositionError").textContent="";
-    await loadAdminArticles();
-    alert("Composição da edição salva.");
-  }catch(e){qs("#editionCompositionError").textContent=e.message}
-}
-
-async function loadAdminAnnouncements(){
-  try{
-    const d=await adminApi("/api/admin/announcements");
-    state.adminAnnouncements=d.announcements||[];
-    renderAdminAnnouncements();
-  }catch(e){console.error(e)}
-}
-
-function resetAnnouncementForm(){
-  const f=qs("#announcementForm");if(!f)return;
-  f.reset();
-  qs("#announcementId").value="";
-  qs("#announcementCategory").value="INFORMATIVO";
-  qs("#announcementPriority").value="INFORMATIVO";
-  qs("#announcementDate").value=new Date().toISOString().slice(0,10);
-  qs("#announcementFeatured").checked=false;
-  qs("#announcementPublished").checked=true;
-  qs("#announcementSaveBtn").textContent="Publicar comunicado";
-  qs("#announcementError").textContent="";
-}
-
-function editAnnouncement(id){
-  const a=(state.adminAnnouncements||[]).find(x=>Number(x.id)===id);if(!a)return;
-  qs("#announcementId").value=a.id;
-  qs("#announcementTitle").value=a.title;
-  qs("#announcementCategory").value=a.category||"INFORMATIVO";
-  qs("#announcementPriority").value=a.priority||"INFORMATIVO";
-  qs("#announcementBody").value=a.body||"";
-  qs("#announcementDate").value=String(a.date||"").slice(0,10);
-  qs("#announcementFeatured").checked=!!a.featured;
-  qs("#announcementPublished").checked=!!a.published;
-  qs("#announcementSaveBtn").textContent="Salvar comunicado";
-  qs("#announcementError").textContent="";
-  qs("#announcementTitle").focus();
-}
-
-function renderAdminAnnouncements(){
-  const el=qs("#adminAnnouncementList");if(!el)return;
-  el.innerHTML=(state.adminAnnouncements||[]).map(a=>`<div class="editorial-item">
-    <div class="editorial-item-head">
-      <div>
-        <b>${escapeHtml(a.title)}</b>
-        <small><span class="announcement-priority ${announcementClass(a.priority)}">${escapeHtml(a.priority)}</span> ${escapeHtml(a.category||"INFORMATIVO")} • ${escapeHtml(String(a.date||""))}${a.featured?" • DESTAQUE":""}${a.published?"":" • RASCUNHO"}</small>
+</section><section class="page" id="cargos">
+  <div class="subhero">
+    <p class="eyebrow">ESTRUTURA ADMINISTRATIVA</p>
+    <h1>Cargos & <em>Ocupantes.</em></h1>
+    <p>Veja os cargos oficiais e descubra quem ocupa cada função no Reino.</p>
+  </div>
+  <div class="content">
+    <div id="rankSummary" class="rank-summary"></div>
+    <div id="publicRanks" class="public-ranks"></div>
+    <div class="panel public-roles-panel">
+      <div class="panel-head"><div><p class="eyebrow">CARGOS OFICIAIS</p><h3>Quadro de funções</h3></div><span>Clique em um cargo para ver detalhes e ocupantes</span></div>
+      <div id="publicRolesOccupants" class="public-role-list"></div>
+    </div>
+  </div>
+</section>
+<section class="page" id="cronograma">
+  <div class="subhero">
+    <p class="eyebrow">AGENDA OFICIAL</p>
+    <h1>O tempo de <em>Spade.</em></h1>
+    <p>Exames, torneios, missões, eventos, rankings e marcos que formam a agenda do Reino.</p>
+  </div>
+  <div class="content">
+    <div class="schedule-intro-grid">
+      <div class="panel schedule-intro-card">
+        <span class="schedule-seal">♠</span>
+        <div><p class="eyebrow">CRONOGRAMA OFICIAL</p><h2>Passado, presente e próximos passos.</h2><p>O calendário reúne os registros históricos de agosto e a programação de setembro de 2026 em uma única linha do tempo.</p></div>
       </div>
-      <div class="editorial-actions">
-        <button type="button" data-ann-edit="${a.id}">✎</button>
-        <button type="button" class="delete" data-ann-delete="${a.id}">×</button>
+      <div class="panel schedule-now-card" id="scheduleNowSummary"></div>
+    </div>
+    <div class="schedule-toolbar-premium">
+      <div class="schedule-month-controls">
+        <button class="outline dark-outline small" type="button" id="schedulePrevMonth">← Mês anterior</button>
+        <button class="gold small" type="button" id="scheduleTodayBtn">Hoje</button>
+        <button class="outline dark-outline small" type="button" id="scheduleNextMonth">Próximo mês →</button>
+      </div>
+      <h2 id="scheduleMonthLabel">Calendário</h2>
+      <div class="schedule-filter-bar">
+        <input class="search" id="scheduleSearch" placeholder="Pesquisar atividade...">
+        <select class="admin-filter" id="scheduleTypeFilter"><option value="">Todos os tipos</option></select>
       </div>
     </div>
-  </div>`).join("")||`<div style="font-size:10px;color:#888">Nenhum comunicado.</div>`;
+    <div class="schedule-legend" id="scheduleLegend">
+      <span>♍ Missão</span><span>⚜️ Exame Intermediário</span><span>🏵️ Admissão</span><span>🔱 Exame Sênior</span><span>🏆 Torneio</span><span>🕊️ Dia Livre</span><span>🏯 Grimório</span><span>🎉 Evento</span><span>🅾️ Ranking</span><span>⚒️ Forja</span>
+    </div>
+    <div id="scheduleCalendar" class="schedule-calendar"></div>
+    <div class="schedule-day-layout">
+      <div class="panel schedule-day-panel"><div class="panel-head"><div><p class="eyebrow">AGENDA DO DIA</p><h3 id="scheduleSelectedDateLabel">Selecione um dia</h3></div><span id="scheduleSelectedDateCount"></span></div><div id="scheduleDayAgenda"></div></div>
+      <div id="scheduleChampionsPanel" class="panel schedule-champions-panel"></div>
+    </div>
+    <div id="scheduleGrid" hidden></div>
+  </div>
+</section><section class="page" id="jogadores"><div class="subhero"><p class="eyebrow">COMUNIDADE</p><h1>Jogadores do <em>Reino.</em></h1><p>Consulte os perfis públicos cadastrados no portal.</p></div><div class="content"><input class="search" id="playerSearch" placeholder="Pesquisar jogador ou Casa"><div id="playerGrid" class="player-grid"></div></div></section>
+<div id="publicPlayerDetail" class="public-player-detail-wrap"></div><section class="page" id="casas">
+      <div class="subhero"><p class="eyebrow">GRANDES CASAS</p><h1>As Casas de <em>Spade.</em></h1><p>Conheça as Casas, seus membros, sua atividade e suas conquistas no Reino.</p></div>
+      <div class="content">
+        <div id="houseGrid" class="house-grid"></div>
+        <div id="houseDetail" class="house-detail-wrap"></div>
+      </div>
+    </section>
+<section class="page" id="ranking">
+  <div class="subhero"><p class="eyebrow">PLACAR DO REINO</p><h1>Rankings de <em>Spade.</em></h1><p>Classificações atualizadas diretamente dos registros oficiais do Reino.</p></div>
+  <div class="content">
+    <div class="ranking-tabs" role="tablist">
+      <button class="ranking-tab active" data-ranking-tab="force">⚔️ Poder</button>
+      <button class="ranking-tab" data-ranking-tab="skill_sc">⚔️ Skill SC</button>
+      <button class="ranking-tab" data-ranking-tab="skill_vt">⚡ Skill VT</button>
+      <button class="ranking-tab" data-ranking-tab="activity">⭐ Atividade</button>
+      <button class="ranking-tab" data-ranking-tab="missions">📋 Missões</button>
+      <button class="ranking-tab" data-ranking-tab="wealth">🪙 Riqueza</button>
+      <button class="ranking-tab" data-ranking-tab="houses">🏰 Casas</button>
+    </div>
+    <div class="ranking-explainer" id="rankingExplainer"></div>
+    <div class="ranking-player-actions" id="rankingPlayerActions"></div>
+    <div class="panel ranking-panel">
+      <div class="table-wrap"><table class="ranking-table">
+        <thead><tr><th>#</th><th>Jogador / Casa</th><th>Casa</th><th>Principal</th><th>Secundário</th></tr></thead>
+        <tbody id="rankingBody"></tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+<section class="page" id="hierarquia">
+  <div class="subhero"><p class="eyebrow">HIERARQUIA DO REINO</p><h1>Hierarquia do <em>Reino.</em></h1><p>Consulte patentes, ranks e cargos oficiais de Spade — e veja quem ocupa cada posição.</p></div>
+  <div class="content">
+    <div class="hierarchy-public-grid">
+      <div class="panel"><p class="eyebrow">PATENTES</p><div id="publicPatents"></div></div>
+      <div class="panel"><p class="eyebrow">CARGOS</p><div id="publicHierarchyRoles"></div></div>
+    </div>
+  </div>
+</section>
+<section class="page" id="login">
+  <div class="login-wrap">
+    <div class="seal big">♠<small>SPADE</small></div>
+    <p class="eyebrow">PORTAL DO JOGADOR</p>
+    <h1>Entrar no Reino</h1>
+    <p>Use seu login e sua senha cadastrados pela administração.</p>
+    <form id="loginForm">
+      <label for="identifier">Nick / usuário</label>
+      <input id="identifier" autocomplete="username" placeholder="Ex.: Mattiel ou seu usuário de aliado" maxlength="80" required>
+      <label for="password" style="margin-top:14px">Senha</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Digite sua senha" maxlength="100" required>
+      <button class="gold full" type="submit">Entrar</button>
+      <div class="error" id="loginError" aria-live="polite"></div>
+    </form>
+    <p style="margin-top:18px;font-size:10px;color:#777">Esqueceu a senha? Procure a administração do RPG.</p>
+  </div>
+</section>
+<section class="page" id="dashboard"><div class="subhero compact"><p class="eyebrow" id="dashboardEyebrow">PAINEL DO JOGADOR</p><h1 id="dashName">Bem-vindo.</h1><p id="dashboardDescription">Acompanhe sua jornada, seus dados e sua posição no Reino.</p><div id="allyModeBadge" class="ally-mode-badge" hidden>🤝 Acesso de Aliado • Modo observador</div><button class="outline dark-outline dashboard-logout-btn" type="button" id="playerLogoutBtn">🚪 Sair do painel</button></div><div id="playerAlerts" class="player-alerts"></div><div class="content"><div id="dash"></div><div class="player-yuls-section"><div class="panel player-yuls-card"><div class="player-yuls-head"><div><p class="eyebrow">BANCO DE YULS</p><h3>Meu saldo</h3></div><strong id="playerYulsBalance">🪙 0</strong></div><div id="playerYulsHistory" class="player-yuls-history"><p>Carregando histórico...</p></div></div></div><div class="player-missions-section"><div class="panel player-missions-card"><div class="player-missions-head"><div><p class="eyebrow">ATIVIDADE</p><h3>Minhas missões</h3></div><strong id="playerMissionCount">0 missões</strong></div><div id="playerMissionHistory" class="player-mission-history"><p>Carregando missões...</p></div></div></div></div><div class="player-status-section">
+  <div class="panel player-status-panel">
+    <div class="player-status-head">
+      <div><p class="eyebrow">STATUS DIÁRIO</p><h3>O que você está fazendo?</h3><p>Publique uma mensagem curta para o quadro do Reino.</p></div>
+      <span id="playerStatusDate"></span>
+    </div>
+    <textarea id="playerStatusMessage" maxlength="280" placeholder="Escreva seu status de hoje..."></textarea>
+    <div class="player-status-footer"><small><span id="playerStatusCount">0</span>/280</small><button class="gold" type="button" id="playerStatusPublishBtn">Publicar status</button></div>
+    <div class="error" id="playerStatusError"></div>
+  </div>
+</div>
+</section>
 
-  qsa("[data-ann-edit]").forEach(b=>b.onclick=()=>editAnnouncement(Number(b.dataset.annEdit)));
-  qsa("[data-ann-delete]").forEach(b=>b.onclick=()=>deleteAnnouncement(Number(b.dataset.annDelete)));
-}
-
-async function deleteAnnouncement(id){
-  if(!confirm("Excluir este comunicado?"))return;
-  try{
-    await adminApi(`/api/admin/announcements/${id}`,{method:"DELETE"});
-    resetAnnouncementForm();
-    await loadAdminAnnouncements();
-    await loadAnnouncements();
-    await loadHome();
-    alert("Comunicado excluído.");
-  }catch(e){alert(e.message)}
-}
-
-async function loadAdminLibrary(){try{const d=await adminApi("/api/admin/library");state.adminLibrary=d.items||[];renderAdminLibrary();}catch(e){console.error(e)}}
-function clearAdminLibraryForm(){qs("#adminLibraryForm")?.reset();qs("#adminLibraryId").value="";qs("#adminLibraryIcon").value="📚";qs("#adminLibraryOrder").value="0";qs("#adminLibraryPublished").checked=true;qs("#adminLibraryError").textContent="";}
-function renderAdminLibrary(){const el=qs("#adminLibraryList");if(!el)return;el.innerHTML=(state.adminLibrary||[]).map(x=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(x.icon||"📚")} ${escapeHtml(x.title)}</b><small>${escapeHtml(x.category||"GERAL")} • ${x.published?"Publicado":"Arquivado"}</small></div><div class="editorial-actions"><button type="button" data-library-edit="${x.id}">✎</button><button type="button" data-library-delete="${x.id}">×</button></div></div></div>`).join("")||'<div style="font-size:10px;color:#888">Nenhum material cadastrado.</div>';qsa("[data-library-edit]").forEach(b=>b.onclick=()=>editAdminLibrary(Number(b.dataset.libraryEdit)));qsa("[data-library-delete]").forEach(b=>b.onclick=()=>deleteAdminLibrary(Number(b.dataset.libraryDelete)));}
-function editAdminLibrary(id){const x=state.adminLibrary.find(i=>Number(i.id)===id);if(!x)return;qs("#adminLibraryId").value=x.id;qs("#adminLibraryTitle").value=x.title||"";qs("#adminLibraryCategory").value=x.category||"";qs("#adminLibraryIcon").value=x.icon||"📚";qs("#adminLibraryOrder").value=x.sort_order||0;qs("#adminLibraryUrl").value=x.url||"";qs("#adminLibraryDescription").value=x.description||"";qs("#adminLibraryContent").value=x.content||"";qs("#adminLibraryPublished").checked=Number(x.published)===1;}
-async function deleteAdminLibrary(id){if(!confirm("Arquivar este material?"))return;try{await adminApi(`/api/admin/library/${id}`,{method:"DELETE"});await loadAdminLibrary();await loadLibrary();}catch(e){alert(e.message)}}
-
-async function uploadMediaFromInput(inputId,targetId,previewId,buttonId){
-  const input=qs("#"+inputId),target=qs("#"+targetId),preview=qs("#"+previewId),button=qs("#"+buttonId);
-  if(!input||!target||!button)return;
-  const file=input.files?.[0];
-  if(!file){alert("Selecione uma imagem primeiro.");return;}
-  button.disabled=true;const old=button.textContent;button.textContent="Enviando...";
-  try{
-    const fd=new FormData();fd.append("file",file);
-    const d=await adminApi("/api/admin/media",{method:"POST",body:fd});
-    target.value=d.url||"";
-    if(preview){preview.innerHTML=`<img src="${escapeHtml(d.url)}" alt="Prévia da imagem">`;preview.hidden=false;}
-    input.value="";
-  }catch(e){alert(e.message)}
-  finally{button.disabled=false;button.textContent=old;}
-}
-function refreshMediaPreview(targetId,previewId){
-  const target=qs("#"+targetId),preview=qs("#"+previewId);if(!target||!preview)return;
-  const v=target.value.trim();
-  if(v){preview.innerHTML=`<img src="${escapeHtml(v)}" alt="Prévia da imagem" onerror="this.closest('.media-preview').hidden=true">`;preview.hidden=false;}
-  else {preview.innerHTML="";preview.hidden=true;}
-}
-
-async function loadAdminEditorial(){
-  try{
-    const [n,e]=await Promise.all([adminApi("/api/admin/news"),adminApi("/api/admin/editions")]);
-    state.adminNews=n.news||[];state.adminEditions=e.editions||[];
-    renderAdminEditorial();
-  }catch(err){console.error(err)}
-}
-
-function renderAdminEditorial(){
-  const nl=qs("#adminNewsList"),el=qs("#adminEditionList");
-  if(nl)nl.innerHTML=(state.adminNews||[]).map(n=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.category||"RPG")} • ${escapeHtml(String(n.date||""))}${n.published?"":" • Rascunho"}</small></div><div class="editorial-actions"><button type="button" data-news-delete="${n.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma notícia.</div>`;
-  if(el)el.innerHTML=(state.adminEditions||[]).map(x=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(x.title)}</b><small>${escapeHtml(x.edition||"Edição")} • ${escapeHtml(String(x.date||""))}${x.pdf_url?" • PDF":" • sem PDF"}</small></div><div class="editorial-actions"><button type="button" class="edit" data-edition-edit-short="${x.id}">✎ Editar</button><button type="button" class="delete" data-edition-delete="${x.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição.</div>`;
-  qsa("[data-news-delete]").forEach(b=>b.onclick=()=>deleteNews(Number(b.dataset.newsDelete)));
-  qsa("[data-edition-edit-short]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionEditShort)));
-  qsa("[data-edition-delete]").forEach(b=>b.onclick=()=>deleteEdition(Number(b.dataset.editionDelete)));
-}
-
-async function deleteNews(id){
-  if(!confirm("Excluir esta notícia?"))return;
-  try{await adminApi(`/api/admin/news/${id}`,{method:"DELETE"});await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();alert("Notícia excluída.")}catch(e){alert(e.message)}
-}
-async function deleteEdition(id){
-  if(!confirm("Excluir esta edição?"))return;
-  try{await adminApi(`/api/admin/editions/${id}`,{method:"DELETE"});await loadAdminEditorial();await loadHome();if(state.page==="jornal")loadEditions();alert("Edição excluída.")}catch(e){alert(e.message)}
-}
-
-qs("#saveEventResultsBtn").addEventListener("click",saveAdminResults);
-qs("#publishEventResultsBtn").addEventListener("click",publishAdminResults);
-qs("#librarySearch")?.addEventListener("input",()=>loadLibrary());
-qs("#librarySearchClear")?.addEventListener("click",()=>{const s=qs("#librarySearch");if(s){s.value="";s.focus();}loadLibrary();});
-qs("#adminLibraryClear")?.addEventListener("click",clearAdminLibraryForm);
-qs("#adminLibraryForm")?.addEventListener("submit",async e=>{e.preventDefault();const id=qs("#adminLibraryId").value;const body={title:qs("#adminLibraryTitle").value,category:qs("#adminLibraryCategory").value,icon:qs("#adminLibraryIcon").value,sort_order:Number(qs("#adminLibraryOrder").value||0),url:qs("#adminLibraryUrl").value,description:qs("#adminLibraryDescription").value,content:qs("#adminLibraryContent").value,published:qs("#adminLibraryPublished").checked};try{await adminApi(id?`/api/admin/library/${id}`:"/api/admin/library",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});clearAdminLibraryForm();await loadAdminLibrary();await loadLibrary();alert(id?"Material atualizado.":"Material cadastrado.")}catch(ex){qs("#adminLibraryError").textContent=ex.message}});
-qs('#scheduleSearch')?.addEventListener('input',()=>{renderSchedule(state.schedule);});
-qs('#scheduleTypeFilter')?.addEventListener('change',()=>{renderSchedule(state.schedule);});
-qs('#schedulePrevMonth')?.addEventListener('click',()=>{const d=new Date(scheduleMonth+'-01T12:00:00');d.setMonth(d.getMonth()-1);scheduleMonth=d.toISOString().slice(0,7);scheduleSelectedDate=scheduleMonth+'-01';renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
-qs('#scheduleNextMonth')?.addEventListener('click',()=>{const d=new Date(scheduleMonth+'-01T12:00:00');d.setMonth(d.getMonth()+1);scheduleMonth=d.toISOString().slice(0,7);scheduleSelectedDate=scheduleMonth+'-01';renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
-qs('#scheduleTodayBtn')?.addEventListener('click',()=>{scheduleMonth=new Date().toISOString().slice(0,7);scheduleSelectedDate=new Date().toISOString().slice(0,10);renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
-qs('#scheduleForm')?.addEventListener('submit',async e=>{e.preventDefault();const err=qs('#scheduleError');err.textContent='';const body={title:qs('#scheduleTitle').value,activity_type:qs('#scheduleType').value,status:qs('#scheduleStatus').value,activity_date:qs('#scheduleDate').value,end_date:qs('#scheduleEndDate').value||qs('#scheduleDate').value,start_time:qs('#scheduleStart').value,end_time:qs('#scheduleEnd').value,cycle_label:qs('#scheduleCycle').value,location:qs('#scheduleLocation').value,link:qs('#scheduleLink').value,event_id:qs('#scheduleEvent').value||null,mission_id:qs('#scheduleMission').value||null,winner_player_id:qs('#scheduleWinner').value||null,result_text:qs('#scheduleResult').value,description:qs('#scheduleDescription').value,featured:qs('#scheduleFeatured').checked?1:0,published:qs('#schedulePublished').checked?1:0};const id=qs('#scheduleId').value;try{await adminApi(id?`/api/admin/schedule/${id}`:'/api/admin/schedule',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetScheduleForm();await loadAdminSchedule();await loadSchedule();alert(id?'Atividade atualizada.':'Atividade criada.');}catch(ex){err.textContent=ex.message}});
-qs('#scheduleCancelBtn')?.addEventListener('click',resetScheduleForm);
-qs('#scheduleChampionForm')?.addEventListener('submit',async e=>{e.preventDefault();const err=qs('#scheduleChampionError');err.textContent='';const body={period_key:qs('#scheduleChampionPeriod').value,category:qs('#scheduleChampionCategory').value,title:qs('#scheduleChampionTitle').value,winner_nick:qs('#scheduleChampionWinner').value,note:qs('#scheduleChampionNote').value};const id=qs('#scheduleChampionId').value;try{await adminApi(id?`/api/admin/schedule-champions/${id}`:'/api/admin/schedule-champions',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const period=body.period_key;resetScheduleChampionForm();await loadAdminScheduleChampions(period);await loadScheduleChampions(period);alert(id?'Campeão atualizado.':'Campeão adicionado.');}catch(ex){err.textContent=ex.message}});
-qs('#scheduleChampionCancelBtn')?.addEventListener('click',resetScheduleChampionForm);
-qs('#scheduleChampionPeriod')?.addEventListener('change',()=>loadAdminScheduleChampions(qs('#scheduleChampionPeriod').value||'2026-08'));
-
-qs("#eventAdminForm").addEventListener("submit",async e=>{
-  e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
-  b.featured=qs("#eventFeatured").checked?1:0;b.published=qs("#eventPublished").checked?1:0;
-  try{
-    if(b.id)await adminApi(`/api/admin/events/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    else await adminApi("/api/admin/events",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    resetEventForm();await loadAdminEvents();alert("Evento salvo com sucesso.");
-  }catch(ex){qs("#eventError").textContent=ex.message}
-});
-qs("#eventCancelBtn").addEventListener("click",resetEventForm);
-
-qsa("[data-event-admin-tab]").forEach(tab=>tab.onclick=()=>{
-  const key=tab.dataset.eventAdminTab;
-  qsa("[data-event-admin-tab]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminTab===key));
-  qsa("[data-event-admin-panel]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminPanel===key));
-  const selectId={actions:"eventActionEventSelect",rewards:"eventRewardEventSelect",players:"eventPlayerEventSelect",results:"eventResultEventSelect"}[key];
-  if(selectId){ const el=qs("#"+selectId); const id=Number(el?.value||state.selectedEventId||0); if(id){ state.selectedEventId=id; loadEventAdminDetails(id); } }
-});
-// Delegated fallback keeps event tabs operational even if other admin widgets are initialized late.
-document.addEventListener("click",e=>{
-  const tab=e.target.closest("[data-event-admin-tab]"); if(!tab)return;
-  const key=tab.dataset.eventAdminTab;
-  qsa("[data-event-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));
-  qsa("[data-event-admin-panel]").forEach(x=>x.classList.toggle("active",x.dataset.eventAdminPanel===key));
-});
-["eventActionEventSelect","eventRewardEventSelect","eventPlayerEventSelect","eventResultEventSelect"].forEach(id=>qs("#"+id)?.addEventListener("change",e=>loadEventAdminDetails(Number(e.target.value))));
-qs("#eventActionForm").addEventListener("submit",async e=>{
-  e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
-  try{await adminApi(`/api/admin/events/${state.selectedEventId}/actions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();await loadEventAdminDetails(state.selectedEventId);qs("#eventActionError").textContent=""}catch(ex){qs("#eventActionError").textContent=ex.message}
-});
-qs("#eventRewardForm").addEventListener("submit",async e=>{
-  e.preventDefault();const b=Object.fromEntries(new FormData(e.target).entries());
-  try{await adminApi(`/api/admin/events/${state.selectedEventId}/rewards`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});e.target.reset();await loadEventAdminDetails(state.selectedEventId);qs("#eventRewardError").textContent=""}catch(ex){qs("#eventRewardError").textContent=ex.message}
-});
-qs("#eventAddParticipantsBtn").addEventListener("click",async()=>{
-  const ids=[...qs("#eventParticipantPicker").querySelectorAll("[data-event-player-pick]:checked")].map(x=>Number(x.dataset.eventPlayerPick));
-  try{await adminApi(`/api/admin/events/${state.selectedEventId}/participants`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_ids:ids})});await loadEventAdminDetails(state.selectedEventId);alert("Participantes adicionados.")}catch(e){alert(e.message)}
-});
-qs("#eventGrantBtn").addEventListener("click",async()=>{
-  const player_id=Number(qs("#eventRewardPlayer").value),yuls=Number(qs("#eventGrantYuls").value||0),exp=Number(qs("#eventGrantExp").value||0),note=qs("#eventGrantNote").value.trim();
-  try{await adminApi(`/api/admin/events/${state.selectedEventId}/reward`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id,yuls,exp,note})});qs("#eventGrantYuls").value="";qs("#eventGrantExp").value="";qs("#eventGrantNote").value="";await loadEventAdminDetails(state.selectedEventId);alert("Recompensa lançada.")}catch(e){alert(e.message)}
-});
-qs("#eventGrantCardBtn").addEventListener("click",async()=>{
-  const player_id=Number(qs("#eventCardRewardPlayer").value),card_id=Number(qs("#eventGrantCard").value),note=qs("#eventGrantCardNote").value.trim();
-  try{
-    const r=await adminApi(`/api/admin/events/${state.selectedEventId}/card-reward`,{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({player_id,card_id,note})
-    });
-    qs("#eventGrantCardNote").value="";
-    await loadEventAdminDetails(state.selectedEventId);
-    alert(`Card "${r.card.name}" concedido com sucesso.`);
-  }catch(e){alert(e.message)}
-});
-
-qs("#eventRegisterActionBtn").addEventListener("click",async()=>{
-  const player_id=Number(qs("#eventActionPlayer").value),action_id=Number(qs("#eventActionForPlayer").value),note=qs("#eventActionNote").value.trim();
-  try{await adminApi(`/api/admin/events/${state.selectedEventId}/action`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({player_id,action_id,note})});qs("#eventActionNote").value="";await loadEventAdminDetails(state.selectedEventId);alert("Pontos registrados.")}catch(e){alert(e.message)}
-});
-
-function updateEditionEditorHeader(editing=false){
-  const h=qs("#editionEditorHeading"),m=qs("#editionEditorMode"),b=qs("#editionSaveBtn");
-  if(h)h.textContent=editing?"Editar edição existente":"Criar nova edição";
-  if(m)m.textContent=editing?"Altere os dados da edição e, abaixo, ajuste as matérias e a ordem em que serão publicadas.":"Cadastre uma nova edição ou selecione uma edição antiga para editar.";
-  if(b)b.textContent=editing?"Salvar alterações":"Criar edição";
-}
-function resetEditionForm(){
-  const f=qs("#editionForm");if(!f)return;f.reset();
-  qs("#editionId").value="";qs("#editionDate").value=new Date().toISOString().slice(0,10);if(qs("#editionCoverFile"))qs("#editionCoverFile").value="";refreshMediaPreview("editionCover","editionCoverPreview");
-  qs("#editionPublished").checked=false;qs("#editionError").textContent="";
-  const sel=qs("#editorEditionSelect");if(sel&&state.adminEditions?.[0])sel.value=String(state.adminEditions[0].id);
-  updateEditionEditorHeader(false);
-  renderEditionPicker(new Map());renderEditionOrder(new Map());
-}
-async function editEdition(id){
-  const e=(state.adminEditions||[]).find(x=>Number(x.id)===id);if(!e)return;
-  qs("#editionId").value=e.id;qs("#editionTitle").value=e.title||"";qs("#editionNumber").value=e.edition||"";
-  qs("#editionDate").value=String(e.date||"").slice(0,10);qs("#editionCover").value=e.cover_url||"";if(qs("#editionCoverFile"))qs("#editionCoverFile").value="";refreshMediaPreview("editionCover","editionCoverPreview");qs("#editionPdf").value=e.pdf_url||"";
-  qs("#editionDescription").value=e.description||"";qs("#editionPublished").checked=!!e.published;qs("#editionError").textContent="";
-  const sel=qs("#editorEditionSelect");if(sel)sel.value=String(e.id);
-  state.editorEditionId=Number(e.id);
-  updateEditionEditorHeader(true);
-  qsa(".journal-editor-tab").forEach(x=>x.classList.toggle("active",x.dataset.editorTab==="edition"));
-  qsa("[data-editor-panel]").forEach(x=>x.classList.toggle("active",x.dataset.editorPanel==="edition"));
-  await loadEditionComposition(Number(e.id));
-  qs("#editionTitle").focus();
-  qs("#editionForm")?.scrollIntoView({behavior:"smooth",block:"start"});
-}
-function newEdition(){
-  const sel=qs("#editorEditionSelect");if(sel)sel.value="";
-  state.editorEditionId=0;
-  resetEditionForm();
-  qs("#editionTitle")?.focus();
-}
-function renderAdminEditions(){
-  const el=qs("#adminEditionList");if(!el)return;
-  el.innerHTML=(state.adminEditions||[]).map(e=>`<div class="editorial-item"><div class="editorial-item-head"><div><b>${escapeHtml(e.title)}</b><small>${escapeHtml(e.edition||"Edição")} • ${escapeHtml(String(e.date||""))} • ${e.article_count||0} matérias${e.published?"":" • Arquivada"}</small><div class="edition-edit-hint">Clique em Editar para alterar dados e composição.</div></div><div class="editorial-actions"><button type="button" class="edit" data-edition-edit="${e.id}">✎ Editar</button><button type="button" class="outline dark-outline small" data-edition-compose="${e.id}">☷ Composição</button><button type="button" class="delete" data-edition-delete="${e.id}">×</button></div></div></div>`).join("")||`<div style="font-size:10px;color:#888">Nenhuma edição cadastrada.</div>`;
-  qsa("[data-edition-edit]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionEdit)));
-  qsa("[data-edition-compose]").forEach(b=>b.onclick=()=>editEdition(Number(b.dataset.editionCompose)));
-  qsa("[data-edition-delete]").forEach(b=>b.onclick=async()=>{if(!confirm("Arquivar esta edição? O histórico será preservado."))return;try{await adminApi(`/api/admin/editions/${b.dataset.editionDelete}`,{method:"DELETE"});await loadAdminArticles();alert("Edição arquivada.")}catch(e){alert(e.message)}});
-}
-
-qs("#articleImageUploadBtn")?.addEventListener("click",()=>uploadMediaFromInput("articleImageFile","articleImage","articleImagePreview","articleImageUploadBtn"));
-qs("#editionCoverUploadBtn")?.addEventListener("click",()=>uploadMediaFromInput("editionCoverFile","editionCover","editionCoverPreview","editionCoverUploadBtn"));
-qs("#articleImage")?.addEventListener("input",()=>refreshMediaPreview("articleImage","articleImagePreview"));
-qs("#editionCover")?.addEventListener("input",()=>refreshMediaPreview("editionCover","editionCoverPreview"));
-
-qs("#articleForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  b.published=qs("#articlePublished").checked?1:0;
-  try{
-    if(b.id){
-      await adminApi(`/api/admin/articles/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    }else{
-      await adminApi("/api/admin/articles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    }
-    resetArticleForm();await loadAdminArticles();alert("Matéria salva com sucesso.");
-  }catch(ex){qs("#articleError").textContent=ex.message}
-});
-qs("#articleCancelBtn").addEventListener("click",resetArticleForm);
-qs("#editionCancelBtn").addEventListener("click",resetEditionForm);
-qs("#editionForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b={title:qs("#editionTitle").value.trim(),edition:qs("#editionNumber").value.trim(),date:qs("#editionDate").value,cover_url:qs("#editionCover").value.trim(),pdf_url:qs("#editionPdf").value.trim(),description:qs("#editionDescription").value.trim(),published:qs("#editionPublished").checked?1:0};
-  const id=Number(qs("#editionId").value||0);
-  try{await adminApi(id?`/api/admin/editions/${id}`:"/api/admin/editions",{method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});resetEditionForm();await loadAdminArticles();alert("Edição salva com sucesso.");}
-  catch(ex){qs("#editionError").textContent=ex.message}
-});
-qs("#editorEditionSelect").addEventListener("change",async e=>{const id=Number(e.target.value||0);if(!id){state.editorEditionId=0;resetEditionForm();return;}await editEdition(id);});
-qs("#newEditionBtn")?.addEventListener("click",newEdition);
-qs("#saveEditionCompositionBtn").addEventListener("click",saveEditionComposition);
-qsa(".journal-editor-tab").forEach(tab=>{
-  tab.onclick=()=>{
-    qsa(".journal-editor-tab").forEach(x=>x.classList.toggle("active",x===tab));
-    qsa("[data-editor-panel]").forEach(x=>x.classList.toggle("active",x.dataset.editorPanel===tab.dataset.editorTab));
-  };
-});
-
-qs("#announcementForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  b.featured=qs("#announcementFeatured").checked?1:0;
-  b.published=qs("#announcementPublished").checked?1:0;
-
-  try{
-    if(b.id){
-      await adminApi(`/api/admin/announcements/${b.id}`,{
-        method:"PUT",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(b)
-      });
-    }else{
-      await adminApi("/api/admin/announcements",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(b)
-      });
-    }
-    resetAnnouncementForm();
-    await loadAdminAnnouncements();
-    await loadAnnouncements();
-    await loadHome();
-    alert("Comunicado salvo com sucesso.");
-  }catch(ex){
-    qs("#announcementError").textContent=ex.message;
-  }
-});
-
-qs("#cardForm").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const b=Object.fromEntries(new FormData(e.target).entries());
-  b.power_value=Number(b.power_value||0);
-  b.damage_value=Number(b.damage_value||0);
-  b.damage_type=b.damage_value<=0?"SEM_DANO":(b.damage_type||"SEM_DANO");
-  try{
-    if(b.id)await adminApi(`/api/admin/cards/${b.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    else await adminApi("/api/admin/cards",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    resetCardForm();await loadAdminCards();
-    if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);
-    alert("Card salvo com sucesso.");
-  }catch(ex){qs("#cardError").textContent=ex.message}
-});
-qs("#cardDamage")?.addEventListener("input",e=>{if(Number(e.target.value||0)<=0&&qs("#cardDamageType"))qs("#cardDamageType").value="SEM_DANO";});
-qs("#cardCancelBtn").addEventListener("click",resetCardForm);
-qs("#addCardCategoryBtn")?.addEventListener("click",async()=>{
-  const input=qs("#newCardCategory"),name=(input?.value||"").trim();if(!name)return alert("Informe o nome da categoria.");
-  try{await adminApi("/api/admin/card-categories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});input.value="";await loadAdminCards();alert("Categoria criada.");}
-  catch(e){alert(e.message)}
-});
-
-async function downloadCardsSheet(){
-  const buttons=[qs('#downloadCardsSheetBtn'),qs('#cardBulkSheetDownload')].filter(Boolean);
-  buttons.forEach(b=>{b.disabled=true;b.dataset.oldText=b.textContent;b.textContent='⏳ Gerando planilha...';});
-  try{
-    const options={credentials:'same-origin',headers:{}};const key=state.adminKey||getStoredAdminKey();if(key)options.headers['x-admin-key']=key;
-    const r=await fetch('/api/admin/cards/export.xlsx',options);
-    if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar a planilha de cards.');}
-    const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='cards-spade-gestao.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
-  }catch(e){alert(e.message||'Não foi possível baixar a planilha de cards.');}
-  finally{buttons.forEach(b=>{b.disabled=false;b.textContent=b.dataset.oldText||'📤 Baixar planilha';});}
-}
-function openCardBulkSheet(){
-  const modal=qs('#cardBulkSheetModal');if(!modal)return;modal.hidden=false;modal.style.display='block';
-  state.cardBulkSheet={file:null,preview:null};qs('#cardBulkSheetFile').value='';qs('#cardBulkSheetFileName').textContent='Nenhum arquivo selecionado';
-  qs('#cardBulkSheetPreview').innerHTML='<p>Escolha uma planilha para começar.</p>';qs('#cardBulkSheetConfirm').disabled=true;qs('#cardBulkSheetCancel').disabled=false;qs('#cardBulkSheetStatus').textContent='';
-}
-function closeCardBulkSheet(){const m=qs('#cardBulkSheetModal');if(m){m.style.display='none';m.hidden=true}}
-function cardBulkChangesHtml(rows,kind){
-  const changed=(rows||[]).filter(r=>!r.errors?.length&&!r.ignored&&((r.changes||[]).length||r.isNew));
-  if(!changed.length)return '<div class="card-bulk-sheet-status-line">Nenhuma alteração detectada nesta seção.</div>';
-  const head=kind==='cards'?['Nº','Operação','Card','Alterações / problemas']:['Linha','Ação','Jogador','Card'];
-  const body=changed.map(r=>{
-    if(kind==='cards'){const op=r.isNew?'CRIAR':((r.changes||[]).length?'ATUALIZAR':'—');const changes=(r.changes||[]).filter(x=>x.field!=='internal').slice(0,12).map(x=>`<div><b>${escapeHtml(x.label)}:</b> ${escapeHtml(String(x.before))} → ${escapeHtml(String(x.after))}</div>`).join('')||'<span class="muted">Sem alterações</span>';return `<tr><td>${escapeHtml(String(r.id??'novo'))}</td><td>${op}</td><td><b>${escapeHtml(r.name||'')}</b></td><td>${changes}</td></tr>`;}
-    return `<tr><td>${escapeHtml(String(r.row))}</td><td>${escapeHtml(r.action||'')}</td><td><b>${escapeHtml(r.player_name||String(r.player_id_num||''))}</b></td><td>${escapeHtml(r.card_name||String(r.card_id_num||''))}</td></tr>`;
-  }).join('');
-  return `<table class="card-bulk-sheet-preview-table"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
-}
-function renderCardBulkSheetPreview(data){
-  const box=qs('#cardBulkSheetPreview');if(!box)return;
-  const c=data.cards||{total:0,valid:0,invalid:0,changes:0,rows:[]},l=data.links||{total:0,valid:0,invalid:0,changes:0,rows:[]};
-  const invalid=Number(c.invalid||0)+Number(l.invalid||0),actionable=Number(c.changes||0)+Number(l.changes||0);
-  box.innerHTML=`<div class="card-bulk-sheet-section"><h4>🃏 Catálogo de Cards</h4><div class="card-bulk-sheet-badges"><span>${c.total||0} linhas</span><span class="ok">✅ ${c.valid||0} válidas</span><span class="bad">⚠️ ${c.invalid||0} com erros</span><span>${c.changes||0} alterações</span></div>${cardBulkChangesHtml(c.rows,'cards')}</div><div class="card-bulk-sheet-section"><h4>🔗 Vínculos com jogadores</h4><div class="card-bulk-sheet-badges"><span>${l.total||0} linhas</span><span class="ok">✅ ${l.valid||0} ações válidas</span><span class="bad">⚠️ ${l.invalid||0} com erros</span><span>${l.changes||0} ações</span></div>${cardBulkChangesHtml(l.rows,'links')}</div>${invalid?`<div class="card-bulk-sheet-section"><h4>⚠️ Problemas encontrados</h4><div class="card-bulk-sheet-status-line">A planilha não será aplicada enquanto existir qualquer erro.</div><div style="overflow:auto"><table class="card-bulk-sheet-preview-table"><thead><tr><th>Aba</th><th>Linha</th><th>Campo</th><th>Problema</th></tr></thead><tbody>${(data.issues||[]).slice(0,200).map(x=>`<tr><td>${escapeHtml(x.section||'')}</td><td>${escapeHtml(String(x.row||''))}</td><td>${escapeHtml(String(x.field||''))}</td><td class="issue">${escapeHtml(x.message||'')}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
-  qs('#cardBulkSheetConfirm').disabled=invalid>0||actionable===0;
-}
-async function previewCardBulkSheet(){
-  const file=qs('#cardBulkSheetFile')?.files?.[0];if(!file)return;state.cardBulkSheet={file,preview:null};
-  qs('#cardBulkSheetFileName').textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;qs('#cardBulkSheetStatus').textContent='Lendo e conferindo o catálogo e os vínculos...';qs('#cardBulkSheetConfirm').disabled=true;
-  const form=new FormData();form.append('file',file);
-  try{const data=await adminApi('/api/admin/cards/bulk-sheet/preview',{method:'POST',body:form});state.cardBulkSheet.preview=data;renderCardBulkSheetPreview(data);qs('#cardBulkSheetStatus').textContent=(Number(data.cards?.invalid||0)+Number(data.links?.invalid||0))?'Corrija os dados indicados antes de aplicar.':'Planilha pronta. Revise a prévia antes de aplicar.';}
-  catch(e){qs('#cardBulkSheetPreview').innerHTML='<p>Não foi possível processar a planilha.</p>';qs('#cardBulkSheetStatus').textContent=e.message;}
-}
-async function confirmCardBulkSheet(){
-  const file=state.cardBulkSheet?.file;if(!file)return;const c=state.cardBulkSheet.preview?.cards||{},l=state.cardBulkSheet.preview?.links||{};
-  const changes=Number(c.changes||0)+Number(l.changes||0);if(!confirm(`Aplicar ${changes} alteração(ões) de Cards e vínculos? Esta operação é única e, se houver qualquer erro, nada será gravado.`))return;
-  qs('#cardBulkSheetConfirm').disabled=true;qs('#cardBulkSheetCancel').disabled=true;qs('#cardBulkSheetStatus').textContent='Aplicando em transação única...';
-  const form=new FormData();form.append('file',file);
-  try{const d=await adminApi('/api/admin/cards/bulk-sheet',{method:'POST',body:form});qs('#cardBulkSheetStatus').textContent=`✅ ${d.created||0} criado(s) • ${d.updated||0} atualizado(s) • ${d.added||0} vínculo(s) criado(s) • ${d.removed||0} vínculo(s) removido(s).`;await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);setTimeout(closeCardBulkSheet,1100);}
-  catch(e){qs('#cardBulkSheetStatus').textContent=e.message;qs('#cardBulkSheetConfirm').disabled=false;qs('#cardBulkSheetCancel').disabled=false;}
-}
-
-// V63 — Gestão em Massa 2.0 para domínios administrativos adicionais.
-function openDomainBulkSheet(kind){
-  const modal=qs('#domainBulkSheetModal');if(!modal)return;
-  const meta={
-    houses:{title:'Casas por planilha',subtitle:'Atualize a estrutura das Casas sem apagar histórico.',exportUrl:'/api/admin/houses/export.xlsx',importUrl:'/api/admin/houses/bulk-sheet',fileName:'casas-spade-atualizacao.xlsx',perm:'houses'},
-    hierarchy:{title:'Hierarquia por planilha',subtitle:'Atualize Patentes e Cargos pelas abas da mesma planilha.',exportUrl:'/api/admin/hierarchy/export.xlsx',importUrl:'/api/admin/hierarchy/bulk-sheet',fileName:'hierarquia-spade-atualizacao.xlsx',perm:'hierarchy'},
-    missions:{title:'Missões por planilha',subtitle:'Atualize ou crie atividades oficiais com validação antes de gravar.',exportUrl:'/api/admin/missions/export.xlsx',importUrl:'/api/admin/missions/bulk-sheet',fileName:'missoes-spade-atualizacao.xlsx',perm:'missions'}
-  }[kind];
-  if(!meta)return;
-  state.domainBulkSheet={kind,meta,file:null,preview:null};
-  qs('#domainBulkSheetTitle').textContent=meta.title;qs('#domainBulkSheetSubtitle').textContent=meta.subtitle;qs('#domainBulkSheetFile').value='';qs('#domainBulkSheetFileName').textContent='Nenhum arquivo selecionado';qs('#domainBulkSheetPreview').innerHTML='<p>Baixe a planilha atual, edite-a e depois escolha o arquivo aqui.</p>';qs('#domainBulkSheetStatus').textContent='';qs('#domainBulkSheetConfirm').disabled=true;modal.hidden=false;modal.style.display='block';
-}
-function closeDomainBulkSheet(){const m=qs('#domainBulkSheetModal');if(m){m.style.display='none';m.hidden=true}}
-async function downloadDomainBulkSheet(kind){
-  const meta={houses:{url:'/api/admin/houses/export.xlsx',name:'casas-spade-atualizacao.xlsx'},hierarchy:{url:'/api/admin/hierarchy/export.xlsx',name:'hierarquia-spade-atualizacao.xlsx'},missions:{url:'/api/admin/missions/export.xlsx',name:'missoes-spade-atualizacao.xlsx'},rankings:{url:'/api/admin/rankings/export.xlsx',name:'rankings-spade-consulta.xlsx'}}[kind];if(!meta)return;
-  try{const key=state.adminKey||getStoredAdminKey();const headers={};if(key)headers['x-admin-key']=key;const r=await fetch(meta.url,{credentials:'same-origin',headers});if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar a planilha.')}const blob=await r.blob();const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=meta.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){alert(e.message||'Não foi possível baixar a planilha.')}
-}
-function renderDomainBulkPreview(data){
-  const box=qs('#domainBulkSheetPreview');if(!box)return;
-  const kind=state.domainBulkSheet?.kind;
-  if(kind==='houses'){
-    const rows=data.rows||[];const invalid=Number(data.invalid||0),changed=rows.filter(r=>!r.errors?.length&&(r.isNew||r.changes?.length));box.innerHTML=`<div class="player-import-summary"><span>${data.total||0} linhas</span><span class="ok">✅ ${data.valid||0} válidas</span><span class="bad">⚠️ ${invalid} com erros</span><span>${changed.length} alterações</span></div>${renderDomainRowsTable(rows)}${renderDomainIssues(data.issues||[])}`;
-    qs('#domainBulkSheetConfirm').disabled=invalid>0||changed.length===0;return;
-  }
-  if(kind==='missions'){
-    const rows=data.rows||[],invalid=Number(data.invalid||0),changed=rows.filter(r=>!r.errors?.length&&(r.isNew||r.changes?.length));box.innerHTML=`<div class="player-import-summary"><span>${data.total||0} linhas</span><span class="ok">✅ ${data.valid||0} válidas</span><span class="bad">⚠️ ${invalid} com erros</span><span>${changed.length} alterações</span></div>${renderDomainRowsTable(rows)}${renderDomainIssues(data.issues||[])}`;qs('#domainBulkSheetConfirm').disabled=invalid>0||changed.length===0;return;
-  }
-  const p=data.patents||{},r=data.roles||{},invalid=Number(p.invalid||0)+Number(r.invalid||0),changed=Number(p.changes||0)+Number(r.changes||0);box.innerHTML=`<div class="card-bulk-sheet-badges"><span>Patentes: ${p.total||0}</span><span>✅ ${p.valid||0}</span><span>⚠️ ${p.invalid||0}</span><span>Cargos: ${r.total||0}</span><span>✅ ${r.valid||0}</span><span>⚠️ ${r.invalid||0}</span><span>${changed} alterações</span></div><h4>Patentes</h4>${renderDomainRowsTable(p.rows||[])}<h4 style="margin-top:15px">Cargos</h4>${renderDomainRowsTable(r.rows||[])}${renderDomainIssues(data.issues||[])}`;qs('#domainBulkSheetConfirm').disabled=invalid>0||changed===0;
-}
-function renderDomainRowsTable(rows){const body=(rows||[]).filter(r=>!r.errors?.length&&(r.isNew||r.changes?.length)).slice(0,200).map(r=>{const ch=(r.changes||[]).map(c=>`<div><b>${escapeHtml(c.label)}:</b> ${escapeHtml(String(c.before))} → ${escapeHtml(String(c.after))}</div>`).join('')||'<span class="muted">Novo registro</span>';return `<tr><td>${escapeHtml(String(r.id??'novo'))}</td><td><b>${escapeHtml(r.name||r.mission_type||'')}</b></td><td>${ch}</td></tr>`}).join('');return `<div style="overflow:auto"><table class="card-bulk-sheet-preview-table"><thead><tr><th>ID</th><th>Registro</th><th>Alterações</th></tr></thead><tbody>${body||'<tr><td colspan="3">Nenhuma alteração detectada.</td></tr>'}</tbody></table></div>`}
-function renderDomainIssues(issues){return issues?.length?`<div class="card-bulk-sheet-section"><h4>⚠️ Problemas encontrados</h4><div style="overflow:auto"><table class="card-bulk-sheet-preview-table"><thead><tr><th>Aba</th><th>Linha</th><th>Campo</th><th>Problema</th></tr></thead><tbody>${issues.slice(0,200).map(x=>`<tr><td>${escapeHtml(x.section||'')}</td><td>${escapeHtml(String(x.row||''))}</td><td>${escapeHtml(x.field||'')}</td><td class="issue">${escapeHtml(x.message||'')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
-async function previewDomainBulkSheet(){const file=qs('#domainBulkSheetFile')?.files?.[0];if(!file)return;state.domainBulkSheet.file=file;qs('#domainBulkSheetFileName').textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;qs('#domainBulkSheetStatus').textContent='Lendo, validando e comparando...';qs('#domainBulkSheetConfirm').disabled=true;const form=new FormData();form.append('file',file);try{const d=await adminApi(`${state.domainBulkSheet.meta.importUrl}/preview`,{method:'POST',body:form});state.domainBulkSheet.preview=d;renderDomainBulkPreview(d);qs('#domainBulkSheetStatus').textContent=(Number(d.invalid||0)+Number(d.patents?.invalid||0)+Number(d.roles?.invalid||0))?'Corrija os dados indicados antes de aplicar.':'Planilha pronta. Revise a prévia antes de aplicar.'}catch(e){qs('#domainBulkSheetPreview').innerHTML='<p>Não foi possível processar a planilha.</p>';qs('#domainBulkSheetStatus').textContent=e.message}}
-async function confirmDomainBulkSheet(){const f=state.domainBulkSheet?.file,d=state.domainBulkSheet?.preview;if(!f||!d)return;const invalid=Number(d.invalid||0)+Number(d.patents?.invalid||0)+Number(d.roles?.invalid||0),changes=Number(d.changes||0)+Number(d.patents?.changes||0)+Number(d.roles?.changes||0);if(invalid) return;if(!confirm(`Aplicar ${changes||'as'} alteração(ões) da planilha? A operação é transacional e será bloqueada se houver erro.`))return;qs('#domainBulkSheetConfirm').disabled=true;qs('#domainBulkSheetCancel').disabled=true;qs('#domainBulkSheetStatus').textContent='Aplicando em transação única...';const form=new FormData();form.append('file',f);try{const r=await adminApi(state.domainBulkSheet.meta.importUrl,{method:'POST',body:form});qs('#domainBulkSheetStatus').textContent=`✅ Operação concluída. ${r.created||r.createdPatents||0} criado(s) • ${r.updated||r.updatedPatents||0} atualizado(s).`+(r.createdRoles!==undefined?` Cargos: ${r.createdRoles||0} criado(s) • ${r.updatedRoles||0} atualizado(s).`:``);setTimeout(()=>closeDomainBulkSheet(),1100)}catch(e){qs('#domainBulkSheetStatus').textContent=e.message;qs('#domainBulkSheetConfirm').disabled=false;qs('#domainBulkSheetCancel').disabled=false}}
-
-qs("#announcementCancelBtn").addEventListener("click",resetAnnouncementForm);
-
-async function tryAdminHash(){
-  if(location.hash!=="#admin")return;
-  history.replaceState(null,"",location.pathname+location.search);
-  await refreshAdminSession();
-  if(state.admin) go("admin"); else go("admin-login");
-}
-
-loadPortalPublicSettings();initGlobalSearch();initGuideNavigation();loadHome();setLoginNav();updateContextNav();tryMe();setAdminNav();tryAdminHash();
+<section class="page" id="grimorio" aria-label="Meu Grimório">
+  <div class="grimoire-hero">
+    <div class="grimoire-intro">
+      <p class="eyebrow">📖 GRIMÓRIO DO MAGO</p>
+      <h1 id="grimoireTitle">Seu Grimório</h1>
+      <p id="grimoireIntroText">Cada página guarda uma conquista da sua evolução. Conforme os níveis avançam, novas magias passam a fazer parte do seu livro.</p>
+      <div class="grimoire-stats"><span>✨ EXP <b id="grimoireExp">0</b>%</span><span>🎖️ <b id="grimoirePatent">—</b></span><span>📈 Nível <b id="grimoireLevel">1</b></span><span>📜 <b id="grimoirePageCount">0</b> páginas</span></div>
+      <div class="grimoire-progress-wrap">
+        <div class="grimoire-progress-head"><span>Progresso para o próximo nível</span><b id="grimoireProgressLabel">—</b></div>
+        <div class="grimoire-progress"><span id="grimoireProgressBar"></span></div>
+        <small id="grimoireProgressHint">A EXP volta a zero quando o nível é alcançado.</small>
+      </div>
+    </div>
+    <div class="grimoire-book" id="grimoireBook" aria-label="Grimório aberto">
+      <div class="book-spine"></div>
+      <div class="book-page book-left"><div class="page-ornament">♠</div></div>
+      <div class="book-page book-right"><div class="grimoire-pages" id="grimoirePages"><p class="grimoire-empty">As páginas do seu Grimório ainda aguardam seus registros.</p></div></div>
+      <div class="book-glow"></div>
+    </div>
+  </div>
+</section>
+<section class="page" id="cards">
+  <div class="subhero">
+    <p class="eyebrow">INVENTÁRIO DO JOGADOR</p>
+    <h1>Meus <em>Cards.</em></h1>
+    <p>Consulte os cards que você possui e filtre seu inventário por categoria.</p>
+  </div>
+  <div class="content">
+    <div class="cards-toolbar panel">
+      <div><p class="eyebrow">INVENTÁRIO</p><h3 id="playerCardsSummary">Carregando...</h3><div id="playerCardsStats" class="player-cards-stats"><span><small>CARDS</small><b>—</b></span><span><small>PODER</small><b>—</b></span><span><small>CATEGORIAS</small><b>—</b></span></div></div>
+      <button class="outline dark-outline" type="button" id="backToDashboard">← Meu painel</button>
+    </div>
+    <div class="cards-filter-bar">
+      <input class="search" id="playerCardSearch" placeholder="Pesquisar card...">
+      <select class="admin-filter" id="playerCardCategoryFilter"><option value="">Todas as categorias</option></select>
+    </div>
+    <div id="playerCardsGrid" class="player-cards-groups"></div>
+  </div>
+</section>
+<section class="page" id="simulador" aria-label="Simulador de combate">
+  <div class="subhero simulator-hero">
+    <div>
+      <p class="eyebrow">⚔️ ARENA DE TREINAMENTO • REINO SPADE</p>
+      <h1>Teste sua <em>estratégia.</em></h1>
+      <p>Enfrente um oponente fictício usando seus próprios Cards e treine com cenários definidos pela Administração.</p>
+    </div>
+  </div>
+  <div class="content">
+    <div id="simulatorRoot" class="simulator-root"></div>
+  </div>
+</section>
 
 
-function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
-async function loadAdminNotifications(){const list=qs("#adminNotificationList");if(!list)return;try{const d=await adminApi("/api/admin/notifications");list.innerHTML=(d.notifications||[]).map(n=>`<div class="editorial-item"><div><b>${escapeHtml(n.title)}</b><small>${escapeHtml(n.type)} • ${escapeHtml(n.nick)}${n.house?` • ${escapeHtml(n.house)}`:""} • ${new Date(n.created_at).toLocaleString("pt-BR")}</small></div></div>`).join("")||`<div class="admin-history-empty">Nenhuma notificação enviada.</div>`;}catch(e){list.innerHTML=`<div class="admin-history-empty">${escapeHtml(e.message)}</div>`;}}
-qs("#adminNotificationForm")?.addEventListener("submit",async e=>{e.preventDefault();const err=qs("#notificationAdminError");err.textContent="";try{const all=qs("#notificationAllActive").checked;const pid=Number(qs("#notificationPlayer").value||0);if(!all&&!pid)throw new Error("Escolha um jogador ou marque todos os ativos.");await adminApi("/api/admin/notifications",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:qs("#notificationTitle").value,body:qs("#notificationBody").value,type:qs("#notificationType").value,link_page:qs("#notificationLink").value,all_active:all,player_id:pid})});e.target.reset();await loadAdminNotifications();alert("Notificação enviada.");}catch(ex){err.textContent=ex.message;}});
-qs("#markAllNotifications")?.addEventListener("click",async()=>{try{await api("/api/me/notifications/read-all",{method:"POST"});await loadNotifications();}catch(e){alert(e.message)}});
+<section class="page" id="emblemas" aria-label="Emblems do jogador">
+  <div class="subhero emblem-hero">
+    <div><p class="eyebrow">🏅 COLEÇÃO DO REINO SPADE</p><h1>Seus <em>Emblems.</em></h1><p>Conquiste, evolua e destaque as marcas da sua jornada no Reino.</p></div>
+  </div>
+  <div class="content"><div id="emblemsRoot" class="emblems-root"></div></div>
+</section>
 
-// Ambiente Spade is initialized immediately near the top so controls stay functional
-// even if a later, unrelated UI initializer throws an error.
+<section class="page" id="admin-login">
+  <div class="subhero compact"><p class="eyebrow">ACESSO RESTRITO</p><h1>Administração do <em>Reino.</em></h1><p>Entre com sua conta administrativa para acessar o centro de controle de Spade.</p></div>
+  <div class="content">
+    <div class="login-wrap admin-login-wrap">
+      <div class="panel login-card admin-login-card">
+        <div class="login-seal">♛</div>
+        <p class="eyebrow">PORTAL ADMINISTRATIVO</p>
+        <h2>Bem-vindo, administrador.</h2>
+        <p class="login-help">Cada administrador possui seu próprio acesso. As alterações realizadas no Portal ficam vinculadas à conta utilizada.</p>
+        <form id="adminLoginForm">
+          <label>Usuário<input id="adminUsername" autocomplete="username" placeholder="Seu usuário" required></label>
+          <label>Senha<input id="adminPassword" type="password" autocomplete="current-password" placeholder="Sua senha" required></label>
+          <button class="gold" type="submit">Entrar na Administração</button>
+          <div class="error" id="adminLoginError"></div>
+        </form>
+        <p class="admin-login-note">Se você ainda não possui uma conta administrativa, procure o responsável pelo Portal.</p>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="page" id="admin"><div class="subhero compact"><div class="admin-title-line"><div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Painel do <em>Reino.</em></h1><p>Controle central de jogadores, Yuls, jornal e dados do RPG.</p></div><div class="admin-header-actions"><button class="outline dark-outline small" type="button" id="exitAdminPanelBtn">← Voltar ao Portal</button><span class="admin-lock">♛ ADMIN</span></div></div></div>
+<div class="content admin-page">
+  <div class="admin-stats" id="adminStats"></div>
+  <section class="admin-reports-panel panel" id="adminReportsPanel">
+    <div class="panel-head"><div><p class="eyebrow">INTELIGÊNCIA DO REINO</p><h3>Estatísticas & Relatórios</h3></div><span>Visão consolidada dos principais dados de Spade</span></div>
+    <div id="adminReportsSummary" class="report-kpis"></div>
+    <div class="reports-grid">
+      <div class="report-card"><p class="eyebrow">TOP PODER</p><div id="reportTopPower"></div></div>
+      <div class="report-card"><p class="eyebrow">TOP ATIVIDADE</p><div id="reportTopActivity"></div></div>
+      <div class="report-card report-card-wide"><p class="eyebrow">CASAS</p><div id="reportHouseStats"></div></div>
+    </div>
+    <div class="report-foot"><span id="reportUpdatedAt">—</span><button class="outline dark-outline small" type="button" id="adminReportsRefresh">↻ Atualizar relatórios</button></div>
+  </section>
+  <section class="admin-audit-panel panel" id="adminAuditPanel">
+    <div class="panel-head">
+      <div><p class="eyebrow">RASTRO ADMINISTRATIVO</p><h3>Auditoria & Histórico</h3></div>
+      <span>Quem fez, quando fez e qual foi o resultado</span>
+    </div>
+    <div class="audit-toolbar">
+      <input class="search" id="adminAuditSearch" placeholder="🔎 Buscar ação, administrador, jogador ou registro...">
+      <select class="admin-filter" id="adminAuditSource">
+        <option value="">Todas as fontes</option>
+        <option value="AUDITORIA">Ações administrativas</option>
+        <option value="JOGADOR">Jogadores</option>
+        <option value="CARD">Cards</option>
+        <option value="RANKING">Rankings</option>
+        <option value="CASA">Casas</option>
+      </select>
+      <input class="admin-filter" id="adminAuditFrom" type="date" title="A partir de">
+      <input class="admin-filter" id="adminAuditTo" type="date" title="Até">
+      <button class="outline dark-outline small" type="button" id="adminAuditRefresh">↻ Atualizar</button>
+    </div>
+    <div class="audit-summary" id="adminAuditSummary"></div>
+    <div class="audit-list" id="adminAuditList"></div>
+  </section>
+  <section class="admin-security-panel panel" id="adminSecurityPanel">
+    <div class="panel-head">
+      <div><p class="eyebrow">SEGURANÇA & MANUTENÇÃO</p><h3>Central de segurança do Portal</h3></div>
+      <span>Verifique a conexão e faça um backup lógico antes de grandes alterações.</span>
+    </div>
+    <div class="security-grid">
+      <div class="security-card" id="adminSystemHealthCard">
+        <div class="security-card-top"><span>🩺</span><div><b>Saúde do sistema</b><small id="adminSystemHealthText">Verificando conexão...</small></div></div>
+        <button class="outline dark-outline small" type="button" id="adminSystemHealthRefresh">↻ Verificar agora</button>
+      </div>
+      <div class="security-card">
+        <div class="security-card-top"><span>💾</span><div><b>Backup lógico</b><small>Exporta os dados administrativos sem expor senhas.</small></div></div>
+        <button class="gold small" type="button" id="adminBackupDownloadBtn">📥 Baixar backup</button>
+      </div>
+    </div>
+    <div class="admin-editor-note security-note">O backup inclui dados estruturais e registros do Portal. Senhas e arquivos de mídia binários não são exportados. O backup é uma cópia para segurança; a restauração deve ser tratada separadamente.</div>
+  </section>
+  <section class="admin-bulk-center panel" id="adminBulkCenter">
+    <div class="panel-head">
+      <div><p class="eyebrow">GESTÃO EM MASSA</p><h3>Central de planilhas</h3></div>
+      <span>Todos os fluxos de massa em um único lugar.</span>
+    </div>
+    <div class="bulk-center-grid">
+      <article class="bulk-center-card"><span>👤</span><div><b>Jogadores</b><small>Baixe, edite e devolva a planilha de atualização.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterPlayersExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterPlayersImport">📥 Importar</button></div></article>
+      <article class="bulk-center-card"><span>🃏</span><div><b>Cards & vínculos</b><small>Catálogo oficial + posse de Cards por jogador.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterCardsExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterCardsImport">📥 Importar</button></div></article>
+      <article class="bulk-center-card"><span>🏰</span><div><b>Casas</b><small>Atualize nomes, liderança, identidade e estrutura das Casas.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterHousesExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterHousesImport">📥 Importar</button></div></article>
+      <article class="bulk-center-card"><span>👑</span><div><b>Hierarquia</b><small>Patentes e Cargos em duas abas da mesma planilha.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterHierarchyExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterHierarchyImport">📥 Importar</button></div></article>
+      <article class="bulk-center-card"><span>⚔️</span><div><b>Missões</b><small>Crie e atualize atividades oficiais com datas e recompensas.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterMissionsExport">📤 Exportar</button><button class="gold small" type="button" id="bulkCenterMissionsImport">📥 Importar</button></div></article>
+      <article class="bulk-center-card"><span>🏆</span><div><b>Rankings</b><small>Exportação para consulta; pontuações não são alteradas por planilha.</small></div><div class="bulk-center-actions"><button class="outline dark-outline small" type="button" id="bulkCenterRankingsExport">📤 Exportar</button></div></article>
+    </div>
+  </section>
+    <section class="admin-simulator-panel panel" id="adminSimulatorPanel">
+    <div class="panel-head">
+      <div><p class="eyebrow">⚔️ SIMULADOR</p><h3>Treinamentos</h3></div>
+      <span>Crie cenários oficiais para a Arena de Treinamento.</span>
+    </div>
+    <form id="adminSimulatorTrainingForm" class="admin-form simulator-admin-form" onsubmit="return false;">
+      <input type="hidden" id="simTrainingId">
+      <div class="article-form-grid">
+        <input id="simTrainingName" class="full" placeholder="Nome do treinamento" required>
+        <input id="simTrainingOpponent" placeholder="Nome do oponente fictício" value="Mago de Treinamento">
+        <select id="simTrainingDifficulty"><option value="FACIL">Fácil</option><option value="NORMAL" selected>Normal</option><option value="DIFICIL">Difícil</option><option value="MESTRE">Mestre</option></select>
+        <select id="simTrainingPersonality"><option value="AGRESSIVO">Agressivo</option><option value="DEFENSIVO">Defensivo</option><option value="ESTRATEGICO" selected>Estratégico</option><option value="IMPREVISIVEL">Imprevisível</option><option value="EXPERIMENTAL">Experimental</option></select>
+        <input id="simTrainingPlayerHp" type="number" min="1" value="200" placeholder="HP do jogador">
+        <input id="simTrainingPlayerMana" type="number" min="0" value="400" placeholder="Mana do jogador">
+        <input id="simTrainingOpponentHp" type="number" min="1" value="200" placeholder="HP do oponente">
+        <input id="simTrainingOpponentMana" type="number" min="0" value="400" placeholder="Mana do oponente">
+        <input id="simTrainingAllowedOrigins" class="full" placeholder="Origens permitidas — ex.: SC Junior, Exclusivo">
+        <input id="simTrainingAllowedCategories" class="full" placeholder="Categorias permitidas — ex.: Paralisia, Técnica">
+        <input id="simTrainingAllowedCards" class="full" placeholder="Nº internos permitidos — ex.: 1, 8, 184">
+        <input id="simTrainingBlockedCards" class="full" placeholder="Nº internos proibidos — ex.: 7, 21">
+        <select id="simTrainingObjectiveType"><option value="WIN" selected>🎯 Vencer o combate</option><option value="SURVIVE_ROUNDS">🛡️ Sobreviver por rounds</option><option value="FINISH_MANA_AT_LEAST">♦️ Terminar com Mana mínima</option><option value="USE_CATEGORY">⛓️ Usar uma categoria</option><option value="USE_CARD">🃏 Usar um Card específico</option></select>
+        <input id="simTrainingObjectiveValue" placeholder="Valor do objetivo (quando necessário)">
+        <input id="simTrainingObjectiveLabel" class="full" placeholder="Descrição do objetivo (opcional)">
+        <input id="simTrainingMaxRounds" type="number" min="1" placeholder="Limite de rounds (opcional)">
+        <select id="simTrainingVisibility"><option value="PUBLICO" selected>Público</option><option value="OCULTO">Oculto</option></select>
+        <textarea id="simTrainingDescription" class="full" placeholder="Descrição do treinamento"></textarea>
+      </div>
+      <div class="announcement-options"><label><input type="checkbox" id="simTrainingActive" checked> Disponível</label></div>
+      <div class="editor-actions"><button class="gold" type="submit" id="simTrainingSaveBtn">Criar treinamento</button><button class="outline dark-outline" type="button" id="simTrainingClearBtn">Limpar</button></div>
+      <div class="error" id="simTrainingError"></div>
+    </form>
+    <div id="adminSimulatorTrainingList" class="editorial-list"></div>
+  </section>
+
+<div class="admin-toolbar admin-toolbar-v2">
+    <div class="admin-search-wrap"><input class="search admin-search" id="adminSearch" placeholder="Pesquisar por nick, identificador ou Casa"></div>
+    <select class="admin-filter" id="adminHouseFilter"><option value="">Todas as Casas</option></select>
+    <select class="admin-filter" id="adminPatentFilter"><option value="">Todas as Patentes</option></select>
+    <select class="admin-filter" id="adminRoleFilter"><option value="">Todos os Cargos</option></select>
+    <select class="admin-filter" id="adminVisibilityFilter"><option value="">Todos os perfis</option><option value="1">Públicos</option><option value="0">Ocultos</option></select>
+    <select class="admin-filter" id="adminStatusFilter"><option value="">Todos os acessos</option><option value="1">Ativos</option><option value="0">Suspensos</option></select>
+    <select class="admin-filter" id="adminSort">
+      <option value="nick">Nome A–Z</option><option value="missions">Mais missões</option>
+      <option value="yuls">Mais Yuls</option><option value="power">Mais força</option>
+      <option value="ranking">Melhor ranking</option><option value="updated">Mais recentes</option>
+    </select>
+    <button class="outline dark-outline" id="exportPlayersBtn" title="Baixar os dados atuais dos jogadores em Excel">📤 Baixar planilha</button><button class="outline dark-outline" id="exportVisiblePlayersBtn" title="Baixar somente os jogadores que estão visíveis com os filtros atuais">📤 Exportar visíveis</button><button class="gold" id="bulkUpdatePlayersBtn" title="Enviar uma planilha editada para atualizar jogadores">📥 Atualizar por planilha</button><button class="gold" id="importPlayersBtn">＋ Importar novos</button><button class="gold" id="newPlayerBtn">＋ Novo jogador</button>
+    <button class="outline dark-outline" id="refreshAdminBtn">↻ Atualizar</button>
+  </div>
+  <div class="admin-mission-manager panel" id="adminMissionManager">
+    <div class="panel-head"><div><p class="eyebrow">ATIVIDADES OFICIAIS</p><h3>Administração de Missões</h3></div><span>Missões sem título: tipo + período + instruções + recompensas</span></div>
+    <form id="adminMissionForm" class="mission-admin-form">
+      <input type="hidden" id="adminMissionId">
+      <select id="adminMissionType"><option>Luta</option><option>Trívia</option><option>História</option><option>Treinamento</option><option>Recrutamento</option><option>Outro</option></select>
+      <input id="adminMissionStart" type="datetime-local" required><input id="adminMissionEnd" type="datetime-local" required>
+      <select id="adminMissionStatus"><option>AGENDADA</option><option>EM_ANDAMENTO</option><option>CONCLUIDA</option><option>CANCELADA</option></select>
+      <input id="adminMissionYuls" type="number" min="0" placeholder="Recompensa em Yuls">
+      <input id="adminMissionExp" type="number" min="0" placeholder="Recompensa em EXP">
+      <input id="adminMissionCards" class="wide" placeholder="Cards de recompensa (opcional)">
+      <textarea id="adminMissionDescription" class="wide" placeholder="Descrição da missão"></textarea>
+      <textarea id="adminMissionInstructions" class="wide" placeholder="Instruções / regras da missão"></textarea>
+      <div class="editor-actions wide"><button class="gold" type="submit">＋ Publicar missão</button><button class="outline dark-outline" type="button" id="adminMissionClear">Limpar</button><span class="error" id="adminMissionError"></span></div>
+    </form>
+    <div class="eyebrow" style="margin-top:18px">HISTÓRICO DE MISSÕES</div><div id="adminMissionList" class="admin-mission-list"></div>
+  </div>
+
+  <div class="bulk-toolbar panel" id="bulkToolbar">
+    <div class="bulk-selection"><b id="bulkSelectedCount">0 selecionados</b><button type="button" class="text-button" id="selectAllPlayersBtn">Selecionar todos</button><button type="button" class="text-button" id="clearAllPlayersBtn">Limpar seleção</button></div>
+    <div class="bulk-actions">
+      <button type="button" class="bulk-action" data-bulk-action="yuls">🪙 Yuls</button><button type="button" class="bulk-action" data-bulk-action="cards">🃏 Cards</button>
+      <button type="button" class="bulk-action" data-bulk-action="house">🏰 Casa</button>
+      <button type="button" class="bulk-action" data-bulk-action="patent">🎖️ Patente</button>
+      <button type="button" class="bulk-action" data-bulk-action="roles">👑 Cargos</button>
+      <button type="button" class="bulk-action" data-bulk-action="missions">📋 Missões</button>
+      <button type="button" class="bulk-action" data-bulk-action="attributes">📊 Atributos</button>
+      <button type="button" class="bulk-action" data-bulk-action="power">⚔️ Recalcular força</button>
+      <button type="button" class="bulk-action" data-bulk-action="visibility">👁️ Visibilidade</button><button type="button" class="bulk-action" data-bulk-action="status">🔐 Acesso</button>
+    </div>
+  </div>
+  <div class="admin-layout">
+    <div class="panel admin-list-panel"><div class="panel-head"><div><p class="eyebrow">CADASTRADOS</p><h3>Jogadores</h3></div><span id="playerCountLabel"></span></div><div id="adminPlayerList" class="admin-player-list"></div></div>
+    <div class="panel admin-editor" id="adminEditor">
+      <div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados ou lançar uma movimentação de Yuls.</p></div>
+    </div>
+  </div>
+
+  <div class="player-import-modal" id="cardBulkSheetModal" hidden style="display:none">
+    <div class="player-import-window player-bulk-sheet-window card-bulk-sheet-window">
+      <div class="player-import-head">
+        <div><p class="eyebrow">GESTÃO EM MASSA</p><h3>Cards por planilha</h3><p>Atualize o catálogo e, pela aba Vinculos, associe ou remova Cards dos jogadores.</p></div>
+        <button type="button" class="journal-close" id="closeCardBulkSheet">×</button>
+      </div>
+      <div class="player-import-actions">
+        <button class="outline small" type="button" id="cardBulkSheetDownload">📤 Baixar planilha atual</button>
+        <label class="gold small import-file-label" for="cardBulkSheetFile">📥 Escolher planilha editada</label>
+        <input id="cardBulkSheetFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <span id="cardBulkSheetFileName">Nenhum arquivo selecionado</span>
+      </div>
+      <div class="player-import-note">
+        <b>Cards:</b> Nº interno preenchido = atualizar. Nº interno vazio = criar novo e receber número automático. O Nº interno nunca pode ser escolhido ou trocado manualmente.<br>
+        <b>Vinculos:</b> use <b>ADICIONAR</b> ou <b>REMOVER</b>. O ID jogador e o Nº interno Card são obrigatórios; os nomes servem para conferência. Linhas sem ação são ignoradas.<br>
+        <span>Novos Cards precisam ser importados primeiro. Depois baixe a planilha novamente para descobrir o Nº interno gerado e então faça os vínculos.</span>
+      </div>
+      <div id="cardBulkSheetPreview" class="player-import-preview"><p>Escolha uma planilha para começar.</p></div>
+      <div class="player-import-footer">
+        <div id="cardBulkSheetStatus" class="error"></div>
+        <button class="outline dark-outline" type="button" id="cardBulkSheetCancel">Cancelar</button>
+        <button class="gold" type="button" id="cardBulkSheetConfirm" disabled>Aplicar alterações</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="player-import-modal" id="domainBulkSheetModal" hidden style="display:none">
+    <div class="player-import-window player-bulk-sheet-window">
+      <div class="player-import-head">
+        <div><p class="eyebrow">GESTÃO EM MASSA 2.0</p><h3 id="domainBulkSheetTitle">Planilha</h3><p id="domainBulkSheetSubtitle">Edite, envie e valide antes de aplicar.</p></div>
+        <button type="button" class="journal-close" id="closeDomainBulkSheet">×</button>
+      </div>
+      <div class="player-import-actions">
+        <label class="gold small import-file-label" for="domainBulkSheetFile">📥 Escolher planilha editada</label>
+        <input id="domainBulkSheetFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <span id="domainBulkSheetFileName">Nenhum arquivo selecionado</span>
+      </div>
+      <div class="player-import-note"><b>Regra:</b> ID preenchido atualiza o registro existente. ID vazio cria um novo registro. Campos informativos de ocupantes/membros são somente leitura. Não há exclusão em massa nesta etapa.</div>
+      <div id="domainBulkSheetPreview" class="player-import-preview"><p>Escolha uma planilha para começar.</p></div>
+      <div class="player-import-footer"><div id="domainBulkSheetStatus" class="error"></div><button class="outline dark-outline" type="button" id="domainBulkSheetCancel">Cancelar</button><button class="gold" type="button" id="domainBulkSheetConfirm" disabled>Aplicar alterações</button></div>
+    </div>
+  </div>
+  <div class="player-import-modal" id="playerImportModal" hidden style="display:none">
+    <div class="player-import-window">
+      <div class="player-import-head">
+        <div><p class="eyebrow">IMPORTAÇÃO EM MASSA</p><h3>Subir jogadores</h3><p>Envie uma planilha .xlsx, .xls ou .csv. O Portal valida tudo antes de gravar.</p></div>
+        <button type="button" class="journal-close" id="closePlayerImport">×</button>
+      </div>
+      <div class="player-import-actions">
+        <a class="outline small" href="/player-import-template.xlsx" download>📄 Baixar modelo</a>
+        <label class="gold small import-file-label" for="playerImportFile">📥 Escolher arquivo</label>
+        <input id="playerImportFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <span id="playerImportFileName">Nenhum arquivo selecionado</span>
+      </div>
+      <div class="player-import-note">
+        <b>Campos principais:</b> Nick, Login, Senha, Número interno (opcional), Casa, Patente, Cargos, Grimório, HP, Mana, Yuls, EXP, Missões, Conquistas, Ranking, Força e Perfil público.
+        <br><span>Número interno pode ficar vazio: o sistema gera um automaticamente. Para múltiplos cargos, separe os nomes por <b>|</b>.</span>
+      </div>
+      <div id="playerImportPreview" class="player-import-preview"><p>Escolha um arquivo para começar.</p></div>
+      <div class="player-import-footer">
+        <div id="playerImportStatus" class="error"></div>
+        <button class="outline dark-outline" type="button" id="playerImportCancel">Cancelar</button>
+        <button class="gold" type="button" id="playerImportConfirm" disabled>Importar jogadores</button>
+      </div>
+    </div>
+  </div>
+  <div class="player-import-modal" id="playerBulkSheetModal" hidden style="display:none">
+    <div class="player-import-window player-bulk-sheet-window">
+      <div class="player-import-head">
+        <div><p class="eyebrow">ATUALIZAÇÃO EM MASSA</p><h3>Editar jogadores por planilha</h3><p>Baixe os dados atuais, altere o que precisar e reenvie. O Portal compara tudo antes de gravar.</p></div>
+        <button type="button" class="journal-close" id="closePlayerBulkSheet">×</button>
+      </div>
+      <div class="player-import-actions">
+        <button class="outline small" type="button" id="playerBulkSheetDownload">📤 Baixar dados atuais</button>
+        <label class="gold small import-file-label" for="playerBulkSheetFile">📥 Escolher planilha editada</label>
+        <input id="playerBulkSheetFile" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <span id="playerBulkSheetFileName">Nenhum arquivo selecionado</span>
+      </div>
+      <div class="player-import-note">
+        <b>Como funciona:</b> a coluna <b>ID</b> identifica o jogador e não deve ser alterada. Você pode editar Nick, número, login, Casa, Patente, Cargos, Grimório, HP, Mana, Yuls, Dracmas, EXP, Missões, Conquistas, Ranking, Força, Skills, visibilidade e acesso.
+        <br><span>A prévia mostra exatamente o que mudará. Nada é aplicado antes da confirmação e uma planilha com qualquer erro é bloqueada por inteiro.</span>
+      </div>
+      <div id="playerBulkSheetPreview" class="player-import-preview"><p>Baixe a planilha atual, edite-a e depois escolha o arquivo aqui.</p></div>
+      <div class="player-import-footer">
+        <div id="playerBulkSheetStatus" class="error"></div>
+        <button class="outline dark-outline" type="button" id="playerBulkSheetCancel">Cancelar</button>
+        <button class="gold" type="button" id="playerBulkSheetConfirm" disabled>Aplicar alterações</button>
+      </div>
+    </div>
+  </div>
+  <div class="admin-house-panel panel">
+    <div class="panel-head">
+      <div><p class="eyebrow">ESTRUTURA DO REINO</p><h3>Casas</h3></div>
+      <span>Cadastre, edite e organize as Casas</span>
+    </div>
+    <div class="admin-house-layout">
+      <form id="houseForm" class="admin-house-form">
+        <input type="hidden" name="id" id="houseId">
+        <input name="name" id="houseName" placeholder="Nome da Casa" required>
+        <input name="emblem" id="houseEmblem" placeholder="Símbolo (ex.: ♜)" maxlength="8">
+        <input name="leader" id="houseLeader" placeholder="Líder">
+        <input name="vice_leader" id="houseVice" placeholder="Vice-líder">
+        <input name="motto" id="houseMotto" placeholder="Lema da Casa">
+        <input name="color" id="houseColor" placeholder="Cor / identidade visual">
+        <input name="banner_url" id="houseBanner" placeholder="URL do banner (opcional)">
+        <select name="status" id="houseStatus"><option value="ATIVA">Ativa</option><option value="REORGANIZANDO">Reorganizando</option><option value="INATIVA">Inativa</option><option value="ARQUIVADA">Arquivada</option></select>
+        <textarea name="description" id="houseDescription" placeholder="Descrição da Casa"></textarea>
+        <textarea name="history" id="houseHistory" placeholder="História da Casa"></textarea>
+        <textarea name="goals" id="houseGoals" placeholder="Objetivos atuais"></textarea>
+        <textarea name="achievements" id="houseAchievements" placeholder="Conquistas"></textarea>
+        <div class="editor-actions"><button class="gold" type="submit" id="houseSaveBtn">Criar Casa</button><button class="outline dark-outline" type="button" id="houseCancelBtn">Limpar</button></div>
+        <div class="error" id="houseError"></div>
+      </form>
+      <div id="adminHouseList" class="admin-house-list"></div>
+    </div>
+  </div>
+  <div class="admin-hierarchy-panel panel">
+    <div class="panel-head"><div><p class="eyebrow">ESTRUTURA OFICIAL</p><h3>Cargos & Patentes</h3></div><span>Cadastre e organize a hierarquia</span></div>
+    <div class="hierarchy-admin-grid">
+      <div>
+        <p class="eyebrow">PATENTES</p>
+        <form id="patentForm" class="hier-form">
+          <input type="hidden" name="id" id="patentId">
+          <input name="name" id="patentName" placeholder="Nome da patente" required>
+          <input name="sort_order" id="patentOrder" type="number" value="0" placeholder="Ordem">
+          <textarea name="description" id="patentDescription" placeholder="Descrição"></textarea>
+          <div class="editor-actions"><button class="gold" type="submit" id="patentSaveBtn">Criar patente</button><button class="outline dark-outline" type="button" id="patentCancelBtn">Limpar</button></div>
+          <div class="error" id="patentError"></div>
+        </form>
+        <div id="adminPatentList" class="hier-list"></div>
+      </div>
+      <div>
+        <p class="eyebrow">CARGOS</p>
+        <form id="roleForm" class="hier-form">
+          <input type="hidden" name="id" id="roleId">
+          <div class="role-form-grid">
+            <input name="name" id="roleName" class="full" placeholder="Nome do cargo" required>
+            <select name="rank_code" id="roleRank"><option value="V">RANK V — OPERACIONAL</option><option value="IV">RANK IV — ESPECIALIZAÇÃO</option><option value="III">RANK III — COORDENAÇÃO</option><option value="II">RANK II — GESTÃO</option><option value="I">RANK I — ADMINISTRAÇÃO</option></select>
+            <input name="vacancies" id="roleVacancies" placeholder="Vagas (ex.: 01 por Reino)">
+            <input name="payment_mode" id="rolePaymentMode" placeholder="Modalidade de pagamento">
+            <input name="salary" id="roleSalary" type="number" min="0" value="0" placeholder="Valor base opcional">
+            <input name="sort_order" id="roleOrder" type="number" value="0" placeholder="Ordem">
+            <textarea name="description" id="roleDescription" class="full" placeholder="Responsabilidades / descrição"></textarea>
+            <textarea name="remuneration_detail" id="roleRemuneration" class="full" placeholder="Remuneração detalhada"></textarea>
+            <textarea name="requirements" id="roleRequirements" class="full" placeholder="Requisitos / condições específicas"></textarea>
+            <textarea name="benefits" id="roleBenefits" class="full" placeholder="Benefícios / bônus"></textarea>
+            <input name="scope" id="roleScope" class="full" placeholder="Âmbito: Reino, Organização ou Casa">
+          </div>
+          <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="roleActive" checked> Cargo ativo</label></div>
+          <div class="editor-actions"><button class="gold" type="submit" id="roleSaveBtn">Criar cargo</button><button class="outline dark-outline" type="button" id="roleCancelBtn">Limpar</button></div>
+          <div class="error" id="roleError"></div>
+        </form>
+        <div id="adminRoleList" class="hier-list"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel admin-card-catalog">
+    <div class="panel-head">
+      <div><p class="eyebrow">BANCO DE CARDS</p><h3>Cards do RPG</h3></div>
+      <span>Cadastre e organize as cartas disponíveis</span>
+    </div>
+    <div class="card-sheet-toolbar">
+      <div class="card-sheet-toolbar-copy"><p class="eyebrow">PLANILHA DE GESTÃO</p><b>Cards + vínculos com jogadores</b><small>Baixe o catálogo atual, edite no Excel e reenvie. A aba Vinculos usa ADICIONAR/REMOVER.</small></div>
+      <div class="card-sheet-toolbar-actions"><button type="button" class="outline dark-outline small" id="downloadCardsSheetBtn">📤 Baixar planilha</button><button type="button" class="gold small" id="importCardsSheetBtn">📥 Importar planilha</button></div>
+    </div>
+    <div class="card-catalog-layout">
+      <form id="cardForm" class="admin-form">
+        <input type="hidden" name="id" id="cardId">
+        <div class="card-admin-grid">
+          <input id="cardInternalNumber" class="full" placeholder="Nº interno — automático" readonly>
+          <input name="name_pt" id="cardNamePt" class="full" placeholder="Nome em português" required>
+          <input name="name_jp" id="cardNameJp" class="full" placeholder="Nome em japonês (opcional)">
+          <select name="category" id="adminCardCategory"></select>
+          <select name="origin" id="cardOrigin"></select>
+          <select name="element_type" id="cardElementType"><option value="NAO_ELEMENTAL">Não Elemental</option><option value="ELEMENTAL">Elemental</option></select>
+          <input name="element" id="cardElement" placeholder="Elemento (ex.: Fogo)">
+          <select name="cost_type" id="cardCostType"><option value="SEM_CUSTO">Sem custo</option><option value="MANA">Mana</option><option value="VIDA">Vida</option></select>
+          <input name="cost" id="cardCost" placeholder="Custo (ex.: 50/00)">
+          <input name="power_value" id="cardPower" type="number" min="0" value="0" placeholder="Valor de Poder">
+          <input name="damage_value" id="cardDamage" type="number" min="0" value="0" placeholder="Valor de Dano">
+          <select name="damage_type" id="cardDamageType"><option value="DANO_BRUTO">Dano Bruto</option><option value="DANO_CONTINUO">Dano Contínuo</option><option value="DANO_DIRETO">Dano Direito</option><option value="SEM_DANO">Sem dano</option></select>
+          <input name="sort_order" id="cardOrder" type="number" value="0" placeholder="Ordem">
+          <select name="status" id="cardStatus"><option value="ATIVO">Ativo</option><option value="INATIVO">Inativo</option></select>
+          <textarea name="description" id="cardDescription" class="full" placeholder="Efeito / descrição da carta"></textarea>
+        </div>
+        <div class="announcement-options" style="margin-top:9px"><span class="admin-editor-note">Poder, Dano e Tipo de Dano são informações independentes do custo e da categoria. A posse é única: o mesmo Card pode pertencer a vários jogadores.</span></div>
+        <div class="editor-actions">
+          <button class="gold" type="submit" id="cardSaveBtn">Criar card</button>
+          <button class="outline dark-outline" type="button" id="cardCancelBtn">Limpar</button>
+        </div>
+        <div class="error" id="cardError"></div>
+      </form>
+      <div class="card-category-manager">
+        <input id="newCardCategory" placeholder="Nova categoria">
+        <button type="button" class="outline dark-outline small" id="addCardCategoryBtn">+ Categoria</button>
+      </div>
+      <div class="card-catalog-filters">
+        <input id="adminCardSearch" class="search" placeholder="Pesquisar no catálogo por nome, categoria, elemento ou origem...">
+        <select id="adminCardCatalogFilter" class="admin-filter"><option value="">Todas as categorias</option></select>
+        <select id="adminCardStatusFilter" class="admin-filter"><option value="">Todos os status</option><option value="ATIVO">Ativos</option><option value="INATIVO">Inativos</option></select>
+      </div>
+      <div id="cardCatalogBulkBar" class="card-catalog-bulkbar" hidden>
+        <div><b id="cardCatalogSelectedCount">0 Cards selecionados</b><small>Selecione Cards para ações em massa ou use a distribuição individual.</small></div>
+        <div class="card-catalog-bulk-actions">
+          <button type="button" class="outline dark-outline small" id="cardCatalogSelectVisible">☑ Selecionar visíveis</button>
+          <button type="button" class="outline dark-outline small" id="cardCatalogClearSelection">Limpar seleção</button>
+          <button type="button" class="outline dark-outline small" id="cardCatalogExportSelected">📤 Exportar selecionados</button>
+          <button type="button" class="outline dark-outline small" id="cardCatalogBulkAction">⚙ Ação em massa</button>
+        </div>
+      </div>
+      <div id="adminCardCatalogList" class="card-catalog-list"></div>
+    </div>
+  </div>
+  <div class="card-distribution-modal" id="cardDistributionModal" hidden></div>
+
+  <div class="panel admin-announcement-panel">
+    <div class="panel-head">
+      <div><p class="eyebrow">AVISOS OFICIAIS</p><h3>Novo comunicado</h3></div>
+      <span>Publique avisos para todos os jogadores</span>
+    </div>
+    <form id="announcementForm" class="admin-form announcement-form">
+      <input type="hidden" name="id" id="announcementId">
+      <input name="title" id="announcementTitle" placeholder="Título do comunicado" required>
+      <div class="announcement-form-row">
+        <input name="category" id="announcementCategory" value="INFORMATIVO" placeholder="Categoria">
+        <select name="priority" id="announcementPriority">
+          <option value="URGENTE">🔴 URGENTE</option>
+          <option value="IMPORTANTE">🟡 IMPORTANTE</option>
+          <option value="INFORMATIVO" selected>🔵 INFORMATIVO</option>
+        </select>
+        <input name="date" id="announcementDate" type="date">
+      </div>
+      <textarea name="body" id="announcementBody" placeholder="Texto do comunicado"></textarea>
+      <div class="announcement-options">
+        <label><input type="checkbox" id="announcementFeatured"> Destacar no mural</label>
+        <label><input type="checkbox" id="announcementPublished" checked> Publicar</label>
+      </div>
+      <div class="editor-actions">
+        <button class="gold" type="submit" id="announcementSaveBtn">Publicar comunicado</button>
+        <button class="outline dark-outline" type="button" id="announcementCancelBtn">Limpar</button>
+      </div>
+      <div class="error" id="announcementError"></div>
+    </form>
+    <div id="adminAnnouncementList" class="editorial-list"></div>
+  </div>
+  <div class="panel admin-schedule-manager">
+    <div class="panel-head"><div><p class="eyebrow">CRONOGRAMA</p><h3>Agenda do Reino</h3></div><span>Cadastre atividades, períodos, resultados e referências</span></div>
+    <form id="scheduleForm" class="admin-form" onsubmit="return false;">
+      <input type="hidden" name="id" id="scheduleId">
+      <div class="article-form-grid">
+        <input name="title" id="scheduleTitle" class="full" placeholder="Nome da atividade" required>
+        <select name="activity_type" id="scheduleType">
+          <option value="MISSÃO">♍ Missão</option><option value="EXAME_INTERMEDIARIO">⚜️ Exame Intermediário</option><option value="EXAME_ADMISSAO">🏵️ Exame de Admissão</option><option value="EXAME_SENIOR">🔱 Exame Sênior</option><option value="TORNEIO">🏆 Torneio</option><option value="DIA_LIVRE">🕊️ Dia Livre</option><option value="TORRE_GRIMORIOS">🏯 Torre de Grimórios</option><option value="EVENTO">🎉 Evento</option><option value="RANKING">🅾️ Ranking</option><option value="FORJA">⚒️ Forja</option><option value="ATIVIDADE_ESPECIAL" selected>✦ Atividade Especial</option>
+        </select>
+        <select name="status" id="scheduleStatus"><option value="AGENDADA">Agendada</option><option value="EM_ANDAMENTO">Em andamento</option><option value="CONCLUIDA">Concluída</option><option value="CANCELADA">Cancelada</option></select>
+        <label class="field-label">Data de início<input name="activity_date" id="scheduleDate" type="date" required></label>
+        <label class="field-label">Data de término<input name="end_date" id="scheduleEndDate" type="date"></label>
+        <label class="field-label">Horário de início<input name="start_time" id="scheduleStart" type="time"></label>
+        <label class="field-label">Horário de encerramento<input name="end_time" id="scheduleEnd" type="time"></label>
+        <input name="cycle_label" id="scheduleCycle" placeholder="Ciclo / edição / etapa (opcional)">
+        <input name="location" id="scheduleLocation" placeholder="Local / canal">
+        <input name="link" id="scheduleLink" class="full" placeholder="Link (opcional)">
+        <select name="event_id" id="scheduleEvent"><option value="">Sem evento vinculado</option></select>
+        <select name="mission_id" id="scheduleMission"><option value="">Sem missão vinculada</option></select>
+        <select name="winner_player_id" id="scheduleWinner"><option value="">Sem vencedor cadastrado</option></select>
+        <input name="result_text" id="scheduleResult" class="full" placeholder="Resultado / vencedor / marco (opcional)">
+        <textarea name="description" id="scheduleDescription" class="full" placeholder="Descrição"></textarea>
+      </div>
+      <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="scheduleFeatured"> Destacar</label><label><input type="checkbox" id="schedulePublished" checked> Publicar</label></div>
+      <div class="editor-actions"><button class="gold" type="submit" id="scheduleSaveBtn">Criar atividade</button><button class="outline dark-outline" type="button" id="scheduleCancelBtn">Limpar</button></div>
+      <div class="error" id="scheduleError"></div>
+    </form>
+    <div id="adminScheduleList" class="editorial-list"></div>
+    <div class="schedule-champion-admin">
+      <div class="panel-head"><div><p class="eyebrow">CAMPEÕES DO PERÍODO</p><h3>Registro de conquistas de agenda</h3></div><span>Base para futuros emblemas</span></div>
+      <form id="scheduleChampionForm" class="admin-form" onsubmit="return false;">
+        <input type="hidden" id="scheduleChampionId">
+        <div class="article-form-grid"><input id="scheduleChampionPeriod" type="month" required><select id="scheduleChampionCategory"><option>EVENTO</option><option>TORNEIO</option><option>RANKING</option><option>EXAME</option></select><input id="scheduleChampionTitle" placeholder="Conquista / competição" required><input id="scheduleChampionWinner" placeholder="Vencedor" required><input id="scheduleChampionNote" class="full" placeholder="Observação (opcional)"></div>
+        <div class="editor-actions"><button class="gold" type="submit" id="scheduleChampionSaveBtn">Adicionar campeão</button><button class="outline dark-outline" type="button" id="scheduleChampionCancelBtn">Limpar</button></div>
+        <div class="error" id="scheduleChampionError"></div>
+      </form>
+      <div id="adminScheduleChampionsList" class="editorial-list"></div>
+    </div>
+  </div>
+<div class="panel admin-event-manager">
+    <div class="panel-head"><div><p class="eyebrow">EVENTOS</p><h3>Gestor de Eventos</h3></div><span>Crie eventos, ações e recompensas</span></div>
+    <div class="journal-editor-tabs">
+      <button type="button" class="journal-editor-tab active" data-event-admin-tab="event">🎉 Evento</button>
+      <button type="button" class="journal-editor-tab" data-event-admin-tab="actions">🎯 Ações</button>
+      <button type="button" class="journal-editor-tab" data-event-admin-tab="rewards">🃏 Recompensas</button>
+      <button type="button" class="journal-editor-tab" data-event-admin-tab="players">👥 Participantes</button><button type="button" class="journal-editor-tab" data-event-admin-tab="results">🏆 Resultados</button>
+    </div>
+
+    <div class="journal-editor-panel active" data-event-admin-panel="event">
+      <form id="eventAdminForm" class="admin-form" onsubmit="return false;">
+        <input type="hidden" name="id" id="eventId">
+        <div class="article-form-grid">
+          <input name="title" id="eventTitle" class="full" placeholder="Nome do evento" required>
+          <select name="event_type" id="eventType"><option value="JOGO">🎮 Evento de Jogo</option><option value="ESPECIAL">🃏 Evento Especial</option><option value="TEMPORADA">🎫 Evento de Temporada</option><option value="LEGIAO">⚔️ Evento de Legião</option></select>
+          <select name="status" id="eventStatus"><option value="PLANEJADO">Planejado</option><option value="ATIVO">Ativo</option><option value="ENCERRADO">Encerrado</option><option value="CANCELADO">Cancelado</option></select>
+          <input name="start_date" id="eventStart" type="date"><input name="end_date" id="eventEnd" type="date">
+          <input name="image_url" id="eventImage" class="full" placeholder="URL da imagem (opcional)">
+          <textarea name="description" id="eventDescription" class="full" placeholder="Descrição do evento"></textarea>
+          <textarea name="rules" id="eventRules" class="full" placeholder="Regras / como participar"></textarea>
+        </div>
+        <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="eventFeatured"> Destacar</label><label><input type="checkbox" id="eventPublished" checked> Publicar</label></div>
+        <div class="editor-actions"><button class="gold" type="submit" id="eventSaveBtn">Criar evento</button><button class="outline dark-outline" type="button" id="eventCancelBtn">Limpar</button></div>
+        <div class="error" id="eventError"></div>
+      </form>
+      <div id="adminEventList" class="editorial-list"></div>
+    </div>
+
+    <div class="journal-editor-panel" data-event-admin-panel="actions">
+      <div class="edition-builder-head"><div><p class="eyebrow">AÇÕES</p><h3>Ações que geram pontos</h3></div><select id="eventActionEventSelect" class="admin-filter"></select></div>
+      <form id="eventActionForm" class="admin-form">
+        <div class="article-form-grid"><input name="name" id="eventActionName" placeholder="Nome da ação" required><input name="points" id="eventActionPoints" type="number" min="1" placeholder="Pontos" required><input name="description" id="eventActionDescription" class="full" placeholder="Descrição"><input name="sort_order" id="eventActionOrder" type="number" value="0" placeholder="Ordem"></div>
+        <div class="editor-actions"><button class="gold" type="submit">Adicionar ação</button></div>
+        <div class="error" id="eventActionError"></div>
+      </form>
+      <div id="adminEventActionList" class="editorial-list"></div>
+    </div>
+
+    <div class="journal-editor-panel" data-event-admin-panel="rewards">
+      <div class="edition-builder-head"><div><p class="eyebrow">RECOMPENSAS</p><h3>Cards de evento</h3></div><select id="eventRewardEventSelect" class="admin-filter"></select></div>
+      <form id="eventRewardForm" class="admin-form">
+        <div class="article-form-grid"><select name="card_id" id="eventRewardCard" class="full"></select><input name="points_cost" id="eventRewardCost" type="number" min="0" placeholder="Custo em pontos"><input name="description" id="eventRewardDescription" placeholder="Descrição"></div>
+        <div class="editor-actions"><button class="gold" type="submit">Vincular recompensa</button></div><div class="error" id="eventRewardError"></div>
+      </form>
+      <div id="adminEventRewardList" class="editorial-list"></div>
+    </div>
+
+    <div class="journal-editor-panel" data-event-admin-panel="results">
+      <div class="edition-builder-head"><div><p class="eyebrow">EVENTO DE JOGO</p><h3>Pódio e menções honrosas</h3></div><select id="eventResultEventSelect" class="admin-filter"></select></div>
+      <p class="admin-editor-note">Eventos de jogo possuem 3 vencedores: 🥇 1º lugar recebe 100 Yuls, 🥈 2º lugar recebe 80 Yuls e 🥉 3º lugar recebe 50 Yuls. As Menções Honrosas são apenas reconhecimento e não recebem premiação.</p>
+      <div id="eventResultSlots" class="event-result-slots"></div>
+      <div class="editor-actions"><button class="gold" type="button" id="saveEventResultsBtn">Salvar resultado</button><button class="outline dark-outline" type="button" id="publishEventResultsBtn">🏆 Publicar resultado e aplicar premiações</button></div>
+      <div class="error" id="eventResultError"></div>
+    </div>    <div class="journal-editor-panel" data-event-admin-panel="players">
+      <div class="edition-builder-head"><div><p class="eyebrow">PARTICIPANTES</p><h3>Gerenciar jogadores</h3></div><select id="eventPlayerEventSelect" class="admin-filter"></select></div>
+      <div class="admin-event-player-picker"><div id="eventParticipantPicker" class="edition-article-picker"></div></div>
+      <div class="editor-actions"><button class="gold" type="button" id="eventAddParticipantsBtn">Adicionar selecionados</button></div>
+      <div id="eventParticipantList" class="editorial-list"></div>
+      <div class="event-reward-grant"><div class="eyebrow">LANÇAR YULS / EXP</div><div class="event-grant-grid"><select id="eventRewardPlayer"></select><input id="eventGrantYuls" type="number" min="0" placeholder="Yuls"><input id="eventGrantExp" type="number" min="0" placeholder="EXP"><input id="eventGrantNote" placeholder="Observação"><button class="gold" type="button" id="eventGrantBtn">Lançar</button></div></div>
+      <div class="event-reward-grant"><div class="eyebrow">CONCEDER CARD</div><div class="event-grant-grid"><select id="eventCardRewardPlayer"></select><select id="eventGrantCard"></select><input id="eventGrantCardNote" placeholder="Observação"><span></span><button class="gold" type="button" id="eventGrantCardBtn">Conceder Card</button></div></div>
+      <div class="event-action-record"><div class="eyebrow">REGISTRAR AÇÃO DE TEMPORADA</div><div class="event-grant-grid"><select id="eventActionPlayer"></select><select id="eventActionForPlayer"></select><input id="eventActionNote" placeholder="Observação"><button class="gold" type="button" id="eventRegisterActionBtn">Somar pontos</button></div></div>
+    </div>
+  </div>
+<div class="panel journal-admin-editor">
+    <div class="panel-head">
+      <div><p class="eyebrow">EDITORIAL</p><h3>Editor do The King Magazine</h3></div>
+      <span>Crie matérias e monte cada edição</span>
+    </div>
+
+    <div class="journal-editor-tabs">
+      <button type="button" class="journal-editor-tab active" data-editor-tab="article">✍️ Matérias</button>
+      <button type="button" class="journal-editor-tab" data-editor-tab="edition">📖 Montar edição</button>
+    </div>
+
+    <div class="journal-editor-panel active" data-editor-panel="article">
+      <div class="journal-editor-layout">
+        <form id="articleForm" class="admin-form article-form">
+          <input type="hidden" name="id" id="articleId">
+          <div class="article-form-grid">
+            <input name="title" id="articleTitle" class="full" placeholder="Título da matéria" required>
+            <input name="subtitle" id="articleSubtitle" class="full" placeholder="Subtítulo / linha fina">
+            <input name="author" id="articleAuthor" placeholder="Autor">
+            <input name="category" id="articleCategory" value="RPG" placeholder="Categoria">
+            <input name="date" id="articleDate" type="date">
+            <div class="media-upload full">
+              <div class="media-upload-line"><input name="image_url" id="articleImage" placeholder="URL da imagem (opcional)"><input id="articleImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><button class="outline dark-outline small" type="button" id="articleImageUploadBtn">⬆ Enviar imagem</button></div>
+              <small>Envie a imagem para o Portal ou cole uma URL. A imagem enviada fica salva no banco.</small>
+              <div id="articleImagePreview" class="media-preview" hidden></div>
+            </div>
+            <input name="excerpt" id="articleExcerpt" class="full" placeholder="Resumo / chamada">
+            <textarea name="body" id="articleBody" class="full" placeholder="Texto completo da matéria"></textarea>
+          </div>
+          <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="articlePublished" checked> Publicar matéria</label></div>
+          <div class="editor-actions">
+            <button class="gold" type="submit" id="articleSaveBtn">Criar matéria</button>
+            <button class="outline dark-outline" type="button" id="articleCancelBtn">Limpar</button>
+          </div>
+          <div class="error" id="articleError"></div>
+        </form>
+        <div>
+          <div class="eyebrow" style="margin-bottom:8px">BANCO DE MATÉRIAS</div>
+          <div id="adminArticleList" class="editorial-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="journal-editor-panel" data-editor-panel="edition">
+      <div class="edition-builder-head">
+        <div>
+          <p class="eyebrow">EDIÇÃO</p>
+          <h3 id="editionEditorHeading">Crie ou escolha uma edição</h3>
+          <p id="editionEditorMode" class="editor-mode-note">Cadastre uma nova edição ou selecione uma edição antiga para editar.</p>
+        </div>
+        <div class="edition-editor-head-actions">
+          <select id="editorEditionSelect" class="admin-filter"></select>
+          <button class="outline dark-outline small" type="button" id="newEditionBtn">＋ Nova edição</button>
+        </div>
+      </div>
+      <form id="editionForm" class="admin-form" style="margin-bottom:14px">
+        <div class="article-form-grid">
+          <input id="editionId" type="hidden">
+          <input id="editionTitle" class="full" placeholder="Título da edição" required>
+          <input id="editionNumber" placeholder="Identificação (ex.: Edição 01)">
+          <input id="editionDate" type="date">
+          <div class="media-upload full">
+            <div class="media-upload-line"><input id="editionCover" placeholder="URL da capa (opcional)"><input id="editionCoverFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><button class="outline dark-outline small" type="button" id="editionCoverUploadBtn">⬆ Enviar capa</button></div>
+            <small>Envie a capa para o Portal ou cole uma URL. A imagem enviada fica salva no banco.</small>
+            <div id="editionCoverPreview" class="media-preview" hidden></div>
+          </div>
+          <input id="editionPdf" class="full" placeholder="URL do PDF (opcional)">
+          <textarea id="editionDescription" class="full" placeholder="Descrição da edição"></textarea>
+        </div>
+        <div class="announcement-options" style="margin-top:9px"><label><input type="checkbox" id="editionPublished"> Publicar edição</label></div>
+        <div class="editor-actions"><button class="gold" type="submit" id="editionSaveBtn">Criar edição</button><button class="outline dark-outline" type="button" id="editionCancelBtn">Limpar</button></div>
+        <div class="error" id="editionError"></div>
+      </form>
+      <div class="eyebrow" style="margin-bottom:8px">ARQUIVO DE EDIÇÕES</div><div id="adminEditionList" class="editorial-list" style="margin-bottom:14px"></div>
+      <div class="edition-builder-layout">
+        <div>
+          <div class="eyebrow">MATÉRIAS DISPONÍVEIS</div>
+          <div id="editionArticlePicker" class="edition-article-picker"></div>
+        </div>
+        <div>
+          <div class="eyebrow">ORDEM DA EDIÇÃO</div>
+          <div id="editionArticleOrder" class="edition-article-order"></div>
+          <div class="editor-actions"><button class="gold" type="button" id="saveEditionCompositionBtn">Salvar composição</button></div>
+          <div class="error" id="editionCompositionError"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="admin-library-panel panel" id="adminLibraryPanel">
+    <div class="panel-head"><div><p class="eyebrow">CONHECIMENTO</p><h3>Biblioteca do Reino</h3></div><span>Materiais permanentes, regras e manuais</span></div>
+    <div class="admin-users-layout">
+      <form id="adminLibraryForm" class="admin-form admin-user-form">
+        <input type="hidden" id="adminLibraryId">
+        <input id="adminLibraryTitle" placeholder="Título do material" required>
+        <input id="adminLibraryCategory" placeholder="Categoria (ex.: Databook)">
+        <input id="adminLibraryIcon" placeholder="Ícone" value="📚">
+        <input id="adminLibraryOrder" type="number" placeholder="Ordem" value="0">
+        <input id="adminLibraryUrl" class="full" placeholder="Link do material (opcional)">
+        <textarea id="adminLibraryDescription" class="full" placeholder="Descrição curta"></textarea>
+        <textarea id="adminLibraryContent" class="full" placeholder="Conteúdo/resumo para leitura no Portal (opcional)"></textarea>
+        <label class="full"><input type="checkbox" id="adminLibraryPublished" checked> Publicar material</label>
+        <div class="editor-actions full"><button class="gold" type="submit">＋ Salvar material</button><button class="outline dark-outline" type="button" id="adminLibraryClear">Limpar</button></div>
+        <div class="error full" id="adminLibraryError"></div>
+      </form>
+      <div><div class="eyebrow">BANCO DA BIBLIOTECA</div><div id="adminLibraryList" class="editorial-list"></div></div>
+    </div>
+  </div>
+
+
+  <div class="admin-economy-panel panel" id="adminEconomyPanel">
+    <div class="panel-head"><div><p class="eyebrow">TESOURARIA</p><h3>Economia do Reino</h3></div><span>Yuls e Dracmas • aprovação, pagamento e estorno</span></div>
+    <div class="economy-admin-summary" id="adminEconomySummary"></div>
+    <form id="adminEconomyForm" class="admin-form economy-admin-form">
+      <select id="economyPlayer" required><option value="">Jogador</option></select>
+      <select id="economyCurrency"><option value="YULS">🪙 Yuls</option><option value="DRACMAS">⚫ Dracmas</option></select>
+      <input id="economyAmount" type="number" step="1" placeholder="Valor (+ ou -)" required>
+      <input id="economyDate" type="date">
+      <input id="economySource" placeholder="Origem (ex.: Missão, Evento, Loja)">
+      <textarea id="economyReason" class="full" placeholder="Motivo da transação" required></textarea>
+      <div class="editor-actions full"><button class="gold" type="submit">＋ Criar transação</button></div>
+      <div class="error full" id="adminEconomyError"></div>
+    </form>
+    <div class="ranking-admin-filters"><select id="adminEconomyStatus" class="admin-filter"><option value="">Todas</option><option value="AGUARDANDO_APROVACAO">Aguardando aprovação</option><option value="APROVADA_AGUARDANDO_PAGAMENTO">Aguardando pagamento</option><option value="PAGA">Pagas</option><option value="ESTORNADA">Estornadas</option><option value="REJEITADA">Rejeitadas</option></select><button class="outline dark-outline small" type="button" id="adminEconomyRefresh">↻ Atualizar</button></div>
+    <div id="adminEconomyList" class="editorial-list"></div>
+  </div>
+
+  <div class="admin-ranking-panel panel" id="adminRankingPanel">
+    <div class="panel-head"><div><p class="eyebrow">COMPETIÇÃO OFICIAL</p><h3>Aprovação de Batalhas — Ranking</h3></div><span>SC e VT separados • a pontuação final é definida pela Administração</span></div>
+    <div class="ranking-admin-filters"><select id="adminRankingBattleStatus" class="admin-filter"><option value="AGUARDANDO_ADMIN">Aguardando aprovação</option><option value="AGUARDANDO_OPONENTE">Aguardando oponente</option><option value="APROVADA">Aprovadas</option><option value="REJEITADA">Rejeitadas</option><option value="">Todas</option></select><button class="outline dark-outline small" type="button" id="adminRankingRefresh">↻ Atualizar</button></div>
+    <div id="adminRankingBattleList" class="editorial-list"></div>
+  </div>
+
+  <div class="admin-users-panel panel">
+    <div class="panel-head"><div><p class="eyebrow">ACESSOS</p><h3>Administradores</h3></div><span>Contas individuais para a equipe do Portal</span></div>
+    <div class="admin-users-layout">
+      <form id="adminUserForm" class="admin-form admin-user-form">
+        <input name="username" id="newAdminUsername" placeholder="Usuário (ex.: maria.admin)" required>
+        <input name="display_name" id="newAdminDisplayName" placeholder="Nome de exibição" required>
+        <input name="password" id="newAdminPassword" type="password" minlength="8" placeholder="Senha (mínimo 8 caracteres)" required>
+        <div class="editor-actions"><button class="gold" type="submit">＋ Criar administrador</button></div>
+        <div class="error" id="adminUserError"></div>
+      </form>
+      <div id="adminUserList" class="admin-user-list"></div>
+    </div>
+  </div>
+  <div class="admin-permissions-panel panel" id="adminPermissionsPanel">
+    <div class="panel-head"><div><p class="eyebrow">CONTROLE DE ACESSO</p><h3>Permissões administrativas</h3></div><span>Defina quais módulos cada administrador pode gerenciar</span></div>
+    <div class="admin-permissions-help">Cada administrador começa com acesso completo. Você pode restringir módulos de outros administradores. O próprio acesso não pode ser removido.</div>
+    <div id="adminPermissionEditor" class="admin-permission-editor"><p class="admin-history-empty">Selecione “Permissões” em um administrador para editar.</p></div>
+  </div>
+
+
+  <section class="admin-emblems-panel panel" id="adminEmblemsPanel">
+    <div class="panel-head"><div><p class="eyebrow">🏅 PROGRESSÃO</p><h3>Gestão de Emblems</h3></div><span>Quatro estágios por Emblem • Inicial, Mediano, Avançado e Supremo</span></div>
+    <form id="adminEmblemForm" class="admin-form emblem-admin-form" onsubmit="return false;">
+      <input type="hidden" id="adminEmblemId">
+      <div class="article-form-grid">
+        <input id="adminEmblemName" class="full" placeholder="Nome do Emblem" required>
+        <input id="adminEmblemIcon" placeholder="Ícone" value="🏅">
+        <input id="adminEmblemCategory" placeholder="Categoria" value="Especial">
+        <select id="adminEmblemRarity"><option value="COMUM">Comum</option><option value="RARO">Raro</option><option value="EPICO">Épico</option><option value="LENDARIO">Lendário</option><option value="SUPREMO">Supremo</option></select>
+        <input id="adminEmblemOrigin" placeholder="Origem" value="Reino Spade">
+        <textarea id="adminEmblemDescription" class="full" placeholder="Descrição do Emblem"></textarea>
+      </div>
+      <div class="emblem-stage-admin-grid">
+        <div class="emblem-stage-admin"><b>🟢 Inicial</b><input id="emblemStage1Name" placeholder="Nome do estágio"><textarea id="emblemStage1Description" placeholder="Descrição"></textarea><textarea id="emblemStage1Req" placeholder='Requisitos JSON: {"logic":"ALL","conditions":[{"type":"CARDS_TOTAL","value":25}]}'></textarea></div>
+        <div class="emblem-stage-admin"><b>🔵 Mediano</b><input id="emblemStage2Name" placeholder="Nome do estágio"><textarea id="emblemStage2Description" placeholder="Descrição"></textarea><textarea id="emblemStage2Req" placeholder='Requisitos JSON'></textarea></div>
+        <div class="emblem-stage-admin"><b>🟣 Avançado</b><input id="emblemStage3Name" placeholder="Nome do estágio"><textarea id="emblemStage3Description" placeholder="Descrição"></textarea><textarea id="emblemStage3Req" placeholder='Requisitos JSON'></textarea></div>
+        <div class="emblem-stage-admin"><b>🔴 Supremo</b><input id="emblemStage4Name" placeholder="Nome do estágio"><textarea id="emblemStage4Description" placeholder="Descrição"></textarea><textarea id="emblemStage4Req" placeholder='Requisitos JSON'></textarea></div>
+      </div>
+      <div class="announcement-options"><label><input type="checkbox" id="adminEmblemSecret"> Emblem secreto</label><label><input type="checkbox" id="adminEmblemAuto" checked> Evolução automática</label><label><input type="checkbox" id="adminEmblemActive" checked> Ativo</label></div>
+      <div class="editor-actions"><button class="gold" type="submit" id="adminEmblemSaveBtn">Criar Emblem</button><button class="outline dark-outline" type="button" id="adminEmblemClearBtn">Limpar</button></div>
+      <div class="error" id="adminEmblemError"></div>
+    </form>
+    <div class="emblem-admin-tools"><input id="adminEmblemPlayerId" type="number" min="1" placeholder="ID do jogador"><select id="adminEmblemGrantStage"><option value="1">Inicial</option><option value="2">Mediano</option><option value="3">Avançado</option><option value="4">Supremo</option></select></div>
+    <div id="adminEmblemList" class="editorial-list"></div>
+  </section>
+
+  <section class="admin-settings-panel panel" id="adminSettingsPanel">
+    <div class="panel-head"><div><p class="eyebrow">CONFIGURAÇÃO DO REINO</p><h3>Configurações Gerais</h3></div><span>Altere a estrutura configurável do Portal sem editar o código</span></div>
+    <div class="settings-grid">
+      <form id="portalIdentityForm" class="admin-form settings-card">
+        <p class="eyebrow">IDENTIDADE</p>
+        <input id="settingKingdomName" placeholder="Nome oficial do Reino" required>
+        <input id="settingKingdomMotto" placeholder="Lema do Reino" required>
+        <input id="settingTimezone" placeholder="Fuso horário (ex.: America/Sao_Paulo)" required>
+        <input id="settingFooter" placeholder="Texto do rodapé" required>
+        <div class="editor-actions"><button class="gold" type="submit">💾 Salvar identidade</button><span class="error" id="portalIdentityError"></span></div>
+      </form>
+      <div class="settings-card">
+        <p class="eyebrow">MOEDAS</p>
+        <h4>🪙 Yuls</h4><p>Moeda principal do Reino para pagamentos, recompensas e Loja Mágica.</p>
+        <h4>💠 Dracmas</h4><p>Moeda independente utilizada pelo Mercado Negro. Nunca é somada aos Yuls.</p>
+        <div class="settings-rule">🔒 A separação entre Yuls e Dracmas é estrutural e não pode ser alterada nesta tela.</div>
+      </div>
+    </div>
+    <div class="settings-lists-grid">
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">MISSÕES</p><h4>Tipos de missão</h4></div><span>Usados no cadastro e validação de missões</span></div><div class="settings-add-row"><input id="newMissionType" placeholder="Novo tipo"><button class="outline dark-outline small" type="button" data-settings-add="mission_types">＋ Adicionar</button></div><div id="settingsMissionTypes" class="settings-chips"></div></section>
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">EVENTOS</p><h4>Tipos de evento</h4></div><span>Jogo, Especial, Temporada e Legião</span></div><div class="settings-add-row"><input id="newEventType" placeholder="Novo tipo (ex.: DESAFIO)"><button class="outline dark-outline small" type="button" data-settings-add="event_types">＋ Adicionar</button></div><div id="settingsEventTypes" class="settings-chips"></div></section>
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">CARDS</p><h4>Origens</h4></div><span>Fonte oficial de aquisição</span></div><div class="settings-add-row"><input id="newCardOrigin" placeholder="Nova origem"><button class="outline dark-outline small" type="button" data-settings-add="card_origins">＋ Adicionar</button></div><div id="settingsCardOrigins" class="settings-chips"></div></section>
+      <section class="settings-list-card"><div class="panel-head"><div><p class="eyebrow">CARDS</p><h4>Elementos</h4></div><span>Elementos disponíveis para Cards elementais</span></div><div class="settings-add-row"><input id="newCardElement" placeholder="Novo elemento"><button class="outline dark-outline small" type="button" data-settings-add="card_elements">＋ Adicionar</button></div><div id="settingsCardElements" class="settings-chips"></div></section>
+    </div>
+    <div class="settings-links">
+      <div><b>🃏 Categorias de Cards</b><p>Continue usando o gerenciador de categorias dentro do módulo de Cards.</p></div>
+      <div><b>👑 Patentes e Cargos</b><p>Continuam sendo administrados na área Cargos & Patentes, com histórico e permissões próprios.</p></div>
+      <div><b>🔐 Visibilidade</b><p>🌎 Público • ♠️ Spade • 🤝 Aliado • 👑 Administração. Cards permanecem restritos a Spade, Aliados e Administração.</p></div>
+    </div>
+    <div class="error" id="settingsGlobalError"></div>
+  </section>
+
+  <div class="panel admin-allies-panel" id="adminAlliesPanel">
+    <div class="panel-head"><div><p class="eyebrow">ALIANÇAS ESPECIAIS</p><h3>Aliados Ocultos</h3></div><span>Contas externas com acesso de observação a Spade</span></div>
+    <div class="admin-users-layout">
+      <form id="adminAllyForm" class="admin-form admin-user-form">
+        <input type="hidden" id="adminAllyId">
+        <input id="adminAllyUsername" placeholder="Usuário do aliado" required>
+        <input id="adminAllyDisplayName" placeholder="Nome de exibição" required>
+        <input id="adminAllyPassword" type="password" minlength="6" placeholder="Senha (mínimo 6 caracteres)">
+        <input id="adminAllyKingdom" placeholder="Reino de origem">
+        <input id="adminAllyHouse" placeholder="Casa de origem">
+        <input id="adminAllyPatent" placeholder="Patente (opcional)">
+        <input id="adminAllyRole" placeholder="Cargo/função (opcional)">
+        <textarea id="adminAllyDescription" class="full" placeholder="Descrição / observação administrativa"></textarea>
+        <label class="full checkline"><input type="checkbox" id="adminAllyActive" checked> Acesso ativo</label>
+        <div class="editor-actions full"><button class="gold" type="submit">🤝 Salvar aliado</button><button class="outline dark-outline" type="button" id="adminAllyClear">Limpar</button></div>
+        <div class="error full" id="adminAllyError"></div>
+      </form>
+      <div>
+        <div class="eyebrow">CADASTRO DE ALIADOS</div>
+        <div id="adminAllyList" class="admin-user-list"></div>
+      </div>
+    </div>
+    <div class="ally-card-manager" id="allyCardManager" hidden>
+      <div class="panel-head"><div><p class="eyebrow">INVENTÁRIO DO ALIADO</p><h4 id="allyCardManagerTitle">Cards do aliado</h4></div><button class="outline dark-outline small" type="button" id="closeAllyCardManager">Fechar</button></div>
+      <div class="ally-card-grant-row"><select id="allyCardSelect"><option value="">Selecionar Card...</option></select><input id="allyCardAcquisition" placeholder="Origem/observação (opcional)"><button class="gold small" type="button" id="grantAllyCardBtn">＋ Conceder</button></div>
+      <div id="allyCardList" class="editorial-list"></div>
+    </div>
+  </div>
+  <div class="panel admin-notification-panel" id="adminNotificationPanel">
+  <div class="panel-head"><div><p class="eyebrow">CENTRAL DE ALERTAS</p><h3>Enviar notificação</h3></div><span>Envie um aviso para um jogador ou para todos os ativos</span></div>
+  <form id="adminNotificationForm" class="admin-form">
+    <input id="notificationTitle" placeholder="Título da notificação" required>
+    <div class="announcement-form-row"><select id="notificationType"><option value="URGENTE">🔴 URGENTE</option><option value="IMPORTANTE">🟡 IMPORTANTE</option><option value="INFORMATIVO" selected>🔵 INFORMATIVO</option><option value="SISTEMA">⚙️ SISTEMA</option></select><select id="notificationPlayer"><option value="">Escolher jogador...</option></select><label class="checkline"><input type="checkbox" id="notificationAllActive"> Todos os jogadores ativos</label></div>
+    <input id="notificationLink" placeholder="Página de destino (opcional, ex.: ranking, casas, cronograma)">
+    <textarea id="notificationBody" placeholder="Mensagem"></textarea>
+    <div class="editor-actions"><button class="gold" type="submit">🔔 Enviar notificação</button><span class="error" id="notificationAdminError"></span></div>
+  </form>
+  <div class="eyebrow" style="margin-top:18px">ÚLTIMAS ENVIADAS</div><div id="adminNotificationList" class="editorial-list"></div>
+</div>
+<div class="admin-danger"><button class="outline danger" id="logoutAdminBtn">Sair da administração</button></div>
+</div></section>
+  <div class="card-detail-modal" id="cardDetailModal" hidden>
+    <div class="card-detail-shell" role="dialog" aria-modal="true" aria-labelledby="cardDetailTitle">
+      <div class="card-detail-head">
+        <div>
+          <p class="eyebrow" id="cardDetailEyebrow">FICHA DO CARD</p>
+          <h2 id="cardDetailTitle">Card</h2>
+          <p id="cardDetailSubtitle">Carregando informações...</p>
+        </div>
+        <button type="button" class="journal-close" id="closeCardDetail">×</button>
+      </div>
+      <div id="cardDetailBody" class="card-detail-body">
+        <div class="card-detail-loading">Carregando ficha...</div>
+      </div>
+      <div class="card-detail-footer"><span id="cardDetailFooterNote">Número interno permanente do catálogo.</span><button class="outline dark-outline small" type="button" id="closeCardDetailFooter">Fechar</button></div>
+    </div>
+  </div>
+
+</main>
+<footer class="site-footer">
+  <div class="footer-brand"><span>♠</span><b>THE KING MAGAZINE</b></div>
+  <small>Portal oficial do Reino Spade • 2026</small>
+</footer>
+</div>
+<script src="/app.js?v=72.0.0-emblems"></script>
+</body>
+</html>
