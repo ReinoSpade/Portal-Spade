@@ -2248,22 +2248,40 @@ function adminTabButton(key,label,active=false){
   return `<button type="button" class="admin-tab ${active?"active":""}" data-admin-tab="${key}">${label}</button>`;
 }
 
+function adminPlayerRankPosition(p,key){
+  const rows=state.players||[];
+  const score=Number(p?.[key]||0);
+  return 1 + rows.filter(x=>Number(x.active??1)===1 && Number(x.public_profile??1)===1 && Number(x[key]||0)>score).length;
+}
+
 function renderOverviewPanel(p){
-  return `<div class="admin-overview">
-    <div class="admin-overview-card"><span>🪙 Yuls</span><b>${money(p.yuls)}</b></div>
-    <div class="admin-overview-card"><span>📋 Missões</span><b>${Number(p.missions||0)}</b></div>
-    <div class="admin-overview-card"><span>⚔️ Força</span><b>${Number(p.power||0)}</b></div>
-    <div class="admin-overview-card"><span>🏆 Ranking</span><b>${Number(p.ranking||0)>0?"#"+p.ranking:"—"}</b></div>
+  const cardCount=Number(p.cardSummary?.count ?? (p.cards||[]).length);
+  const cardPower=Number(p.cardSummary?.power ?? (p.cards||[]).reduce((sum,c)=>sum+Number(c.power_value||0),0));
+  const powerRank=Number(p.power||0)>0?adminPlayerRankPosition(p,"power"):0;
+  const scRank=Number(p.skill_sc||0)>0?adminPlayerRankPosition(p,"skill_sc"):0;
+  const vtRank=Number(p.skill_vt||0)>0?adminPlayerRankPosition(p,"skill_vt"):0;
+  const recentMissions=(p.missions||[]).slice(0,3);
+  const rolesCount=(p.roles||[]).length;
+  return `<div class="central-player-summary">
+    <div class="central-player-identity"><div><p class="eyebrow">FICHA CENTRAL</p><h3>${escapeHtml(displayPlayerName(p))}</h3><p>#${Number(p.id)} • ${escapeHtml(p.identifier||"Sem login")}</p></div><div class="central-player-badges"><span class="admin-status-pill ${p.public_profile?"ok":"off"}">${p.public_profile?"● Público":"● Oculto"}</span><span class="admin-status-pill ${Number(p.active??1)?"ok":"off"}">${Number(p.active??1)?"🟢 Ativo":"⛔ Suspenso"}</span></div></div>
+    <div class="central-stat-grid">
+      <button type="button" class="central-stat-card" data-jump-admin-tab="overview"><span>❤️ HP</span><b>${Number(p.hp||0)}</b><small>Vida atual</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="overview"><span>♦️ Mana</span><b>${Number(p.mana||0)}</b><small>Mana atual</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="economy"><span>🪙 Yuls</span><b>${money(p.yuls)}</b><small>Saldo</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="cards"><span>🃏 Cards</span><b>${cardCount}</b><small>⚔️ ${cardPower} poder</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="grimoire"><span>📖 Grimório</span><b>Nível ${Number(p.grimoire_level||1)}</b><small>${escapeHtml(p.grimoire||"Não definido")}</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="grimoire"><span>⭐ EXP</span><b>${money(p.exp||0)}%</b><small>Progresso</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="rankings"><span>🎯 Skill SC</span><b>${Number(p.skill_sc||0)}</b><small>${scRank?`#${scRank}`:"Sem posição"}</small></button>
+      <button type="button" class="central-stat-card" data-jump-admin-tab="rankings"><span>⚡ Skill VT</span><b>${Number(p.skill_vt||0)}</b><small>${vtRank?`#${vtRank}`:"Sem posição"}</small></button>
+    </div>
   </div>
-  <div class="admin-status-line">
-    <span class="admin-status-pill ${p.public_profile?"ok":"off"}">${p.public_profile?"● Perfil público":"● Perfil oculto"}</span>
-    <span class="admin-status-pill ${p.has_password?"ok":"warn"}">${p.has_password?"🔐 Senha definida":"⚠️ Sem senha"}</span>
-    <span class="admin-status-pill ${Number(p.active??1)?"ok":"off"}">${Number(p.active??1)?"🟢 Acesso ativo":"⛔ Acesso suspenso"}</span>
-    <span class="admin-status-pill">${escapeHtml(p.house||"Sem Casa")}</span>
-    <span class="admin-status-pill">${escapeHtml(p.patent||"Sem patente")}</span>
+  <div class="central-player-info-grid">
+    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">IDENTIDADE</p><h4>Dados principais</h4></div></div><div class="central-info-lines"><div><span>🏰 Casa</span><b>${escapeHtml(p.house||"Não definida")}</b></div><div><span>🎖️ Patente</span><b>${escapeHtml(p.patent||"Não definida")}</b></div><div><span>👑 Cargos</span><b>${rolesCount}</b></div><div><span>🪙 Dracmas</span><b>${money(p.dracmas||0)}</b></div></div></section>
+    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">RANKINGS</p><h4>Posições atuais</h4></div><button type="button" class="text-button" data-jump-admin-tab="rankings">Ver detalhes →</button></div><div class="central-ranking-list"><div><span>⚔️ Poder</span><b>${powerRank?`#${powerRank}`:"—"}</b></div><div><span>🟥 Skill SC</span><b>${scRank?`#${scRank}`:"—"}</b></div><div><span>🟦 Skill VT</span><b>${vtRank?`#${vtRank}`:"—"}</b></div><div><span>🏆 Ranking manual</span><b>${Number(p.ranking||0)>0?`#${Number(p.ranking)}`:"—"}</b></div></div></section>
+    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">ATIVIDADE</p><h4>Resumo recente</h4></div></div><div class="central-activity-list"><div><span>📋 Missões</span><b>${Number(p.missions||0)}</b></div><div><span>🏆 Conquistas</span><b>${Number(p.achievements||0)}</b></div>${recentMissions.length?recentMissions.map(m=>`<div class="central-activity-mini"><span>${escapeHtml(m.title)}</span><small>${escapeHtml(m.status||"")}</small></div>`).join(""):`<div class="central-empty-mini">Nenhuma missão registrada.</div>`}</div></section>
+    <section class="central-info-card"><div class="central-info-head"><div><p class="eyebrow">ATALHOS</p><h4>Acessar áreas da ficha</h4></div></div><div class="central-shortcuts"><button type="button" class="outline small" data-jump-admin-tab="cards">🃏 Cards</button><button type="button" class="outline small" data-jump-admin-tab="missions">⚔️ Missões</button><button type="button" class="outline small" data-jump-admin-tab="roles">👑 Cargos</button>${String(p.grimoire||"").trim()?`<button type="button" class="outline small" data-jump-admin-tab="grimoire">📖 Grimório</button>`:""}<button type="button" class="outline small" data-jump-admin-tab="status">📢 Status</button><button type="button" class="outline small" data-jump-admin-tab="history">📜 Histórico</button></div></section>
   </div>
-  <p class="admin-editor-note">O número permanece apenas como identificador interno. O Nick é o nome exibido no Portal.</p>
-  <form id="editPlayerForm"><div class="form-grid">
+  <div class="central-edit-section"><div class="central-edit-head"><div><p class="eyebrow">EDIÇÃO</p><h4>Dados cadastrais</h4><p>Os campos abaixo continuam sendo a fonte de edição da ficha.</p></div></div><form id="editPlayerForm"><div class="form-grid">
     ${field("Nick","nick",p.nick)}
     ${field("Número interno","number",p.number)}
     ${field("Nova senha","password","","password")}
@@ -2280,7 +2298,19 @@ function renderOverviewPanel(p){
     ${field("⚔️ Força","power",p.power,"number")}
     <div class="field full"><label>Acesso ao Portal</label><select name="active"><option value="1" ${Number(p.active??1)?"selected":""}>Ativo — pode entrar</option><option value="0" ${!Number(p.active??1)?"selected":""}>Suspenso — sem acesso</option></select></div>
     <div class="field full"><label>Perfil público</label><select name="public_profile"><option value="1" ${p.public_profile?"selected":""}>Visível</option><option value="0" ${!p.public_profile?"selected":""}>Oculto</option></select></div>
-  </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">${Number(p.active??1)?"Suspender acesso":"Reativar acesso"}</button></div><div class="error" id="editError"></div></form>`;
+  </div><div class="editor-actions"><button class="gold" type="submit">Salvar alterações</button><button class="outline dark-outline" type="button" id="deletePlayerBtn">${Number(p.active??1)?"Suspender acesso":"Reativar acesso"}</button></div><div class="error" id="editError"></div></form></div>`;
+}
+
+function renderRankingPanel(p){
+  const powerRank=Number(p.power||0)>0?adminPlayerRankPosition(p,"power"):0;
+  const scRank=Number(p.skill_sc||0)>0?adminPlayerRankPosition(p,"skill_sc"):0;
+  const vtRank=Number(p.skill_vt||0)>0?adminPlayerRankPosition(p,"skill_vt"):0;
+  return `<div class="central-ranking-panel"><div class="central-info-card full-width"><div class="central-info-head"><div><p class="eyebrow">RANKINGS DO JOGADOR</p><h4>Posições calculadas</h4><p>As posições de Poder, Skill SC e Skill VT seguem os mesmos registros públicos usados pelo Portal. O ranking manual continua sendo o valor cadastrado na ficha.</p></div></div><div class="central-ranking-grid"><div><span>⚔️ Poder</span><b>${powerRank?`#${powerRank}`:"—"}</b><small>${Number(p.power||0)} pontos</small></div><div><span>🟥 Skill SC</span><b>${scRank?`#${scRank}`:"—"}</b><small>${Number(p.skill_sc||0)} pontos</small></div><div><span>🟦 Skill VT</span><b>${vtRank?`#${vtRank}`:"—"}</b><small>${Number(p.skill_vt||0)} pontos</small></div><div><span>🏆 Ranking</span><b>${Number(p.ranking||0)>0?`#${Number(p.ranking)}`:"—"}</b><small>Valor cadastrado</small></div></div></div><div class="central-info-card full-width"><div class="central-info-head"><div><p class="eyebrow">HISTÓRICO DE RANKING</p><h4>Últimos registros</h4></div></div><div class="central-ranking-history-placeholder">Os registros detalhados de batalhas continuam na área de Rankings. Esta ficha consolida apenas os dados já disponíveis para o jogador.</div></div></div>`;
+}
+
+function renderStatusPanel(p){
+  const statuses=p.statuses||[];
+  return `<div class="central-status-panel"><div class="central-info-card full-width"><div class="central-info-head"><div><p class="eyebrow">MURAL DO JOGADOR</p><h4>Histórico de Status</h4><p>Somente os Status que já foram registrados para este jogador.</p></div><button type="button" class="text-button" data-status-refresh-jump="history">Ir para histórico →</button></div><div class="central-status-list">${statuses.length?statuses.map(s=>`<article class="central-status-item"><div><b>${escapeHtml(String(s.status_date||""))}</b><small>${escapeHtml(String(s.updated_at||s.created_at||""))}</small></div><p>${escapeHtml(s.message||"")}</p></article>`).join(""):`<div class="central-empty-mini">Este jogador ainda não possui Status registrados.</div>`}</div></div></div>`;
 }
 
 function renderEconomyPanel(p){
@@ -2428,32 +2458,39 @@ function renderAdminGrimoirePanel(p){
 function renderEditor(p){
   qs("#adminEditor").innerHTML=`<div class="editor-head"><div><p class="eyebrow">EDITANDO JOGADOR</p><h3>${escapeHtml(displayPlayerName(p))}</h3><p>${escapeHtml(p.house||"Sem Casa")} · ${escapeHtml(p.patent||"Sem patente")}</p></div><button class="icon-button" type="button" id="closeEditor">×</button></div>
   <div class="admin-tabs">
-    ${adminTabButton("overview","Dados",true)}
+    ${adminTabButton("overview","Resumo",true)}
     ${adminTabButton("economy","Economia")}
     ${adminTabButton("missions","Missões")}
     ${adminTabButton("cards","Cards")}
+    ${adminTabButton("rankings","🏆 Rankings")}
     ${adminTabButton("roles","Cargos")}
     ${String(p.grimoire||"").trim()?adminTabButton("grimoire","📖 Grimório"):""}
+    ${adminTabButton("status","📢 Status")}
     ${adminTabButton("history","Histórico")}
   </div>
   <div class="admin-tab-panel active" data-admin-tab-panel="overview">${renderOverviewPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="economy">${renderEconomyPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="missions">${renderMissionsPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="cards">${renderAdminPlayerCardsPanel(p)}</div>
+  <div class="admin-tab-panel" data-admin-tab-panel="rankings">${renderRankingPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="roles">${renderRolesPanel(p)}</div>
   ${String(p.grimoire||"").trim()?`<div class="admin-tab-panel" data-admin-tab-panel="grimoire">${renderAdminGrimoirePanel(p)}</div>`:""}
+  <div class="admin-tab-panel" data-admin-tab-panel="status">${renderStatusPanel(p)}</div>
   <div class="admin-tab-panel" data-admin-tab-panel="history">${renderHistoryPanel(p)}</div>`;
 
   const empty=`<div class="empty-editor"><div class="empty-icon">♠</div><p class="eyebrow">SELECIONE UM JOGADOR</p><h3>Pronto para administrar</h3><p>Escolha um jogador ao lado para editar os dados, lançar Yuls, registrar missões ou administrar seus cargos.</p></div>`;
   qs("#closeEditor").addEventListener("click",()=>{state.selectedPlayer=null;renderAdminList(state.players,qs("#adminSearch").value);qs("#adminEditor").innerHTML=empty});
 
-  qsa("[data-admin-tab]").forEach(tab=>{
-    tab.onclick=()=>{
-      const key=tab.dataset.adminTab;
-      qsa("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));
-      qsa("[data-admin-tab-panel]").forEach(x=>x.classList.toggle("active",x.dataset.adminTabPanel===key));
-    };
-  });
+  const activateAdminTab=(key)=>{
+    const tab=qsa("[data-admin-tab]").find(x=>x.dataset.adminTab===key);
+    if(!tab)return;
+    qsa("[data-admin-tab]").forEach(x=>x.classList.toggle("active",x===tab));
+    qsa("[data-admin-tab-panel]").forEach(x=>x.classList.toggle("active",x.dataset.adminTabPanel===key));
+    tab.scrollIntoView?.({behavior:"smooth",block:"nearest",inline:"center"});
+  };
+  qsa("[data-admin-tab]").forEach(tab=>tab.onclick=()=>activateAdminTab(tab.dataset.adminTab));
+  qsa("[data-jump-admin-tab]").forEach(b=>b.addEventListener("click",()=>activateAdminTab(b.dataset.jumpAdminTab)));
+  qsa("[data-status-refresh-jump]").forEach(b=>b.addEventListener("click",()=>activateAdminTab(b.dataset.statusRefreshJump)));
 
   qs("#editPlayerForm").addEventListener("submit",savePlayer);
   qs("#deletePlayerBtn").addEventListener("click",deleteSelectedPlayer);
