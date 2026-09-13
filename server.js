@@ -5682,6 +5682,9 @@ app.get("/api/admin/players", requireAdmin, async (req, res) => {
       public_profile:Number(r.public_profile),
       active:Number(r.active ?? 1),
       has_password:Boolean(r.password_hash),
+      dracmas:Number(r.dracmas||0),
+      skill_sc:Number(r.skill_sc||0),
+      skill_vt:Number(r.skill_vt||0),
       created_at:r.created_at,
       updated_at:r.updated_at
     }))});
@@ -5870,7 +5873,7 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
   try {
-    const [playerResult, historyResult, grimoirePagesResult, expHistoryResult] = await Promise.all([
+    const [playerResult, historyResult, grimoirePagesResult, expHistoryResult, statusResult, cardSummaryResult] = await Promise.all([
       pool.query("SELECT * FROM players WHERE id=$1", [id]),
       pool.query(
         `SELECT id,amount,reason,balance_after,created_at
@@ -5886,6 +5889,17 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
         `SELECT id,amount,source_code,source_detail,reason,exp_before,exp_after,level_before,level_after,upgraded,created_at
          FROM exp_history WHERE player_id=$1 ORDER BY id DESC LIMIT 50`,
         [id]
+      ),
+      pool.query(
+        `SELECT id,status_date,message,created_at,updated_at
+         FROM player_statuses WHERE player_id=$1 ORDER BY status_date DESC,id DESC LIMIT 30`,
+        [id]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS count, COALESCE(SUM(c.power_value),0)::bigint AS power
+         FROM player_cards pc JOIN cards c ON c.id=pc.card_id
+         WHERE pc.player_id=$1`,
+        [id]
       )
     ]);
     const player = playerResult.rows[0];
@@ -5897,6 +5911,9 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
         roles,
         public_profile: Number(player.public_profile),
         has_password: Boolean(player.password_hash),
+        dracmas: Number(player.dracmas||0),
+        skill_sc: Number(player.skill_sc||0),
+        skill_vt: Number(player.skill_vt||0),
         created_at: player.created_at,
         updated_at: player.updated_at,
         grimoirePages: grimoirePagesResult.rows.map(g => ({
@@ -5909,7 +5926,9 @@ app.get("/api/admin/players/:id", requireAdmin, async (req, res) => {
       })),
       expHistory: expHistoryResult.rows.map(h => ({
         ...h, amount:Number(h.amount), exp_before:Number(h.exp_before), exp_after:Number(h.exp_after), level_before:Number(h.level_before), level_after:Number(h.level_after), upgraded:Number(h.upgraded)
-      }))
+      })),
+      statuses: statusResult.rows.map(x=>({id:Number(x.id),status_date:x.status_date,message:x.message||"",created_at:x.created_at,updated_at:x.updated_at})),
+      cardSummary: {count:Number(cardSummaryResult.rows[0]?.count||0),power:Number(cardSummaryResult.rows[0]?.power||0)}
     });
   } catch (e) {
     console.error(e);
