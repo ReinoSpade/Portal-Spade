@@ -34,6 +34,7 @@ const ADMIN_PERMISSION_DEFS = {
   rankings: "Rankings",
   notifications: "Notificações & Alertas",
   allies: "Aliados Ocultos",
+  simulator_trainings: "Simulador — gerenciar treinamentos",
 
   // Permissões de ação: continuam separadas das permissões de módulo.
   players_write: "Jogadores — criar/editar",
@@ -95,6 +96,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings";
   if (path.startsWith("/notifications")) return "notifications";
   if (path.startsWith("/allies")) return "allies";
+  if (path.startsWith("/simulator/trainings")) return "simulator_trainings";
   if (path.startsWith("/missions")) return "missions";
   return "dashboard";
 }
@@ -159,6 +161,7 @@ function adminActionPermissionForRequest(req) {
   if (path.startsWith("/ranking-battles") || path.startsWith("/ranking-history")) return "rankings_write";
   if (path.startsWith("/notifications")) return "notifications_write";
   if (path.startsWith("/allies")) return "allies_write";
+  if (path.startsWith("/simulator/trainings")) return "simulator_trainings";
   if (path.startsWith("/economy")) return "economy_write";
   if (path.startsWith("/settings")) return "settings";
 
@@ -220,6 +223,7 @@ function routeEntityType(pathname) {
   if (p.includes('/articles') || p.includes('/editions') || p.includes('/news')) return 'jornal';
   if (p.includes('/notifications')) return 'notificacao';
   if (p.includes('/settings')) return 'configuracao';
+  if (p.includes('/simulator')) return 'simulador';
   if (p.includes('/admins') || p.includes('/permissions')) return 'administrador';
   if (p.includes('/hierarchy') || p.includes('/patents') || p.includes('/roles')) return 'hierarquia';
   return 'sistema';
@@ -1050,6 +1054,28 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS simulator_trainings (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+      visibility TEXT NOT NULL DEFAULT 'PUBLICO' CHECK (visibility IN ('PUBLICO','OCULTO')),
+      card_rules JSONB NOT NULL DEFAULT '{}'::jsonb,
+      player_hp INTEGER NOT NULL DEFAULT 200 CHECK (player_hp > 0),
+      player_mana INTEGER NOT NULL DEFAULT 400 CHECK (player_mana >= 0),
+      opponent_hp INTEGER NOT NULL DEFAULT 200 CHECK (opponent_hp > 0),
+      opponent_mana INTEGER NOT NULL DEFAULT 400 CHECK (opponent_mana >= 0),
+      opponent_name TEXT NOT NULL DEFAULT 'Mago de Treinamento',
+      difficulty TEXT NOT NULL DEFAULT 'NORMAL' CHECK (difficulty IN ('FACIL','NORMAL','DIFICIL','MESTRE')),
+      personality TEXT NOT NULL DEFAULT 'ESTRATEGICO' CHECK (personality IN ('AGRESSIVO','DEFENSIVO','ESTRATEGICO','IMPREVISIVEL','EXPERIMENTAL')),
+      objective JSONB NOT NULL DEFAULT '{"type":"WIN","value":0}'::jsonb,
+      max_rounds INTEGER CHECK (max_rounds IS NULL OR max_rounds > 0),
+      created_by_admin_id BIGINT REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_simulator_trainings_active ON simulator_trainings(active, visibility, id);
+
 
   `);
 
@@ -1579,7 +1605,8 @@ const BACKUP_TABLES = [
   ["player_notifications", "SELECT * FROM player_notifications ORDER BY id"],
   ["announcements", "SELECT * FROM announcements ORDER BY id"],
   ["ranking_battles", "SELECT * FROM ranking_battles ORDER BY id"],
-  ["ranking_history", "SELECT * FROM ranking_history ORDER BY id"]
+  ["ranking_history", "SELECT * FROM ranking_history ORDER BY id"],
+  ["simulator_trainings", "SELECT * FROM simulator_trainings ORDER BY id"]
 ];
 
 app.get("/api/admin/backup/export.json", requireAdmin, async (req,res)=>{
@@ -2141,6 +2168,145 @@ app.get("/api/me/ally-cards", async (req,res)=>{
     const linkMap=new Map();for(const x of lr.rows){const k=Number(x.card_id);if(!linkMap.has(k))linkMap.set(k,[]);linkMap.get(k).push({library_item_id:Number(x.library_item_id),library_title:x.library_title,library_category:x.library_category,section_title:x.section_title||'',child_title:x.child_title||'',path_label:x.path_label||''});}
     res.json({cards:r.rows.map(c=>({id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||"",category:c.category||"Outros",element_type:c.element_type||"NAO_ELEMENTAL",element:c.element||"",cost_type:c.cost_type||"SEM_CUSTO",cost:c.cost||"",power_value:Number(c.power_value||0),origin:c.origin||"Administrativo",status:c.status||"ATIVO",description:c.description||"",acquisition_type:c.acquisition_type||"ADMINISTRATIVO",acquisition_name:c.acquisition_name||"",acquired_at:c.acquired_at,library_links:linkMap.get(Number(c.id))||[]}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar seus Cards de aliado."});}
+});
+
+
+function cleanSimulatorList(value){
+  if(!Array.isArray(value)) return String(value||'').split(',').map(x=>String(x).trim()).filter(Boolean).slice(0,100);
+  return value.map(x=>String(x||'').trim()).filter(Boolean).slice(0,100);
+}
+function normalizeSimulatorRules(raw){
+  const r=raw&&typeof raw==='object'?raw:{};
+  const out={};
+  for(const k of ['allowed_origins','allowed_categories','allowed_card_ids','blocked_card_ids']){
+    const arr=cleanSimulatorList(r[k]);
+    if(k.endsWith('_ids')) out[k]=arr.filter(x=>/^\d+$/.test(x)).map(Number).slice(0,100);
+    else out[k]=arr.slice(0,100);
+  }
+  return out;
+}
+function simulatorCardMatches(card,rules){
+  const r=normalizeSimulatorRules(rules);
+  const category=String(card.category||card.type||'').trim();
+  const origin=String(card.origin||'').trim();
+  const id=Number(card.id);
+  if(r.allowed_card_ids.length && !r.allowed_card_ids.includes(id)) return false;
+  if(r.blocked_card_ids.includes(id)) return false;
+  if(r.allowed_categories.length && !r.allowed_categories.some(x=>normalizeIdentifier(x)===normalizeIdentifier(category))) return false;
+  if(r.allowed_origins.length && !r.allowed_origins.some(x=>normalizeIdentifier(x)===normalizeIdentifier(origin))) return false;
+  return true;
+}
+function normalizeSimulatorObjective(raw){
+  const o=raw&&typeof raw==='object'?raw:{};
+  const allowed=['WIN','SURVIVE_ROUNDS','FINISH_MANA_AT_LEAST','USE_CATEGORY','USE_CARD'];
+  const type=allowed.includes(String(o.type||'WIN').toUpperCase())?String(o.type||'WIN').toUpperCase():'WIN';
+  let value=o.value;
+  if(['SURVIVE_ROUNDS','FINISH_MANA_AT_LEAST','USE_CARD'].includes(type)) value=Number.isFinite(Number(value))?Number(value):0;
+  else value=String(value||'').trim();
+  if(type==='USE_CATEGORY' && !value) value='';
+  if(type==='USE_CARD' && (!Number.isInteger(value)||value<=0)) value=0;
+  const label=String(o.label||'').trim().slice(0,180);
+  return {type,value,label};
+}
+function simulatorTrainingPayload(row,{includeOpponentCards=false,cards=[]}={}){
+  const rules=normalizeSimulatorRules(row.card_rules||{});
+  const payload={
+    id:Number(row.id),name:row.name,description:row.description||'',active:Number(row.active??1),visibility:row.visibility||'PUBLICO',
+    card_rules:rules,player_hp:Number(row.player_hp||200),player_mana:Number(row.player_mana||400),opponent_hp:Number(row.opponent_hp||200),opponent_mana:Number(row.opponent_mana||400),
+    opponent_name:row.opponent_name||'Mago de Treinamento',difficulty:row.difficulty||'NORMAL',personality:row.personality||'ESTRATEGICO',
+    objective:normalizeSimulatorObjective(row.objective||{}),max_rounds:row.max_rounds===null?null:Number(row.max_rounds||0),
+    created_at:row.created_at,updated_at:row.updated_at
+  };
+  if(includeOpponentCards) payload.opponent_cards=cards.filter(c=>simulatorCardMatches(c,rules)).map(simulatorCardPublic);
+  return payload;
+}
+function simulatorCardPublic(c){
+  return {id:Number(c.id),name:c.name,name_pt:c.name_pt||c.name,name_jp:c.name_jp||'',category:c.category||c.type||'Outros',element_type:c.element_type||'NAO_ELEMENTAL',element:c.element||'',cost_type:c.cost_type||'SEM_CUSTO',cost:c.cost||'',power_value:Number(c.power_value||0),damage_value:Number(c.damage_value||0),damage_type:c.damage_type||'SEM_DANO',origin:c.origin||'Exclusivo',status:c.status||'ATIVO',description:c.description||''};
+}
+function validateSimulatorTrainingInput(body){
+  const b=body||{};
+  const name=String(b.name||'').trim();
+  if(!name || name.length<2 || name.length>100) throw Object.assign(new Error('Informe um nome de treinamento entre 2 e 100 caracteres.'),{statusCode:400});
+  const pick=(v,allowed,def)=>allowed.includes(String(v||def).toUpperCase())?String(v||def).toUpperCase():def;
+  const hp=(v,def,min=1)=>{const n=Number(v??def);if(!Number.isInteger(n)||n<min||n>100000)return def;return n;};
+  const mana=(v,def)=>{const n=Number(v??def);if(!Number.isInteger(n)||n<0||n>100000)return def;return n;};
+  const max=String(b.max_rounds??'').trim()===''?null:hp(b.max_rounds,10,1);
+  const rules=normalizeSimulatorRules(b.card_rules||{});
+  const objective=normalizeSimulatorObjective(b.objective||{});
+  if(objective.type==='USE_CATEGORY' && !objective.value) throw Object.assign(new Error('Defina a categoria do objetivo.'),{statusCode:400});
+  if(objective.type==='USE_CARD' && (!Number.isInteger(objective.value)||objective.value<=0)) throw Object.assign(new Error('Defina um Card válido para o objetivo.'),{statusCode:400});
+  return {
+    name,description:String(b.description||'').trim().slice(0,1000),active: b.active===false||String(b.active)==='0'?0:1,
+    visibility:pick(b.visibility,['PUBLICO','OCULTO'],'PUBLICO'),card_rules:rules,
+    player_hp:hp(b.player_hp,200),player_mana:mana(b.player_mana,400),opponent_hp:hp(b.opponent_hp,200),opponent_mana:mana(b.opponent_mana,400),
+    opponent_name:String(b.opponent_name||'Mago de Treinamento').trim().slice(0,80)||'Mago de Treinamento',
+    difficulty:pick(b.difficulty,['FACIL','NORMAL','DIFICIL','MESTRE'],'NORMAL'),
+    personality:pick(b.personality,['AGRESSIVO','DEFENSIVO','ESTRATEGICO','IMPREVISIVEL','EXPERIMENTAL'],'ESTRATEGICO'),
+    objective,max_rounds:max
+  };
+}
+
+app.get('/api/simulator/trainings', async (req,res)=>{
+  try{
+    const r=await pool.query(`SELECT * FROM simulator_trainings WHERE active=1 AND visibility='PUBLICO' ORDER BY id`);
+    res.json({trainings:r.rows.map(x=>simulatorTrainingPayload(x))});
+  }catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os treinamentos.'});}
+});
+
+app.get('/api/simulator/trainings/:id', async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Treinamento inválido.'});
+  try{
+    const r=await pool.query(`SELECT * FROM simulator_trainings WHERE id=$1 AND active=1 AND visibility='PUBLICO' LIMIT 1`,[id]);
+    if(!r.rows[0])return res.status(404).json({error:'Treinamento não encontrado.'});
+    const c=await pool.query(`SELECT id,name,name_jp,name_pt,type,category,element_type,element,cost_type,cost,power_value,damage_value,damage_type,origin,status,description FROM cards WHERE active=1 AND status='ATIVO' ORDER BY id`);
+    res.json({training:simulatorTrainingPayload(r.rows[0],{includeOpponentCards:true,cards:c.rows})});
+  }catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar o treinamento.'});}
+});
+
+app.get('/api/me/simulator/cards', async (req,res)=>{
+  const viewer=await resolveViewer(req);
+  if(!viewer || viewer.type!=='PLAYER')return res.status(401).json({error:'Entre como jogador para usar o Simulador.'});
+  const trainingId=Number(req.query.training_id);if(!Number.isInteger(trainingId)||trainingId<=0)return res.status(400).json({error:'Treinamento inválido.'});
+  try{
+    const tr=(await pool.query(`SELECT * FROM simulator_trainings WHERE id=$1 AND active=1 AND visibility='PUBLICO' LIMIT 1`,[trainingId])).rows[0];
+    if(!tr)return res.status(404).json({error:'Treinamento não encontrado.'});
+    const r=await pool.query(`SELECT c.id,c.name,c.name_jp,c.name_pt,COALESCE(c.category,c.type) AS category,c.type,c.element_type,c.element,c.cost_type,c.cost,c.power_value,c.damage_value,c.damage_type,c.origin,c.status,c.description,pc.quantity
+      FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1 AND c.active=1 AND c.status='ATIVO' ORDER BY COALESCE(c.category,c.type),c.sort_order,c.name COLLATE "C"`,[viewer.id]);
+    const cards=r.rows.filter(c=>simulatorCardMatches(c,tr.card_rules||{})).map(simulatorCardPublic);
+    res.json({cards});
+  }catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os Cards disponíveis para o treinamento.'});}
+});
+
+app.get('/api/admin/simulator/trainings', requireAdmin, async (req,res)=>{
+  try{const r=await pool.query(`SELECT st.*,au.display_name AS created_by_name FROM simulator_trainings st LEFT JOIN admin_users au ON au.id=st.created_by_admin_id ORDER BY st.id DESC`);res.json({trainings:r.rows.map(x=>({...simulatorTrainingPayload(x),created_by_name:x.created_by_name||'Chave principal'}))});}
+  catch(e){console.error(e);res.status(500).json({error:'Não foi possível carregar os treinamentos administrativos.'});}
+});
+
+app.post('/api/admin/simulator/trainings', requireAdmin, async (req,res)=>{
+  try{
+    const t=validateSimulatorTrainingInput(req.body);
+    const r=await pool.query(`INSERT INTO simulator_trainings(name,description,active,visibility,card_rules,player_hp,player_mana,opponent_hp,opponent_mana,opponent_name,difficulty,personality,objective,max_rounds,created_by_admin_id,created_at,updated_at)
+      VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,NOW(),NOW()) RETURNING *`,
+      [t.name,t.description,t.active,t.visibility,JSON.stringify(t.card_rules),t.player_hp,t.player_mana,t.opponent_hp,t.opponent_mana,t.opponent_name,t.difficulty,t.personality,JSON.stringify(t.objective),t.max_rounds,req.admin?.id||null]);
+    res.json({ok:true,training:simulatorTrainingPayload(r.rows[0])});
+  }catch(e){console.error(e);res.status(e.statusCode||500).json({error:e.code==='23505'?'Já existe um treinamento com esse nome.':(e.message||'Erro ao criar treinamento.')});}
+});
+
+app.put('/api/admin/simulator/trainings/:id', requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Treinamento inválido.'});
+  try{
+    const t=validateSimulatorTrainingInput(req.body);
+    const r=await pool.query(`UPDATE simulator_trainings SET name=$1,description=$2,active=$3,visibility=$4,card_rules=$5::jsonb,player_hp=$6,player_mana=$7,opponent_hp=$8,opponent_mana=$9,opponent_name=$10,difficulty=$11,personality=$12,objective=$13::jsonb,max_rounds=$14,updated_at=NOW() WHERE id=$15 RETURNING *`,
+      [t.name,t.description,t.active,t.visibility,JSON.stringify(t.card_rules),t.player_hp,t.player_mana,t.opponent_hp,t.opponent_mana,t.opponent_name,t.difficulty,t.personality,JSON.stringify(t.objective),t.max_rounds,id]);
+    if(!r.rows[0])return res.status(404).json({error:'Treinamento não encontrado.'});
+    res.json({ok:true,training:simulatorTrainingPayload(r.rows[0])});
+  }catch(e){console.error(e);res.status(e.statusCode||500).json({error:e.code==='23505'?'Já existe um treinamento com esse nome.':(e.message||'Erro ao salvar treinamento.')});}
+});
+
+app.delete('/api/admin/simulator/trainings/:id', requireAdmin, async (req,res)=>{
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({error:'Treinamento inválido.'});
+  try{const r=await pool.query(`UPDATE simulator_trainings SET active=0,updated_at=NOW() WHERE id=$1 RETURNING id,name`,[id]);if(!r.rows[0])return res.status(404).json({error:'Treinamento não encontrado.'});res.json({ok:true,message:'Treinamento desativado.',id});}
+  catch(e){console.error(e);res.status(500).json({error:'Não foi possível desativar o treinamento.'});}
 });
 
 app.get("/api/me/cards", async (req,res)=>{
@@ -7020,6 +7186,62 @@ async function seedOfficialCronograma() {
   }
 }
 
+
+async function seedSimulatorTrainings(){
+  const defaults=[
+    {
+      name:'Treinamento Livre',
+      description:'Treino aberto usando os Cards ativos disponíveis para o personagem.',
+      card_rules:{},
+      objective:{type:'WIN',value:0,label:'Vencer o combate'},
+      max_rounds:null,
+      difficulty:'NORMAL',
+      personality:'ESTRATEGICO'
+    },
+    {
+      name:'SC — Júnior',
+      description:'Treinamento com Cards cuja origem esteja marcada como SC Junior.',
+      card_rules:{allowed_origins:['SC Junior']},
+      objective:{type:'WIN',value:0,label:'Vencer usando apenas Cards do treinamento'},
+      max_rounds:null,
+      difficulty:'NORMAL',
+      personality:'ESTRATEGICO'
+    },
+    {
+      name:'Treino de Paralisias',
+      description:'Pratique interações envolvendo a categoria Paralisia.',
+      card_rules:{allowed_categories:['Paralisia']},
+      objective:{type:'USE_CATEGORY',value:'Paralisia',label:'Utilizar pelo menos uma Paralisia'},
+      max_rounds:12,
+      difficulty:'NORMAL',
+      personality:'DEFENSIVO'
+    },
+    {
+      name:'Treino de Técnicas',
+      description:'Pratique o uso de Técnicas e suas interações durante os rounds.',
+      card_rules:{allowed_categories:['Técnica']},
+      objective:{type:'USE_CATEGORY',value:'Técnica',label:'Utilizar pelo menos uma Técnica'},
+      max_rounds:12,
+      difficulty:'NORMAL',
+      personality:'AGRESSIVO'
+    },
+    {
+      name:'Sobrevivência — 10 Rounds',
+      description:'Resista até o décimo round sem deixar seu HP chegar a zero.',
+      card_rules:{},
+      objective:{type:'SURVIVE_ROUNDS',value:10,label:'Sobreviver por 10 Rounds'},
+      max_rounds:10,
+      difficulty:'DIFICIL',
+      personality:'AGRESSIVO'
+    }
+  ];
+  for(const t of defaults){
+    await pool.query(`INSERT INTO simulator_trainings(name,description,card_rules,objective,max_rounds,difficulty,personality)
+      VALUES($1,$2,$3::jsonb,$4::jsonb,$5,$6,$7) ON CONFLICT(name) DO NOTHING`,
+      [t.name,t.description,JSON.stringify(t.card_rules),JSON.stringify(t.objective),t.max_rounds,t.difficulty,t.personality]);
+  }
+}
+
 pool.on('error', err=>{
   console.error('PostgreSQL pool error:',err);
 });
@@ -7036,6 +7258,7 @@ initDatabase()
   .then(async () => {
     await seedOfficialLibrary();
     await seedOfficialCronograma();
+    await seedSimulatorTrainings();
     app.listen(PORT, "0.0.0.0", () => console.log(`Portal Spade conectado ao PostgreSQL na porta ${PORT}`));
   })
   .catch(err => {
