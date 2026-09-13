@@ -1177,17 +1177,17 @@
         <input id="adminEmblemOrigin" placeholder="Origem" value="Reino Spade">
         <textarea id="adminEmblemDescription" class="full" placeholder="Descrição do Emblem"></textarea>
       </div>
-      <div class="emblem-stage-admin-grid">
-        <div class="emblem-stage-admin"><b>🟢 Inicial</b><input id="emblemStage1Name" placeholder="Nome do estágio"><textarea id="emblemStage1Description" placeholder="Descrição"></textarea><textarea id="emblemStage1Req" placeholder='Requisitos JSON: {"logic":"ALL","conditions":[{"type":"CARDS_TOTAL","value":25}]}'></textarea></div>
-        <div class="emblem-stage-admin"><b>🔵 Mediano</b><input id="emblemStage2Name" placeholder="Nome do estágio"><textarea id="emblemStage2Description" placeholder="Descrição"></textarea><textarea id="emblemStage2Req" placeholder='Requisitos JSON'></textarea></div>
-        <div class="emblem-stage-admin"><b>🟣 Avançado</b><input id="emblemStage3Name" placeholder="Nome do estágio"><textarea id="emblemStage3Description" placeholder="Descrição"></textarea><textarea id="emblemStage3Req" placeholder='Requisitos JSON'></textarea></div>
-        <div class="emblem-stage-admin"><b>🔴 Supremo</b><input id="emblemStage4Name" placeholder="Nome do estágio"><textarea id="emblemStage4Description" placeholder="Descrição"></textarea><textarea id="emblemStage4Req" placeholder='Requisitos JSON'></textarea></div>
+      <div class="emblem-stage-mode"><label>Formato do Emblem<select id="adminEmblemStageMode"><option value="FOUR">Progressivo — 4 níveis</option><option value="ADVANCED_SUPREME">Especial — Avançado + Supremo</option></select></label><small>Emblems especiais possuem somente os níveis Avançado e Supremo.</small></div><div class="emblem-stage-admin-grid">
+        <div class="emblem-stage-admin" data-emblem-stage="1"><b>🟢 Inicial <small>(nome comercial)</small></b><input id="emblemStage1Name" placeholder="Ex.: Recruta"><textarea id="emblemStage1Description" placeholder="Descrição"></textarea><textarea id="emblemStage1Req" placeholder='Requisitos JSON: {"logic":"ALL","conditions":[{"type":"CARDS_TOTAL","value":25}]}'></textarea></div>
+        <div class="emblem-stage-admin" data-emblem-stage="2"><b>🔵 Mediano <small>(nome comercial)</small></b><input id="emblemStage2Name" placeholder="Ex.: Combatente"><textarea id="emblemStage2Description" placeholder="Descrição"></textarea><textarea id="emblemStage2Req" placeholder='Requisitos JSON'></textarea></div>
+        <div class="emblem-stage-admin" data-emblem-stage="3"><b>🟣 Avançado <small>(nome comercial)</small></b><input id="emblemStage3Name" placeholder="Ex.: Elite"><textarea id="emblemStage3Description" placeholder="Descrição"></textarea><textarea id="emblemStage3Req" placeholder='Requisitos JSON'></textarea></div>
+        <div class="emblem-stage-admin" data-emblem-stage="4"><b>🔴 Supremo <small>(nome comercial)</small></b><input id="emblemStage4Name" placeholder="Ex.: Lendário"><textarea id="emblemStage4Description" placeholder="Descrição"></textarea><textarea id="emblemStage4Req" placeholder='Requisitos JSON'></textarea></div>
       </div>
       <div class="announcement-options"><label><input type="checkbox" id="adminEmblemSecret"> Emblem secreto</label><label><input type="checkbox" id="adminEmblemAuto" checked> Evolução automática</label><label><input type="checkbox" id="adminEmblemActive" checked> Ativo</label></div>
       <div class="editor-actions"><button class="gold" type="submit" id="adminEmblemSaveBtn">Criar Emblem</button><button class="outline dark-outline" type="button" id="adminEmblemClearBtn">Limpar</button></div>
       <div class="error" id="adminEmblemError"></div>
     </form>
-    <div class="emblem-admin-tools"><input id="adminEmblemPlayerId" type="number" min="1" placeholder="ID do jogador"><select id="adminEmblemGrantStage"><option value="1">Inicial</option><option value="2">Mediano</option><option value="3">Avançado</option><option value="4">Supremo</option></select></div>
+    <div class="emblem-admin-tools"><input id="adminEmblemPlayerId" type="number" min="1" placeholder="ID do jogador"><select id="adminEmblemGrantStage"><option value="1">🟢 Inicial</option><option value="2">🔵 Mediano</option><option value="3">🟣 Avançado</option><option value="4">🔴 Supremo</option></select></div>
     <div id="adminEmblemList" class="editorial-list"></div>
   </section>
 
