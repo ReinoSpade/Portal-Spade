@@ -1563,7 +1563,7 @@ function setAdminPermissionVisibility(){
   const bulkCenter=qs('#adminBulkCenter'); if(bulkCenter) bulkCenter.style.display=(hasAdminPermission('players')||hasAdminPermission('cards')||hasAdminPermission('houses')||hasAdminPermission('hierarchy')||hasAdminPermission('missions')||hasAdminPermission('rankings'))?'':'none';
   const bulkButtonPerms={bulkCenterPlayersExport:'players',bulkCenterPlayersImport:'players_import',bulkCenterCardsExport:'cards',bulkCenterCardsImport:'cards_import',bulkCenterHousesExport:'houses',bulkCenterHousesImport:'houses_import',bulkCenterHierarchyExport:'hierarchy',bulkCenterHierarchyImport:'hierarchy_import',bulkCenterMissionsExport:'missions',bulkCenterMissionsImport:'missions_import',bulkCenterRankingsExport:'rankings'};
   Object.entries(bulkButtonPerms).forEach(([id,perm])=>{const el=qs('#'+id);if(el)el.style.display=hasAdminPermission(perm)?'':'none'});
-  const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
+  const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",attributes:"players",power:"players",visibility:"players",status:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
 }
 
@@ -2111,9 +2111,38 @@ function populateAdminFilters(){
   if(h)h.value=state.adminFilters.house||""; if(p)p.value=state.adminFilters.patent||""; if(r)r.value=state.adminFilters.role||""; const st=qs("#adminStatusFilter"); if(st)st.value=state.adminFilters.status||"";
 }
 
+function getFilteredAdminPlayers(){
+  const q=(qs("#adminSearch")?.value||"").trim().toLowerCase();
+  let list=[...(state.players||[])];
+  const f=state.adminFilters||{};
+  if(q)list=list.filter(p=>`${p.nick||""} ${p.number||""} ${p.identifier||""} ${p.house||""}`.toLowerCase().includes(q));
+  if(f.house)list=list.filter(p=>String(p.house||"")===String(f.house));
+  if(f.patent)list=list.filter(p=>String(p.patent||"")===String(f.patent));
+  if(f.role)list=list.filter(p=>(p.roles||[]).some(r=>Number(r.id)===Number(f.role)));
+  if(f.visibility!=="")list=list.filter(p=>Number(p.public_profile??1)===Number(f.visibility));
+  if(f.status!=="")list=list.filter(p=>Number(p.active??1)===Number(f.status));
+  const sort=f.sort||"nick";
+  const numeric=k=>(a,b)=>Number(b[k]||0)-Number(a[k]||0);
+  if(sort==="missions")list.sort(numeric("missions"));
+  else if(sort==="yuls")list.sort(numeric("yuls"));
+  else if(sort==="power")list.sort(numeric("power"));
+  else if(sort==="ranking")list.sort((a,b)=>(Number(a.ranking||999999)-Number(b.ranking||999999)));
+  else if(sort==="updated")list.sort((a,b)=>new Date(b.updated_at||0)-new Date(a.updated_at||0));
+  else list.sort((a,b)=>String(a.nick||"").localeCompare(String(b.nick||""),"pt-BR"));
+  return list;
+}
+
 function updateBulkCount(){
   const el=qs("#bulkSelectedCount");
   if(el)el.textContent=`${state.selectedPlayers.size} ${state.selectedPlayers.size===1?"selecionado":"selecionados"}`;
+}
+
+function openExportVisiblePlayers(){
+  const ids=[...new Set(getFilteredAdminPlayers().map(p=>Number(p.id)).filter(Boolean))];
+  if(!ids.length){alert("Nenhum jogador visível para exportar.");return;}
+  const qsIds=ids.join(",");
+  const url=`/api/admin/players/export.xlsx?ids=${encodeURIComponent(qsIds)}`;
+  fetch(url,{headers:{"x-admin-key":state.adminKey||getStoredAdminKey()}}).then(async r=>{if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||"Não foi possível gerar a planilha.");return r.blob();}).then(blob=>{const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download="jogadores-spade-visiveis.xlsx";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);}).catch(e=>alert(e.message));
 }
 
 function openBulkModal(type){
@@ -2133,7 +2162,11 @@ function openBulkModal(type){
   if(type==="patent")title="🎖️ Alterar Patente",body=`<div class="bulk-modal-grid"><select id="bulkPatent">${(state.adminHierarchy?.patents||[]).map(x=>`<option value="${x.id}">${escapeHtml(x.name)}</option>`).join("")}</select></div>`;
   if(type==="roles")title="👑 Definir Cargos",body=`<div class="bulk-role-options">${(state.adminHierarchy?.roles||[]).map(x=>`<label class="role-option"><input type="checkbox" name="bulkRoleIds" value="${x.id}"><span><b>${escapeHtml(x.name)}</b><small>${x.salary>0?`🪙 ${money(x.salary)}`:""}</small></span></label>`).join("")||`<span style="font-size:10px;color:#888">Nenhum cargo cadastrado.</span>`}</div>`;
   if(type==="missions")title="📋 Ajustar Missões",body=`<div class="bulk-modal-grid"><select id="bulkMissionMode"><option value="add">Adicionar missões</option><option value="set">Definir quantidade</option></select><input id="bulkMissionAmount" type="number" min="0" placeholder="Quantidade"></div>`;
-  if(type==="power")title="⚔️ Definir Força",body=`<div class="bulk-modal-grid"><input id="bulkPowerAmount" type="number" min="0" placeholder="Novo valor de força"></div>`;
+  if(type==="attributes"){
+    title="📊 Ajustar atributos";
+    body=`<div class="bulk-modal-grid"><select id="bulkAttribute"><option value="hp">❤️ HP</option><option value="mana">♦️ Mana</option><option value="exp">⭐ EXP</option><option value="achievements">🏆 Conquistas</option><option value="ranking">📈 Ranking</option><option value="grimoire">📖 Grimório</option></select><div id="bulkAttributeFields"></div></div><p class="bulk-card-help">A alteração será aplicada a todos os selecionados. Para EXP, você pode adicionar ou definir o valor. Para Grimório, informe nome e nível.</p>`;
+  }
+  if(type==="power")title="⚔️ Recalcular Força",body=`<p class="bulk-card-help">A Força será recalculada automaticamente com base nos Cards atualmente vinculados a cada jogador.</p>`;
   if(type==="visibility")title="👁️ Visibilidade",body=`<div class="bulk-modal-grid"><select id="bulkVisibility"><option value="1">Tornar público</option><option value="0">Ocultar perfil</option></select></div>`;
   if(type==="status")title="🔐 Acesso ao Portal",body=`<div class="bulk-modal-grid"><select id="bulkActive"><option value="1">🟢 Ativar acesso</option><option value="0">⛔ Suspender acesso</option></select></div><p class="bulk-card-help">Suspender preserva o cadastro, Cards, economia, missões e histórico.</p>`;
 
@@ -2142,6 +2175,15 @@ function openBulkModal(type){
   modal.innerHTML=`<div class="bulk-modal"><h3>${title}</h3><p>${ids.length} jogador(es) selecionado(s). A alteração será aplicada a todos.</p>${body}<div class="bulk-modal-actions"><button type="button" class="outline dark-outline" id="bulkCancel">Cancelar</button><button type="button" class="gold" id="bulkConfirm">Aplicar</button></div></div>`;
   document.body.appendChild(modal);
   qs("#bulkCancel").onclick=()=>modal.remove();
+  if(type==="attributes"){
+    const renderFields=()=>{
+      const field=qs("#bulkAttribute")?.value, box=qs("#bulkAttributeFields"); if(!box)return;
+      if(field==="grimoire") box.innerHTML=`<input id="bulkGrimoireName" placeholder="Nome do Grimório"><input id="bulkGrimoireLevel" type="number" min="1" max="999" value="1" placeholder="Nível">`;
+      else if(field==="exp") box.innerHTML=`<select id="bulkExpMode"><option value="add">Adicionar EXP</option><option value="set">Definir EXP</option></select><input id="bulkAttributeAmount" type="number" min="0" placeholder="Valor">`;
+      else box.innerHTML=`<input id="bulkAttributeAmount" type="number" min="0" placeholder="Novo valor">`;
+    };
+    qs("#bulkAttribute").onchange=renderFields; renderFields();
+  }
   qs("#bulkConfirm").onclick=()=>submitBulkAction(type,ids,modal);
 }
 
@@ -2168,7 +2210,17 @@ async function submitBulkAction(type,ids,modal){
   if(type==="patent"){action="set_patent";payload.patent_id=Number(qs("#bulkPatent").value)}
   if(type==="roles"){action="set_roles";payload.role_ids=[...modal.querySelectorAll('input[name="bulkRoleIds"]:checked')].map(x=>Number(x.value))}
   if(type==="missions"){action=qs("#bulkMissionMode").value==="add"?"add_missions":"set_missions";payload.amount=Math.round(Number(qs("#bulkMissionAmount").value||0))}
-  if(type==="power"){action="set_power";payload.amount=Math.round(Number(qs("#bulkPowerAmount").value||0))}
+  if(type==="attributes"){
+    const field=qs("#bulkAttribute")?.value;
+    if(field==="grimoire"){
+      action="set_grimoire";payload.grimoire=qs("#bulkGrimoireName")?.value?.trim()||"";payload.grimoire_level=Math.round(Number(qs("#bulkGrimoireLevel")?.value||0));
+    }else if(field==="exp"){
+      action=qs("#bulkExpMode").value==="add"?"add_exp":"set_exp";payload.amount=Math.round(Number(qs("#bulkAttributeAmount").value||0));
+    }else{
+      action={hp:"set_hp",mana:"set_mana",achievements:"set_achievements",ranking:"set_ranking"}[field];payload.amount=Math.round(Number(qs("#bulkAttributeAmount").value||0));
+    }
+  }
+  if(type==="power"){action="set_power"}
   if(type==="visibility"){action="set_public";payload.public_profile=Number(qs("#bulkVisibility").value)}
   if(type==="status"){action="set_active";payload.active=Number(qs("#bulkActive").value)}
 
@@ -2589,6 +2641,7 @@ qs("#patentForm").addEventListener("submit",async e=>{
 qs("#patentCancelBtn").addEventListener("click",resetPatentForm);
 
 qs("#exportPlayersBtn")?.addEventListener("click",downloadPlayersSheet);
+qs("#exportVisiblePlayersBtn")?.addEventListener("click",openExportVisiblePlayers);
 qs("#bulkUpdatePlayersBtn")?.addEventListener("click",openPlayerBulkSheet);
 qs("#playerBulkSheetDownload")?.addEventListener("click",downloadPlayersSheet);
 qs("#closePlayerBulkSheet")?.addEventListener("click",closePlayerBulkSheet);
