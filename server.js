@@ -44,7 +44,7 @@ function adminPermissionForRequest(req) {
   if (path.startsWith("/permissions") || path.startsWith("/admins")) return "admin_users";
   if (path === "/reports") return "reports";
   if (path === "/audit") return "audit";
-  if (path.startsWith("/settings")) return "settings";
+  if (path.startsWith("/settings") || path.startsWith("/backup") || path.startsWith("/health")) return "settings";
   if (path === "/overview") return "dashboard";
   if (path.startsWith("/grimoire")) return "players";
   if (path.startsWith("/players")) {
@@ -1407,8 +1407,101 @@ async function initDatabase() {
   }
 }
 
+app.get("/api/health", async (req,res)=>{
+  const started=Date.now();
+  try{
+    await pool.query("SELECT 1");
+    res.json({ok:true,database:"ok",latency_ms:Date.now()-started,version:require("./package.json").version});
+  }catch(e){
+    console.error("Health check error:",e.message);
+    res.status(503).json({ok:false,database:"error",latency_ms:Date.now()-started});
+  }
+});
+
 app.get("/api/settings", async (req,res)=>{
   res.json({kingdom_name:portalSettings.kingdom_name, kingdom_motto:portalSettings.kingdom_motto, timezone:portalSettings.timezone, footer_text:portalSettings.footer_text, visibility_scopes:portalSettings.visibility_scopes});
+});
+
+const BACKUP_TABLES = [
+  ["players", "SELECT id,nick,number,identifier,house,patent,role,grimoire,grimoire_level,hp,mana,yuls,dracmas,missions,achievements,ranking,power,skill_sc,skill_vt,public_profile,active,created_at,updated_at FROM players ORDER BY id"],
+  ["grimoire_pages", "SELECT * FROM grimoire_pages ORDER BY id"],
+  ["exp_history", "SELECT * FROM exp_history ORDER BY id"],
+  ["exp_rules", "SELECT * FROM exp_rules ORDER BY id"],
+  ["admin_users", "SELECT id,username,display_name,active,created_at,updated_at,last_login FROM admin_users ORDER BY id"],
+  ["admin_permissions", "SELECT * FROM admin_permissions ORDER BY admin_id"],
+  ["audit_log", "SELECT * FROM audit_log ORDER BY id"],
+  ["portal_settings", "SELECT * FROM portal_settings ORDER BY key"],
+  ["news", "SELECT * FROM news ORDER BY id"],
+  ["editions", "SELECT * FROM editions ORDER BY id"],
+  ["articles", "SELECT * FROM articles ORDER BY id"],
+  ["edition_articles", "SELECT * FROM edition_articles ORDER BY edition_id,article_id"],
+  ["library_items", "SELECT * FROM library_items ORDER BY id"],
+  ["player_statuses", "SELECT * FROM player_statuses ORDER BY id"],
+  ["status_reactions", "SELECT * FROM status_reactions ORDER BY id"],
+  ["status_comments", "SELECT * FROM status_comments ORDER BY id"],
+  ["card_categories", "SELECT * FROM card_categories ORDER BY id"],
+  ["cards", "SELECT * FROM cards ORDER BY id"],
+  ["player_cards", "SELECT * FROM player_cards ORDER BY player_id,card_id"],
+  ["player_card_history", "SELECT * FROM player_card_history ORDER BY id"],
+  ["ally_accounts", "SELECT id,username,display_name,origin_kingdom,origin_house,patent,role,description,active,created_at,updated_at,last_login FROM ally_accounts ORDER BY id"],
+  ["ally_cards", "SELECT * FROM ally_cards ORDER BY ally_id,card_id"],
+  ["events", "SELECT * FROM events ORDER BY id"],
+  ["event_participants", "SELECT * FROM event_participants ORDER BY id"],
+  ["event_actions", "SELECT * FROM event_actions ORDER BY id"],
+  ["event_action_history", "SELECT * FROM event_action_history ORDER BY id"],
+  ["event_points", "SELECT * FROM event_points ORDER BY event_id,player_id"],
+  ["event_card_rewards", "SELECT * FROM event_card_rewards ORDER BY event_id,card_id"],
+  ["event_reward_history", "SELECT * FROM event_reward_history ORDER BY id"],
+  ["event_results", "SELECT * FROM event_results ORDER BY id"],
+  ["schedule_activities", "SELECT * FROM schedule_activities ORDER BY id"],
+  ["schedule_champions", "SELECT * FROM schedule_champions ORDER BY id"],
+  ["yuls_history", "SELECT * FROM yuls_history ORDER BY id"],
+  ["economy_transactions", "SELECT * FROM economy_transactions ORDER BY id"],
+  ["missions", "SELECT * FROM missions ORDER BY id"],
+  ["mission_activities", "SELECT * FROM mission_activities ORDER BY id"],
+  ["houses", "SELECT * FROM houses ORDER BY id"],
+  ["house_history", "SELECT * FROM house_history ORDER BY id"],
+  ["patents", "SELECT * FROM patents ORDER BY id"],
+  ["role_ranks", "SELECT * FROM role_ranks ORDER BY id"],
+  ["roles", "SELECT * FROM roles ORDER BY id"],
+  ["player_roles", "SELECT * FROM player_roles ORDER BY player_id,role_id"],
+  ["player_notifications", "SELECT * FROM player_notifications ORDER BY id"],
+  ["announcements", "SELECT * FROM announcements ORDER BY id"],
+  ["ranking_battles", "SELECT * FROM ranking_battles ORDER BY id"],
+  ["ranking_history", "SELECT * FROM ranking_history ORDER BY id"]
+];
+
+app.get("/api/admin/backup/export.json", requireAdmin, async (req,res)=>{
+  const started=Date.now();
+  try{
+    const data={meta:{product:"Portal Spade",version:require("./package.json").version,generated_at:new Date().toISOString(),database_tables:[],excluded:["media_assets (imagens armazenadas em BYTEA)","password_hash de players/admin_users/ally_accounts"]},tables:{}};
+    for(const [name,query] of BACKUP_TABLES){
+      const r=await pool.query(query);
+      data.tables[name]=r.rows;
+      data.meta.database_tables.push({name,rows:r.rows.length});
+    }
+    data.meta.elapsed_ms=Date.now()-started;
+    const payload=JSON.stringify(data);
+    const checksum=crypto.createHash("sha256").update(payload).digest("hex");
+    data.meta.sha256=checksum;
+    const out=Buffer.from(JSON.stringify(data));
+    res.setHeader("Content-Type","application/json; charset=utf-8");
+    res.setHeader("Content-Disposition",`attachment; filename="portal-spade-backup-${new Date().toISOString().replace(/[:.]/g,'-')}.json"`);
+    res.send(out);
+  }catch(e){
+    console.error("Backup export error:",e);
+    res.status(500).json({error:"Não foi possível gerar o backup lógico do Portal."});
+  }
+});
+
+app.get("/api/admin/health", requireAdmin, async (req,res)=>{
+  const started=Date.now();
+  try{
+    const r=await pool.query("SELECT NOW() AS db_time");
+    res.json({ok:true,database:"ok",latency_ms:Date.now()-started,db_time:r.rows[0]?.db_time||null,version:require("./package.json").version});
+  }catch(e){
+    res.status(503).json({ok:false,database:"error",latency_ms:Date.now()-started});
+  }
 });
 
 app.get("/api/admin/settings", requireAdmin, async (req,res)=>{
@@ -5006,6 +5099,9 @@ app.post("/api/admin/players/bulk-sheet", requireAdmin, importUpload.single("fil
         await client.query(`INSERT INTO player_admin_history(player_id,action,description) VALUES($1,'PLANILHA EM MASSA',$2)`,[r.id,changed?`Alterações: ${summary}`:'Linha processada sem alterações.']);
       }
       await client.query('COMMIT');
+      try{
+        await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'jogadores','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA EM MASSA','/api/admin/players/bulk-sheet',`Planilha ${req.file.originalname}: ${changedPlayers} jogador(es), ${changedFields} campo(s) alterado(s), ${checked.rows.length} linha(s) validada(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)]);
+      }catch(ae){console.error('Bulk player audit summary error:',ae.message)}
       res.json({ok:true,changedPlayers,changedFields,total:checked.rows.length});
     }catch(e){await client.query('ROLLBACK');console.error('Bulk sheet commit error:',e);res.status(e.statusCode||500).json({error:e.message||'Erro ao atualizar os jogadores. Nenhuma alteração foi aplicada.'});}
     finally{client.release();}
@@ -6351,6 +6447,18 @@ async function seedOfficialCronograma() {
     await pool.query(`INSERT INTO schedule_champions(period_key,category,title,winner_nick,note) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,c);
   }
 }
+
+pool.on('error', err=>{
+  console.error('PostgreSQL pool error:',err);
+});
+
+async function shutdown(signal){
+  console.log(`Recebido ${signal}. Encerrando Portal Spade com segurança...`);
+  try{ await pool.end(); }catch(e){ console.error('Erro ao fechar conexão com PostgreSQL:',e.message); }
+  process.exit(0);
+}
+process.on('SIGTERM',()=>shutdown('SIGTERM'));
+process.on('SIGINT',()=>shutdown('SIGINT'));
 
 initDatabase()
   .then(async () => {
