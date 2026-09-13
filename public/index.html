@@ -810,10 +810,22 @@
       <div class="card-catalog-filters">
         <input id="adminCardSearch" class="search" placeholder="Pesquisar no catálogo por nome, categoria, elemento ou origem...">
         <select id="adminCardCatalogFilter" class="admin-filter"><option value="">Todas as categorias</option></select>
+        <select id="adminCardStatusFilter" class="admin-filter"><option value="">Todos os status</option><option value="ATIVO">Ativos</option><option value="INATIVO">Inativos</option></select>
+      </div>
+      <div id="cardCatalogBulkBar" class="card-catalog-bulkbar" hidden>
+        <div><b id="cardCatalogSelectedCount">0 Cards selecionados</b><small>Selecione Cards para ações em massa ou use a distribuição individual.</small></div>
+        <div class="card-catalog-bulk-actions">
+          <button type="button" class="outline dark-outline small" id="cardCatalogSelectVisible">☑ Selecionar visíveis</button>
+          <button type="button" class="outline dark-outline small" id="cardCatalogClearSelection">Limpar seleção</button>
+          <button type="button" class="outline dark-outline small" id="cardCatalogExportSelected">📤 Exportar selecionados</button>
+          <button type="button" class="outline dark-outline small" id="cardCatalogBulkAction">⚙ Ação em massa</button>
+        </div>
       </div>
       <div id="adminCardCatalogList" class="card-catalog-list"></div>
     </div>
   </div>
+  <div class="card-distribution-modal" id="cardDistributionModal" hidden></div>
+
   <div class="panel admin-announcement-panel">
     <div class="panel-head">
       <div><p class="eyebrow">AVISOS OFICIAIS</p><h3>Novo comunicado</h3></div>
