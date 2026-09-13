@@ -1528,7 +1528,9 @@ function setAdminPermissionVisibility(){
   const map={dashboard:["#adminStats"],players:[".admin-toolbar-v2",".bulk-toolbar",".admin-layout",".player-import-modal"],houses:[".admin-house-panel"],hierarchy:[".admin-hierarchy-panel"],cards:[".admin-card-catalog","#cardBulkSheetModal"],announcements:[".admin-announcement-panel"],schedule:[".admin-schedule-manager"],events:[".admin-event-manager"],missions:[".admin-mission-manager"],journal:[".journal-admin-editor"],admin_users:[".admin-users-panel","#adminPermissionsPanel"],library:["#adminLibraryPanel"],rankings:["#adminRankingPanel"],economy:["#adminEconomyPanel"],notifications:["#adminNotificationPanel"],allies:["#adminAlliesPanel"],audit:["#adminAuditPanel"],settings:["#adminSettingsPanel"]};
   Object.entries(map).forEach(([perm,selectors])=>selectors.forEach(sel=>qsa(sel).forEach(el=>el.style.display=hasAdminPermission(perm)?"":"none")));
   const security=qs('#adminSecurityPanel'); if(security) security.style.display=hasAdminPermission('settings')?'':'none';
-  const bulkCenter=qs('#adminBulkCenter'); if(bulkCenter) bulkCenter.style.display=(hasAdminPermission('players')||hasAdminPermission('cards'))?'':'none';
+  const bulkCenter=qs('#adminBulkCenter'); if(bulkCenter) bulkCenter.style.display=(hasAdminPermission('players')||hasAdminPermission('cards')||hasAdminPermission('houses')||hasAdminPermission('hierarchy')||hasAdminPermission('missions')||hasAdminPermission('rankings'))?'':'none';
+  const bulkButtonPerms={bulkCenterPlayersExport:'players',bulkCenterPlayersImport:'players_import',bulkCenterCardsExport:'cards',bulkCenterCardsImport:'cards_import',bulkCenterHousesExport:'houses',bulkCenterHousesImport:'houses_import',bulkCenterHierarchyExport:'hierarchy',bulkCenterHierarchyImport:'hierarchy_import',bulkCenterMissionsExport:'missions',bulkCenterMissionsImport:'missions_import',bulkCenterRankingsExport:'rankings'};
+  Object.entries(bulkButtonPerms).forEach(([id,perm])=>{const el=qs('#'+id);if(el)el.style.display=hasAdminPermission(perm)?'':'none'});
   const bulkMap={yuls:"economy",cards:"cards",house:"houses",patent:"hierarchy",roles:"hierarchy",missions:"missions",power:"players",visibility:"players"};
   qsa("[data-bulk-action]").forEach(btn=>{const perm=bulkMap[btn.dataset.bulkAction];btn.style.display=hasAdminPermission(perm)?"":"none"});
 }
@@ -2566,6 +2568,21 @@ qs("#closeCardBulkSheet")?.addEventListener("click",closeCardBulkSheet);
 qs("#cardBulkSheetCancel")?.addEventListener("click",closeCardBulkSheet);
 qs("#cardBulkSheetFile")?.addEventListener("change",previewCardBulkSheet);
 qs("#cardBulkSheetConfirm")?.addEventListener("click",confirmCardBulkSheet);
+qs("#bulkCenterPlayersExport")?.addEventListener("click",()=>downloadPlayersSheet());
+qs("#bulkCenterPlayersImport")?.addEventListener("click",openPlayerBulkSheet);
+qs("#bulkCenterCardsExport")?.addEventListener("click",()=>downloadCardsSheet());
+qs("#bulkCenterCardsImport")?.addEventListener("click",openCardBulkSheet);
+qs("#bulkCenterHousesExport")?.addEventListener("click",()=>downloadDomainBulkSheet("houses"));
+qs("#bulkCenterHousesImport")?.addEventListener("click",()=>openDomainBulkSheet("houses"));
+qs("#bulkCenterHierarchyExport")?.addEventListener("click",()=>downloadDomainBulkSheet("hierarchy"));
+qs("#bulkCenterHierarchyImport")?.addEventListener("click",()=>openDomainBulkSheet("hierarchy"));
+qs("#bulkCenterMissionsExport")?.addEventListener("click",()=>downloadDomainBulkSheet("missions"));
+qs("#bulkCenterMissionsImport")?.addEventListener("click",()=>openDomainBulkSheet("missions"));
+qs("#bulkCenterRankingsExport")?.addEventListener("click",()=>downloadDomainBulkSheet("rankings"));
+qs("#domainBulkSheetFile")?.addEventListener("change",previewDomainBulkSheet);
+qs("#domainBulkSheetCancel")?.addEventListener("click",closeDomainBulkSheet);
+qs("#closeDomainBulkSheet")?.addEventListener("click",closeDomainBulkSheet);
+qs("#domainBulkSheetConfirm")?.addEventListener("click",confirmDomainBulkSheet);
 qs("#importPlayersBtn").addEventListener("click",openPlayerImport);
 qs("#closePlayerImport").addEventListener("click",closePlayerImport);
 qs("#playerImportCancel").addEventListener("click",closePlayerImport);
@@ -3260,6 +3277,41 @@ async function confirmCardBulkSheet(){
   try{const d=await adminApi('/api/admin/cards/bulk-sheet',{method:'POST',body:form});qs('#cardBulkSheetStatus').textContent=`✅ ${d.created||0} criado(s) • ${d.updated||0} atualizado(s) • ${d.added||0} vínculo(s) criado(s) • ${d.removed||0} vínculo(s) removido(s).`;await loadAdminCards();if(state.selectedPlayer)await selectAdminPlayer(state.selectedPlayer.id);setTimeout(closeCardBulkSheet,1100);}
   catch(e){qs('#cardBulkSheetStatus').textContent=e.message;qs('#cardBulkSheetConfirm').disabled=false;qs('#cardBulkSheetCancel').disabled=false;}
 }
+
+// V63 — Gestão em Massa 2.0 para domínios administrativos adicionais.
+function openDomainBulkSheet(kind){
+  const modal=qs('#domainBulkSheetModal');if(!modal)return;
+  const meta={
+    houses:{title:'Casas por planilha',subtitle:'Atualize a estrutura das Casas sem apagar histórico.',exportUrl:'/api/admin/houses/export.xlsx',importUrl:'/api/admin/houses/bulk-sheet',fileName:'casas-spade-atualizacao.xlsx',perm:'houses'},
+    hierarchy:{title:'Hierarquia por planilha',subtitle:'Atualize Patentes e Cargos pelas abas da mesma planilha.',exportUrl:'/api/admin/hierarchy/export.xlsx',importUrl:'/api/admin/hierarchy/bulk-sheet',fileName:'hierarquia-spade-atualizacao.xlsx',perm:'hierarchy'},
+    missions:{title:'Missões por planilha',subtitle:'Atualize ou crie atividades oficiais com validação antes de gravar.',exportUrl:'/api/admin/missions/export.xlsx',importUrl:'/api/admin/missions/bulk-sheet',fileName:'missoes-spade-atualizacao.xlsx',perm:'missions'}
+  }[kind];
+  if(!meta)return;
+  state.domainBulkSheet={kind,meta,file:null,preview:null};
+  qs('#domainBulkSheetTitle').textContent=meta.title;qs('#domainBulkSheetSubtitle').textContent=meta.subtitle;qs('#domainBulkSheetFile').value='';qs('#domainBulkSheetFileName').textContent='Nenhum arquivo selecionado';qs('#domainBulkSheetPreview').innerHTML='<p>Baixe a planilha atual, edite-a e depois escolha o arquivo aqui.</p>';qs('#domainBulkSheetStatus').textContent='';qs('#domainBulkSheetConfirm').disabled=true;modal.hidden=false;modal.style.display='block';
+}
+function closeDomainBulkSheet(){const m=qs('#domainBulkSheetModal');if(m){m.style.display='none';m.hidden=true}}
+async function downloadDomainBulkSheet(kind){
+  const meta={houses:{url:'/api/admin/houses/export.xlsx',name:'casas-spade-atualizacao.xlsx'},hierarchy:{url:'/api/admin/hierarchy/export.xlsx',name:'hierarquia-spade-atualizacao.xlsx'},missions:{url:'/api/admin/missions/export.xlsx',name:'missoes-spade-atualizacao.xlsx'},rankings:{url:'/api/admin/rankings/export.xlsx',name:'rankings-spade-consulta.xlsx'}}[kind];if(!meta)return;
+  try{const key=state.adminKey||getStoredAdminKey();const headers={};if(key)headers['x-admin-key']=key;const r=await fetch(meta.url,{credentials:'same-origin',headers});if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.error||'Não foi possível gerar a planilha.')}const blob=await r.blob();const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=meta.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){alert(e.message||'Não foi possível baixar a planilha.')}
+}
+function renderDomainBulkPreview(data){
+  const box=qs('#domainBulkSheetPreview');if(!box)return;
+  const kind=state.domainBulkSheet?.kind;
+  if(kind==='houses'){
+    const rows=data.rows||[];const invalid=Number(data.invalid||0),changed=rows.filter(r=>!r.errors?.length&&(r.isNew||r.changes?.length));box.innerHTML=`<div class="player-import-summary"><span>${data.total||0} linhas</span><span class="ok">✅ ${data.valid||0} válidas</span><span class="bad">⚠️ ${invalid} com erros</span><span>${changed.length} alterações</span></div>${renderDomainRowsTable(rows)}${renderDomainIssues(data.issues||[])}`;
+    qs('#domainBulkSheetConfirm').disabled=invalid>0||changed.length===0;return;
+  }
+  if(kind==='missions'){
+    const rows=data.rows||[],invalid=Number(data.invalid||0),changed=rows.filter(r=>!r.errors?.length&&(r.isNew||r.changes?.length));box.innerHTML=`<div class="player-import-summary"><span>${data.total||0} linhas</span><span class="ok">✅ ${data.valid||0} válidas</span><span class="bad">⚠️ ${invalid} com erros</span><span>${changed.length} alterações</span></div>${renderDomainRowsTable(rows)}${renderDomainIssues(data.issues||[])}`;qs('#domainBulkSheetConfirm').disabled=invalid>0||changed.length===0;return;
+  }
+  const p=data.patents||{},r=data.roles||{},invalid=Number(p.invalid||0)+Number(r.invalid||0),changed=Number(p.changes||0)+Number(r.changes||0);box.innerHTML=`<div class="card-bulk-sheet-badges"><span>Patentes: ${p.total||0}</span><span>✅ ${p.valid||0}</span><span>⚠️ ${p.invalid||0}</span><span>Cargos: ${r.total||0}</span><span>✅ ${r.valid||0}</span><span>⚠️ ${r.invalid||0}</span><span>${changed} alterações</span></div><h4>Patentes</h4>${renderDomainRowsTable(p.rows||[])}<h4 style="margin-top:15px">Cargos</h4>${renderDomainRowsTable(r.rows||[])}${renderDomainIssues(data.issues||[])}`;qs('#domainBulkSheetConfirm').disabled=invalid>0||changed===0;
+}
+function renderDomainRowsTable(rows){const body=(rows||[]).filter(r=>!r.errors?.length&&(r.isNew||r.changes?.length)).slice(0,200).map(r=>{const ch=(r.changes||[]).map(c=>`<div><b>${escapeHtml(c.label)}:</b> ${escapeHtml(String(c.before))} → ${escapeHtml(String(c.after))}</div>`).join('')||'<span class="muted">Novo registro</span>';return `<tr><td>${escapeHtml(String(r.id??'novo'))}</td><td><b>${escapeHtml(r.name||r.mission_type||'')}</b></td><td>${ch}</td></tr>`}).join('');return `<div style="overflow:auto"><table class="card-bulk-sheet-preview-table"><thead><tr><th>ID</th><th>Registro</th><th>Alterações</th></tr></thead><tbody>${body||'<tr><td colspan="3">Nenhuma alteração detectada.</td></tr>'}</tbody></table></div>`}
+function renderDomainIssues(issues){return issues?.length?`<div class="card-bulk-sheet-section"><h4>⚠️ Problemas encontrados</h4><div style="overflow:auto"><table class="card-bulk-sheet-preview-table"><thead><tr><th>Aba</th><th>Linha</th><th>Campo</th><th>Problema</th></tr></thead><tbody>${issues.slice(0,200).map(x=>`<tr><td>${escapeHtml(x.section||'')}</td><td>${escapeHtml(String(x.row||''))}</td><td>${escapeHtml(x.field||'')}</td><td class="issue">${escapeHtml(x.message||'')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+async function previewDomainBulkSheet(){const file=qs('#domainBulkSheetFile')?.files?.[0];if(!file)return;state.domainBulkSheet.file=file;qs('#domainBulkSheetFileName').textContent=`${file.name} • ${(file.size/1024).toFixed(1)} KB`;qs('#domainBulkSheetStatus').textContent='Lendo, validando e comparando...';qs('#domainBulkSheetConfirm').disabled=true;const form=new FormData();form.append('file',file);try{const d=await adminApi(`${state.domainBulkSheet.meta.importUrl}/preview`,{method:'POST',body:form});state.domainBulkSheet.preview=d;renderDomainBulkPreview(d);qs('#domainBulkSheetStatus').textContent=(Number(d.invalid||0)+Number(d.patents?.invalid||0)+Number(d.roles?.invalid||0))?'Corrija os dados indicados antes de aplicar.':'Planilha pronta. Revise a prévia antes de aplicar.'}catch(e){qs('#domainBulkSheetPreview').innerHTML='<p>Não foi possível processar a planilha.</p>';qs('#domainBulkSheetStatus').textContent=e.message}}
+async function confirmDomainBulkSheet(){const f=state.domainBulkSheet?.file,d=state.domainBulkSheet?.preview;if(!f||!d)return;const invalid=Number(d.invalid||0)+Number(d.patents?.invalid||0)+Number(d.roles?.invalid||0),changes=Number(d.changes||0)+Number(d.patents?.changes||0)+Number(d.roles?.changes||0);if(invalid) return;if(!confirm(`Aplicar ${changes||'as'} alteração(ões) da planilha? A operação é transacional e será bloqueada se houver erro.`))return;qs('#domainBulkSheetConfirm').disabled=true;qs('#domainBulkSheetCancel').disabled=true;qs('#domainBulkSheetStatus').textContent='Aplicando em transação única...';const form=new FormData();form.append('file',f);try{const r=await adminApi(state.domainBulkSheet.meta.importUrl,{method:'POST',body:form});qs('#domainBulkSheetStatus').textContent=`✅ Operação concluída. ${r.created||r.createdPatents||0} criado(s) • ${r.updated||r.updatedPatents||0} atualizado(s).`+(r.createdRoles!==undefined?` Cargos: ${r.createdRoles||0} criado(s) • ${r.updatedRoles||0} atualizado(s).`:``);setTimeout(()=>closeDomainBulkSheet(),1100)}catch(e){qs('#domainBulkSheetStatus').textContent=e.message;qs('#domainBulkSheetConfirm').disabled=false;qs('#domainBulkSheetCancel').disabled=false}}
+
 qs("#announcementCancelBtn").addEventListener("click",resetAnnouncementForm);
 
 async function tryAdminHash(){
