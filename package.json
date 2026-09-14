@@ -1,11 +1,11 @@
 {
   "name": "portal-spade-rpg",
-  "version": "72.1.0",
+  "version": "73.0.0",
   "private": true,
   "description": "Portal oficial do RPG - Reino Spade",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node v73-runtime-patch.js && node server.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
