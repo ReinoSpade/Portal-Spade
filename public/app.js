@@ -200,15 +200,18 @@ function go(page){
 }
 
 document.addEventListener("click",e=>{
+  const eventBtn=e.target.closest("[data-home-open-event]");
+  if(eventBtn){e.preventDefault();openPublicEvent(Number(eventBtn.dataset.homeOpenEvent));return;}
   const el=e.target.closest("[data-page]");
   if(!el)return;
+  e.preventDefault();
   go(el.dataset.page);
 });
 document.addEventListener("click",e=>{
   const retry=e.target.closest("[data-retry-home]");
   if(retry){retry.disabled=true;retry.textContent="Carregando…";loadHome();}
 });
-qs("#hamb").addEventListener("click",()=>{closeGlobalSearch();qs("#nav").classList.toggle("open")});
+qs("#hamb")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
 qs("#mobileMenuBtn")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();const m=qs("#libraryReaderModal");if(m?.classList.contains("open")){m.classList.remove("open");document.body.classList.remove("library-reader-open");}closeLibraryExplorer();}});
 
@@ -220,17 +223,39 @@ function initGuideNavigation(){
   }));
 }
 async function api(url,options={}){
-  options.credentials="same-origin";
-  const r=await fetch(url,options);let d={};
-  try{d=await r.json()}catch{}
-  if(!r.ok)throw new Error(d.error||"Ocorreu um erro.");
-  return d;
+  const baseOptions={...options,credentials:"same-origin"};
+  const retries=Math.max(0,Number(baseOptions.retryCount??0));
+  const timeoutMs=Math.max(3000,Number(baseOptions.timeoutMs??12000));
+  delete baseOptions.retryCount;delete baseOptions.timeoutMs;
+  let lastError=null;
+  for(let attempt=0;attempt<=retries;attempt++){
+    const controller=new AbortController();
+    const externalSignal=baseOptions.signal;
+    let externalAbort=()=>{};
+    if(externalSignal){
+      if(externalSignal.aborted)controller.abort();
+      else{externalAbort=()=>controller.abort();externalSignal.addEventListener('abort',externalAbort,{once:true});}
+    }
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const r=await fetch(url,{...baseOptions,signal:controller.signal});
+      let d={};try{d=await r.json()}catch{}
+      if(!r.ok)throw new Error(d.error||`Erro ${r.status} ao acessar ${url}.`);
+      return d;
+    }catch(e){
+      lastError=e?.name==='AbortError'?new Error('A solicitação demorou demais. Tente novamente.'):e;
+      if(attempt<retries)await new Promise(resolve=>setTimeout(resolve,500*(attempt+1)));
+    }finally{clearTimeout(timer);if(externalSignal)externalSignal.removeEventListener('abort',externalAbort);}
+  }
+  throw lastError||new Error('Ocorreu um erro.');
 }
 
 async function loadHome(attempt=0){
-  const maxAttempts=2;
+  const maxAttempts=3;
+  const newsGrid=qs("#newsGrid");
+  if(attempt===0 && newsGrid) newsGrid.innerHTML='<div class="panel home-loading-state"><h3>Carregando o Portal…</h3><p>Consultando as últimas notícias e atividades de Spade.</p></div>';
   try{
-    const d=await api("/api/home");
+    const d=await api("/api/home",{retryCount:1,timeoutMs:10000});
     let active={activities:[]};
     try{active=await api("/api/active-activities")}catch(_){/* feed ao vivo indisponível não bloqueia a Home */}
     state.data=d;state.activeActivities=active.activities||[];
@@ -251,7 +276,7 @@ async function loadHome(attempt=0){
       return false;
     }
     const newsGrid=qs("#newsGrid");
-    if(newsGrid)newsGrid.innerHTML=`<div class="panel home-load-error"><h3>Não foi possível carregar a Home</h3><p>${escapeHtml(err.message)}</p><button type="button" class="gold small" data-retry-home>↻ Tentar novamente</button></div>`;
+    if(newsGrid)newsGrid.innerHTML=`<div class="panel home-load-error"><h3>Não foi possível carregar a Home</h3><p>${escapeHtml(err.message)}</p><div class="home-load-actions"><button type="button" class="gold small" data-retry-home>↻ Tentar novamente</button><button type="button" class="outline dark-outline small" data-page="jornal">Abrir Jornal</button></div></div>`;
     return false;
   }
 }
@@ -1141,7 +1166,7 @@ async function openPublicPlayer(id){
   wrap.classList.add("open");
   wrap.innerHTML=`<div class="public-player-detail"><p>Carregando ficha...</p></div>`;
   try{
-    const d=await api(`/api/players/${id}`);
+    const d=await api(`/api/players/${id}`,{retryCount:1,timeoutMs:10000});
     const p=d.player;
     const roles=(p.roles||[]).map(r=>`<span class="public-role-chip">${escapeHtml(r.name)}</span>`).join("")||`<span class="tag">Nenhum cargo</span>`;
     const missions=(d.mission_summary?.recent||[]).map(m=>`<div class="public-player-mission"><div><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.status)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""} • ${escapeHtml(String(m.completed_at||""))}</small></div><span>${m.reward_yuls>0?`🪙 +${money(m.reward_yuls)}`:""}</span></div>`).join("")||`<p style="color:#888;font-size:10px">Nenhuma missão recente.</p>`;
@@ -1804,7 +1829,7 @@ function setAdminPermissionVisibility(){
 
 async function refreshAdminSession(){
   try{
-    const d=await adminApi("/api/admin/me");
+    const d=await adminApi("/api/admin/me",{retryCount:1,timeoutMs:8000});
     state.admin=true;state.adminUser=d.admin;state.adminPermissions=d.admin.permissions||{};setAdminNav();
     if(state.page==="admin-login") go("admin");
   }catch{
@@ -3151,17 +3176,36 @@ function bindCardDetailLibraryButtons(){
 }
 async function openCardDetailModal(id,isAdmin=true){
   const modal=qs("#cardDetailModal");if(!modal)return;
-  let local=(state.adminCards||[]).find(c=>Number(c.id)===Number(id)) || (state.playerCards||[]).find(c=>Number(c.id)===Number(id));
-  if(!local && !isAdmin){
-    try{const d=await api(`/api/cards/${Number(id)}`);local=d.card;}
-    catch(e){alert(e.message||"Não foi possível carregar o Card.");return;}
-  }
-  if(!local)return;
+  const cardId=Number(id);if(!Number.isInteger(cardId)||cardId<=0){alert("Card inválido.");return;}
+  let local=(state.adminCards||[]).find(c=>Number(c.id)===cardId) || (state.playerCards||[]).find(c=>Number(c.id)===cardId) || null;
   modal.hidden=false;modal.classList.add("open");document.body.classList.add("card-detail-open");
-  qs("#cardDetailTitle").textContent=`#${Number(local.id)} • ${local.name_pt||local.name}`;qs("#cardDetailSubtitle").textContent=isAdmin?"Catálogo oficial e possuidores do Card.":"Detalhes do Card.";qs("#cardDetailBody").innerHTML=renderCardDetailBody({card:local,players:[],allies:[]},false);bindCardDetailLibraryButtons();
-  if(isAdmin){
-    try{const d=await adminApi(`/api/admin/cards/${Number(id)}/details`);state.cardDetail=d;qs("#cardDetailBody").innerHTML=renderCardDetailBody(d,true);qs("#cardDetailSubtitle").textContent=`${Number(d.holders_total||0)} conta(s) possuem este Card.`;bindCardDetailLibraryButtons();}
-    catch(e){qs("#cardDetailBody").innerHTML=`<div class="card-detail-empty">${escapeHtml(e.message||"Não foi possível carregar os possuidores do Card.")}</div>`;}
+  qs("#cardDetailTitle").textContent=`#${cardId} • Ficha do Card`;
+  qs("#cardDetailSubtitle").textContent=isAdmin?"Carregando catálogo e possuidores…":"Carregando detalhes do Card…";
+  qs("#cardDetailBody").innerHTML='<div class="card-detail-loading"><div class="loading-spinner" aria-hidden="true"></div><p>Carregando ficha do Card…</p></div>';
+  try{
+    if(isAdmin){
+      const d=await adminApi(`/api/admin/cards/${cardId}/details`,{timeoutMs:12000});
+      state.cardDetail=d;
+      const c=d.card||local;
+      if(!c)throw new Error("Card não encontrado.");
+      qs("#cardDetailTitle").textContent=`#${cardId} • ${c.name_pt||c.name}`;
+      qs("#cardDetailSubtitle").textContent=`${Number(d.holders_total||0)} conta(s) possuem este Card.`;
+      qs("#cardDetailBody").innerHTML=renderCardDetailBody(d,true);
+      bindCardDetailLibraryButtons();
+      return;
+    }
+    if(!local){
+      const d=await api(`/api/cards/${cardId}`,{retryCount:1,timeoutMs:10000});
+      local=d.card;
+    }
+    if(!local)throw new Error("Card não encontrado.");
+    qs("#cardDetailTitle").textContent=`#${cardId} • ${local.name_pt||local.name}`;
+    qs("#cardDetailSubtitle").textContent="Detalhes do Card.";
+    qs("#cardDetailBody").innerHTML=renderCardDetailBody({card:local,players:[],allies:[]},false);
+    bindCardDetailLibraryButtons();
+  }catch(e){
+    qs("#cardDetailBody").innerHTML=`<div class="card-detail-empty card-detail-error"><h3>Não foi possível carregar a ficha</h3><p>${escapeHtml(e.message||"Tente novamente.")}</p><button type="button" class="gold small" id="retryCardDetail">↻ Tentar novamente</button></div>`;
+    qs("#retryCardDetail")?.addEventListener("click",()=>openCardDetailModal(cardId,isAdmin));
   }
 }
 
