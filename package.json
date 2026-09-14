@@ -5,7 +5,7 @@
   "description": "Portal oficial do RPG - Reino Spade",
   "main": "server.js",
   "scripts": {
-    "start": "node v73-runtime-patch.js && node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
