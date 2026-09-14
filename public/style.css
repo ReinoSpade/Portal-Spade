@@ -1642,6 +1642,9 @@ button.gold,button.outline{position:relative}.gold::before,.outline::before{cont
 @media(prefers-reduced-motion:reduce){.schedule-day{transition:none}}
 
 
+/* V76 — estados de carregamento e erro resilientes */
+.home-loading-state,.home-load-error{min-height:150px;display:grid;place-items:center;text-align:center;padding:22px}.home-loading-state p,.home-load-error p{max-width:520px;margin:0 auto 12px;color:#777}.home-load-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px}.card-detail-loading{min-height:260px;display:grid;place-items:center;text-align:center;align-content:center;gap:10px;color:#777}.loading-spinner{width:30px;height:30px;border:3px solid rgba(198,164,93,.2);border-top-color:#c6a45d;border-radius:50%;animation:spadeSpin .8s linear infinite}@keyframes spadeSpin{to{transform:rotate(360deg)}}.card-detail-error h3{margin:0 0 6px}.public-detail-error{padding-bottom:26px}
+
 /* ===== V53.3.4 — Navegação por contexto + Mobile ===== */
 .top{gap:14px}
 .top .logo{flex:0 0 auto}
