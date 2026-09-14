@@ -946,8 +946,10 @@ function renderHouses(houses){
         <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
         <h3>${escapeHtml(h.name)}</h3>
         ${h.kingdom?`<small class="house-kingdom-label">${escapeHtml(h.kingdom)}</small>`:""}
-        <p>${escapeHtml(h.description||"Casa do Reino Spade.")}</p>
-        ${h.motto?`<div class="house-motto">“${escapeHtml(h.motto)}”</div>`:""}
+        <div class="house-card-section"><small>DESCRIÇÃO</small><p>${escapeHtml(h.description||"Casa do Reino Spade.")}</p></div>
+        ${h.motto?`<div class="house-card-section"><small>LEMA</small><div class="house-motto">“${escapeHtml(h.motto)}”</div></div>`:""}
+        ${h.specialty?`<div class="house-card-section"><small>ESPECIALIDADE</small><p>${escapeHtml(h.specialty)}</p></div>`:""}
+        ${h.virtues?`<div class="house-card-section"><small>VIRTUDES</small><p>${escapeHtml(h.virtues)}</p></div>`:""}
         <div class="house-meta"><span>${h.count} membros</span><span>${h.missions} missões</span><span>🪙 ${money(h.yuls)}</span></div>
       </button>`).join("")
     : `<div class="house-empty">Nenhuma Casa cadastrada.</div>`;
@@ -974,6 +976,8 @@ async function openHouse(id){
       <div class="house-stats"><div class="house-stat"><small>Membros</small><b>${h.count}</b></div><div class="house-stat"><small>Missões</small><b>${h.missions}</b></div><div class="house-stat"><small>Yuls somados</small><b>🪙 ${money(h.yuls)}</b></div></div>
       ${h.motto?`<div class="house-motto house-motto-dark">“${escapeHtml(h.motto)}”</div>`:""}
       <div class="house-institution-grid">
+        <div><small>ESPECIALIDADE</small><p>${escapeHtml(h.specialty||"Não informada.")}</p></div>
+        <div><small>VIRTUDES</small><p>${escapeHtml(h.virtues||"Não informadas.")}</p></div>
         <div><small>HISTÓRIA</small><p>${escapeHtml(h.history||"A história desta Casa ainda está sendo registrada no Portal.")}</p></div>
         <div><small>OBJETIVOS</small><p>${escapeHtml(h.goals||"Nenhum objetivo publicado.")}</p></div>
         <div><small>CONQUISTAS</small><p>${escapeHtml(h.achievements||"Nenhuma conquista registrada ainda.")}</p></div>
@@ -989,7 +993,7 @@ async function openHouse(id){
     detail.innerHTML=`<div class="house-empty">${escapeHtml(e.message)}</div>`;
   }
 }
-let rankingData={force:[],activity:[],missions:[],wealth:[],houses:[]};
+let rankingData={force:[],activity:[],missions:[],wealth:[],exp:[],houses:[]};
 let activeRanking="force";
 
 async function loadHierarchy(){
@@ -1148,10 +1152,10 @@ async function loadRanking(){
 async function renderRanking(type){
   const body=qs("#rankingBody"), info=qs("#rankingExplainer"); if(!body)return;
   qsa(".ranking-tab").forEach(b=>b.classList.toggle("active",b.dataset.rankingTab===type));
-  const descriptions={force:"Poder é o valor atual cadastrado para o jogador. A automação pelo catálogo de Cards será consolidada no módulo de Cards.",skill_sc:"Skill em SC é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",skill_vt:"Skill em VT é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",activity:"Atividade considera missões e conquistas registradas no sistema.",missions:"Classificação pela quantidade de missões concluídas.",wealth:"Classificação pelo saldo atual de Yuls.",houses:"Classificação das Casas pelo poder somado dos seus membros."};
+  const descriptions={force:"Poder é o valor atual cadastrado para o jogador. A automação pelo catálogo de Cards será consolidada no módulo de Cards.",skill_sc:"Skill em SC é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",skill_vt:"Skill em VT é um ranking independente. Batalhas só entram no placar depois de confirmação do oponente e aprovação administrativa.",activity:"Atividade = inscrições no mês + missões concluídas no mês + dias diferentes de acesso no mês." ,exp:"Classificação pela EXP acumulada do jogador.",missions:"Classificação pela quantidade de missões concluídas.",wealth:"Classificação pelo saldo atual de Yuls.",houses:"Classificação das Casas pelo poder somado dos seus membros."};
   info.textContent=descriptions[type]||"";
-  if(type==="houses"){const rows=rankingData.houses||[];body.innerHTML=rows.length?rows.map((h,i)=>`<tr><td><span class="rank-number">${i+1}</span></td><td><div class="house-rank-main"><span class="house-rank-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="rank-main">${escapeHtml(h.name)}<small>${h.members} membros</small></span></div></td><td class="rank-house">${h.leader?`Líder: ${escapeHtml(h.leader)}`:"Sem líder definida"}</td><td class="rank-secondary">⚔️ ${h.power.toLocaleString("pt-BR")}</td><td class="rank-secondary">📋 ${h.missions}</td></tr>`).join(""):`<tr><td colspan="5">Nenhuma Casa cadastrada.</td></tr>`;return;}
-  const rows=rankingData[type]||[];body.innerHTML=rows.length?rows.map((p,i)=>{let main="",secondary="";if(type==="force"){main=`⚔️ ${p.power.toLocaleString("pt-BR")}`;secondary=`📋 ${p.missions} missões`;}if(type==="skill_sc"){main=`⚔️ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em SC";}if(type==="skill_vt"){main=`⚡ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em VT";}if(type==="activity"){main=`⭐ ${(p.missions+p.achievements*3).toLocaleString("pt-BR")}`;secondary=`🏆 ${p.achievements} conquistas`;}if(type==="missions"){main=`📋 ${p.missions}`;secondary=`🪙 ${money(p.yuls)} Yuls`;}if(type==="wealth"){main=`🪙 ${money(p.yuls)}`;secondary=`📋 ${p.missions} missões`;}return `<tr><td><span class="rank-number">${i+1}</span></td><td><div class="rank-main">${escapeHtml(displayPlayerName(p))}<small>${escapeHtml(p.identifier)}</small></div></td><td class="rank-house">${escapeHtml(p.house||"Sem Casa")}</td><td class="rank-secondary">${main}</td><td class="rank-secondary">${secondary}</td></tr>`;}).join(""):`<tr><td colspan="5">Nenhum jogador disponível.</td></tr>`;
+  if(type==="houses"){const rows=rankingData.houses||[];body.innerHTML=rows.length?rows.map((h,i)=>`<tr><td><span class="rank-number">${i+1}</span></td><td><div class="house-rank-main"><span class="house-rank-emblem">${escapeHtml(h.emblem||"♜")}</span><span class="rank-main">${escapeHtml(h.name)}<small>${h.members} membros • ${h.active_mission_members} fizeram missão no mês</small></span></div></td><td class="rank-house">${h.leader?`Líder: ${escapeHtml(h.leader)}`:"Sem líder definida"}</td><td class="rank-secondary">📋 ${h.active_mission_members} ativos</td><td class="rank-secondary">⚔️ ${h.power.toLocaleString("pt-BR")}</td></tr>`).join(""):`<tr><td colspan="5">Nenhuma Casa cadastrada.</td></tr>`;return;}
+  const rows=rankingData[type]||[];body.innerHTML=rows.length?rows.map((p,i)=>{let main="",secondary="";if(type==="force"){main=`⚔️ ${p.power.toLocaleString("pt-BR")}`;secondary=`📋 ${p.missions} missões`;}if(type==="skill_sc"){main=`⚔️ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em SC";}if(type==="skill_vt"){main=`⚡ ${p.score.toLocaleString("pt-BR")} pontos`;secondary="Skill em VT";}if(type==="activity"){main=`⭐ ${Number(p.activity_score||0).toLocaleString("pt-BR")}`;secondary=`${p.registrations_month} inscrições • ${p.missions_month} missões • ${p.access_days_month} dias`;}if(type==="exp"){main=`⭐ ${Number(p.exp||0).toLocaleString("pt-BR")} EXP`;secondary="EXP acumulada";}if(type==="missions"){main=`📋 ${p.missions}`;secondary=`🪙 ${money(p.yuls)} Yuls`;}if(type==="wealth"){main=`🪙 ${money(p.yuls)}`;secondary=`📋 ${p.missions} missões`;}return `<tr><td><span class="rank-number">${i+1}</span></td><td><div class="rank-main">${escapeHtml(displayPlayerName(p))}<small>${escapeHtml(p.identifier)}</small></div></td><td class="rank-house">${escapeHtml(p.house||"Sem Casa")}</td><td class="rank-secondary">${main}</td><td class="rank-secondary">${secondary}</td></tr>`;}).join(""):`<tr><td colspan="5">Nenhum jogador disponível.</td></tr>`;
 }
 
 async function loadRankingPlayerActions(){
@@ -1851,7 +1855,7 @@ function resetHouseForm(){
 }
 function editHouseForm(id){
   const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
-  qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseKingdom").value=h.kingdom||"";qs("#houseEmblem").value=h.emblem||"♜";
+  qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseKingdom").value=h.kingdom||"";qs("#houseSpecialty").value=h.specialty||"";qs("#houseVirtues").value=h.virtues||"";qs("#houseEmblem").value=h.emblem||"♜";
   qs("#houseLeader").value=h.leader||"";qs("#houseVice").value=h.vice_leader||"";qs("#houseMotto").value=h.motto||"";qs("#houseColor").value=h.color||"";qs("#houseBanner").value=h.banner_url||"";qs("#houseStatus").value=h.status||"ATIVA";qs("#houseDescription").value=h.description||"";qs("#houseHistory").value=h.history||"";qs("#houseGoals").value=h.goals||"";qs("#houseAchievements").value=h.achievements||"";
   qs("#houseSaveBtn").textContent="Salvar Casa";qs("#houseError").textContent="";
   qs("#houseName").focus();
@@ -2015,8 +2019,26 @@ function renderAdminMissions(){
   const list=qs("#adminMissionList");if(!list)return;
   list.innerHTML=(state.adminMissions||[]).map(m=>`<div class="admin-mission-item"><div><b>${escapeHtml(missionLabel(m))}</b><small>${escapeHtml(m.status)} • ${escapeHtml(missionDate(m.start_at))} → ${escapeHtml(missionDate(m.end_at))}${m.published?"":" • Não publicada"}</small></div><div class="admin-mission-actions"><button type="button" data-mission-edit="${m.id}">✎</button><button type="button" class="delete" data-mission-cancel="${m.id}">×</button></div></div>`).join("")||`<div class="admin-history-empty">Nenhuma missão cadastrada.</div>`;
   qsa("[data-mission-edit]").forEach(b=>b.onclick=()=>editAdminMission(Number(b.dataset.missionEdit)));
+  qsa("[data-mission-participants]").forEach(b=>b.onclick=()=>openMissionParticipants(Number(b.dataset.missionParticipants)));
   qsa("[data-mission-cancel]").forEach(b=>b.onclick=async()=>{if(!confirm("Encerrar esta missão sem apagar seu registro?"))return;try{await adminApi(`/api/admin/missions/${b.dataset.missionCancel}`,{method:"DELETE"});await loadAdminMissions();await loadMissions();}catch(e){alert(e.message)}});
 }
+
+async function openMissionParticipants(missionId){
+  const mission=(state.adminMissions||[]).find(x=>Number(x.id)===Number(missionId));
+  if(!mission)return;
+  let wrap=qs('#missionParticipantsModal');
+  if(!wrap){wrap=document.createElement('div');wrap.id='missionParticipantsModal';wrap.className='role-detail-modal';document.body.appendChild(wrap);}
+  wrap.style.display='block';wrap.innerHTML=`<div class="role-detail"><div class="role-detail-head"><button class="journal-close" id="closeMissionParticipants">×</button><p class="eyebrow">PARTICIPANTES DA MISSÃO</p><h2>${escapeHtml(missionLabel(mission))}</h2></div><div class="role-detail-body"><p>Carregando participantes...</p></div></div>`;
+  try{
+    const [pd,playerData,cards]=await Promise.all([adminApi(`/api/admin/missions/${missionId}/participants`),adminApi('/api/admin/players'),adminApi('/api/admin/cards')]);
+    const players=playerData.players||[];
+    const participantRows=(pd.participants||[]).map(x=>`<div class="mission-participant-row"><div><b>${escapeHtml(x.nick)}</b><small>${escapeHtml(x.house||'Sem Casa')} • ${escapeHtml(x.result)}${x.reward_applied?' • recompensa aplicada':''}</small><div class="mission-participant-cards">${(x.cards||[]).map(c=>`<span>${escapeHtml(c.name||'Card')} ×${c.quantity}</span>`).join('')||'Sem cards'}</div></div><span>🪙 ${Number(x.reward_yuls||0)} • ⭐ ${Number(x.reward_exp||0)}</span></div>`).join('')||'<p>Nenhum participante registrado.</p>';
+    wrap.querySelector('.role-detail-body').innerHTML=`<div class="mission-participant-add"><h3>Registrar participação</h3><div class="mission-participant-form"><select id="mpPlayer"><option value="">Escolha o jogador</option>${(players||[]).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?' — '+escapeHtml(p.house):''}</option>`).join('')}</select><select id="mpResult"><option value="CONCLUIU">Concluiu</option><option value="PARTICIPOU">Participou</option><option value="FALHOU">Falhou</option><option value="AUSENTE">Ausente</option></select><input id="mpYuls" type="number" min="0" placeholder="Yuls"><input id="mpExp" type="number" min="0" placeholder="EXP"><input id="mpNotes" class="wide" placeholder="Observação"><div class="mission-card-picker">${(cards.cards||[]).filter(c=>Number(c.active)!==0).map(c=>`<label><input type="checkbox" value="${c.id}" data-mp-card><span>#${c.id} ${escapeHtml(c.name_pt||c.name)}</span><input type="number" min="1" value="1" data-mp-qty="${c.id}" aria-label="Quantidade"></label>`).join('')}</div><label class="announcement-options"><input type="checkbox" id="mpApplyRewards"> Aplicar recompensas agora</label><button class="gold" type="button" id="mpSave">Registrar participante</button><span class="error" id="mpErr"></span></div></div><div class="eyebrow" style="margin-top:18px">REGISTROS ATUAIS</div><div class="mission-participant-list">${participantRows}</div>`;
+    wrap.querySelector('#mpSave').onclick=async()=>{const err=wrap.querySelector('#mpErr');err.textContent='';const cardsPicked=[...wrap.querySelectorAll('[data-mp-card]:checked')].map(cb=>({card_id:Number(cb.value),quantity:Number(wrap.querySelector(`[data-mp-qty="${cb.value}"]`)?.value||1)}));try{await adminApi(`/api/admin/missions/${missionId}/participants`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:Number(qs('#mpPlayer').value),result:qs('#mpResult').value,reward_yuls:Number(qs('#mpYuls').value||0),reward_exp:Number(qs('#mpExp').value||0),notes:qs('#mpNotes').value,apply_rewards:qs('#mpApplyRewards').checked,cards:cardsPicked})});await openMissionParticipants(missionId);await loadAdminMissions();}catch(e){err.textContent=e.message}};
+    wrap.querySelector('#closeMissionParticipants').onclick=()=>wrap.style.display='none';wrap.onclick=e=>{if(e.target===wrap)wrap.style.display='none'};
+  }catch(e){wrap.querySelector('.role-detail-body').innerHTML=`<p>${escapeHtml(e.message)}</p>`;wrap.querySelector('#closeMissionParticipants').onclick=()=>wrap.style.display='none';}
+}
+
 function editAdminMission(id){const m=state.adminMissions.find(x=>Number(x.id)===id);if(!m)return;qs("#adminMissionId").value=m.id;qs("#adminMissionType").value=m.mission_type;qs("#adminMissionStart").value=toLocalInput(m.start_at);qs("#adminMissionEnd").value=toLocalInput(m.end_at);qs("#adminMissionStatus").value=m.status;qs("#adminMissionYuls").value=m.reward_yuls||0;qs("#adminMissionExp").value=m.reward_exp||0;qs("#adminMissionCards").value=m.reward_cards||"";qs("#adminMissionDescription").value=m.description||"";qs("#adminMissionInstructions").value=m.instructions||"";qs("#adminMissionError").textContent="Editando missão.";qs("#adminMissionManager")?.scrollIntoView({behavior:"smooth",block:"center"});}
 function clearAdminMissionForm(){qs("#adminMissionForm")?.reset();qs("#adminMissionId").value="";qs("#adminMissionError").textContent="";qs("#adminMissionStatus").value="AGENDADA";}
 qs("#adminMissionClear")?.addEventListener("click",clearAdminMissionForm);
