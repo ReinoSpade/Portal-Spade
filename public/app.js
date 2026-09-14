@@ -199,7 +199,15 @@ function go(page){
   if(page==="admin-login") refreshAdminSession();
 }
 
-qsa("[data-page]").forEach(el=>el.addEventListener("click",()=>go(el.dataset.page)));
+document.addEventListener("click",e=>{
+  const el=e.target.closest("[data-page]");
+  if(!el)return;
+  go(el.dataset.page);
+});
+document.addEventListener("click",e=>{
+  const retry=e.target.closest("[data-retry-home]");
+  if(retry){retry.disabled=true;retry.textContent="Carregando…";loadHome();}
+});
 qs("#hamb").addEventListener("click",()=>{closeGlobalSearch();qs("#nav").classList.toggle("open")});
 qs("#mobileMenuBtn")?.addEventListener("click",()=>{closeGlobalSearch();qs("#nav")?.classList.toggle("open")});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){qs("#nav")?.classList.remove("open");qs("#globalSearchResults")?.setAttribute("hidden","");qs("#globalSearchInput")?.blur();const m=qs("#libraryReaderModal");if(m?.classList.contains("open")){m.classList.remove("open");document.body.classList.remove("library-reader-open");}closeLibraryExplorer();}});
@@ -219,12 +227,33 @@ async function api(url,options={}){
   return d;
 }
 
-async function loadHome(){
+async function loadHome(attempt=0){
+  const maxAttempts=2;
   try{
-    const d=await api("/api/home");let active={activities:[]};try{active=await api("/api/active-activities")}catch(_){/* feed ao vivo indisponível não bloqueia a Home */}state.data=d;state.activeActivities=active.activities||[];renderHomeAnnouncements(d.announcements||[]);renderHomeActiveActivities(state.activeActivities);
-    qs("#newsGrid").innerHTML=d.news.length?d.news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
-    const e=d.editions[0];qs("#homeEditionTitle").textContent=e?e.title:"Nenhuma edição publicada";qs("#editionDesc").textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
-  }catch(e){qs("#newsGrid").innerHTML=`<div class="panel"><h3>Erro ao carregar</h3><p>${escapeHtml(e.message)}</p></div>`}
+    const d=await api("/api/home");
+    let active={activities:[]};
+    try{active=await api("/api/active-activities")}catch(_){/* feed ao vivo indisponível não bloqueia a Home */}
+    state.data=d;state.activeActivities=active.activities||[];
+    renderHomeAnnouncements(d.announcements||[]);
+    renderHomeActiveActivities(state.activeActivities);
+    const news=Array.isArray(d.news)?d.news:[];
+    const newsGrid=qs("#newsGrid");
+    if(newsGrid)newsGrid.innerHTML=news.length?news.map((n,i)=>`<article class="news-card ${i===0?"featured":""}"><div class="art ${n.image_url?"has-image":""}" ${n.image_url?`style="background-image:url('${escapeHtml(n.image_url)}')"`:""}>${n.image_url?"":(i===0?"♠":"◆")}</div><div><span class="tag">${escapeHtml(n.category)}</span><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.excerpt)}</p></div></article>`).join(""):`<div class="panel"><h3>Nenhuma notícia publicada</h3><p>Use o painel administrativo para publicar a primeira.</p></div>`;
+    const e=Array.isArray(d.editions)?d.editions[0]:null;
+    const title=qs("#homeEditionTitle"),desc=qs("#editionDesc");
+    if(title)title.textContent=e?e.title:"Nenhuma edição publicada";
+    if(desc)desc.textContent=e?e.description:"Adicione uma edição pelo painel administrativo.";
+    return true;
+  }catch(err){
+    if(attempt<maxAttempts){
+      const delay=700*(attempt+1);
+      setTimeout(()=>loadHome(attempt+1),delay);
+      return false;
+    }
+    const newsGrid=qs("#newsGrid");
+    if(newsGrid)newsGrid.innerHTML=`<div class="panel home-load-error"><h3>Não foi possível carregar a Home</h3><p>${escapeHtml(err.message)}</p><button type="button" class="gold small" data-retry-home>↻ Tentar novamente</button></div>`;
+    return false;
+  }
 }
 
 const LIBRARY_TOPICS={
@@ -1677,8 +1706,12 @@ function updateContextNav(){
   if(simulatorNav){const visible=logged&&state.me?.account_type!=="ALLY";simulatorNav.style.display=visible?"":"none";simulatorNav.classList.toggle("is-visible",visible);simulatorNav.setAttribute("aria-hidden",String(!visible));}
   const adminNav=qs("#adminNav");
   if(adminNav){
-    adminNav.classList.toggle("is-visible",!!state.admin);
-    adminNav.setAttribute("aria-hidden",String(!state.admin));
+    const canAccessAdmin=logged||state.admin;
+    adminNav.classList.toggle("is-visible",canAccessAdmin);
+    adminNav.classList.toggle("admin-player-access",logged&&!state.admin);
+    adminNav.dataset.page=state.admin?"admin":"admin-login";
+    adminNav.setAttribute("aria-hidden",String(!canAccessAdmin));
+    adminNav.setAttribute("title",state.admin?"Abrir Administração":"Entrar na Administração");
   }
   const login=qs("#loginNav");
   if(login) login.setAttribute("aria-label",logged?"Abrir meu painel":"Entrar no Reino");
@@ -3915,7 +3948,18 @@ async function tryAdminHash(){
   if(state.admin) go("admin"); else go("admin-login");
 }
 
-loadPortalPublicSettings();initGlobalSearch();initGuideNavigation();loadHome();setLoginNav();updateContextNav();tryMe();setAdminNav();tryAdminHash();
+async function bootstrapPortal(){
+  loadPortalPublicSettings();
+  initGlobalSearch();
+  initGuideNavigation();
+  await Promise.allSettled([tryMe(),refreshAdminSession()]);
+  if(!state.me)setLoginNav();
+  setAdminNav();
+  updateContextNav();
+  loadHome();
+  await tryAdminHash();
+}
+bootstrapPortal();
 
 
 function populateNotificationPlayers(){const sel=qs("#notificationPlayer");if(!sel)return;const players=state.players||[];sel.innerHTML=`<option value="">Escolher jogador...</option>`+players.filter(p=>Number(p.active)!==0).map(p=>`<option value="${p.id}">${escapeHtml(displayPlayerName(p))}${p.house?` — ${escapeHtml(p.house)}`:""}</option>`).join("");}
