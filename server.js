@@ -440,6 +440,86 @@ function applyPortalSetting(key,value){
   else if(key==='visibility_scopes') portalSettings.visibility_scopes=cleanStringList(value,DEFAULT_PORTAL_SETTINGS.visibility_scopes);
   else if(['kingdom_name','kingdom_motto','timezone','footer_text'].includes(key)) portalSettings[key]=String(value??'').trim() || String(DEFAULT_PORTAL_SETTINGS[key]);
 }
+
+async function refreshMissionCounters(executor=pool){
+  await executor.query(`
+    UPDATE players p
+    SET missions = COALESCE((
+      SELECT COUNT(*)::int
+      FROM missions m
+      WHERE m.player_id=p.id
+        AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')
+    ),0),
+    updated_at=NOW()
+  `);
+}
+
+async function touchPlayerAccess(playerId, executor=pool){
+  const id=Number(playerId);
+  if(!Number.isInteger(id)||id<=0)return;
+  await executor.query(
+    `INSERT INTO player_access_days(player_id,access_date,first_seen_at,last_seen_at) VALUES($1,(NOW() AT TIME ZONE 'America/Sao_Paulo')::date,NOW(),NOW())
+     ON CONFLICT(player_id,access_date) DO UPDATE SET last_seen_at=NOW()`,[id]
+  );
+}
+
+function spadeMonthSql(alias="d"){
+  return `(DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo')`;
+}
+
+const SPADE_HOUSE_KINGDOMS = {
+  Grinberryall:'Spade', Novachrono:'Spade', Zogratis:'Spade',
+  Silva:'Clover', Silvamillion:'Clover', Vermillion:'Clover', Faust:'Clover', Voltia:'Clover',
+  Mars:'Diamond', Mariella:'Diamond', Kruger:'Diamond', Whomalt:'Diamond'
+};
+
+function normalizeOfficialHouseName(value){
+  return String(value||'').replace(/^casa\s+/i,'').trim().toLocaleLowerCase('pt-BR');
+}
+
+
+async function reconcileScheduleEventLinks(executor=pool){
+  await executor.query(`
+    UPDATE schedule_activities s
+    SET event_id=e.id,updated_at=NOW()
+    FROM events e
+    WHERE s.event_id IS NULL
+      AND lower(trim(s.title))=lower(trim(e.title))
+      AND (s.activity_date=e.start_date OR e.start_date IS NULL)
+  `);
+}
+
+async function reconcileOfficialHouseKingdoms(executor=pool){
+  const rows=(await executor.query(`SELECT id,name FROM houses`)).rows;
+  const targets=new Map(Object.entries(SPADE_HOUSE_KINGDOMS).map(([name,kingdom])=>[normalizeOfficialHouseName(name),kingdom]));
+  for(const row of rows){
+    const kingdom=targets.get(normalizeOfficialHouseName(row.name));
+    if(kingdom) await executor.query(`UPDATE houses SET kingdom=$1,updated_at=NOW() WHERE id=$2`,[kingdom,row.id]);
+  }
+}
+
+async function syncScheduleFromEvent(eventId, executor=pool){
+  const id=Number(eventId); if(!Number.isInteger(id)||id<=0)return;
+  await executor.query(`
+    UPDATE schedule_activities s
+    SET title=e.title,
+        activity_date=COALESCE(e.start_date,s.activity_date),
+        end_date=COALESCE(e.end_date,s.end_date, e.start_date),
+        status=CASE e.status WHEN 'CANCELADO' THEN 'CANCELADA' WHEN 'ENCERRADO' THEN 'CONCLUIDA' WHEN 'ATIVO' THEN 'EM_ANDAMENTO' ELSE s.status END,
+        updated_at=NOW()
+    FROM events e
+    WHERE e.id=$1 AND s.event_id=e.id`,[id]);
+}
+
+async function syncEventFromSchedule(scheduleId, executor=pool){
+  const id=Number(scheduleId); if(!Number.isInteger(id)||id<=0)return;
+  const row=(await executor.query(`SELECT id,event_id,activity_date,end_date,status,title FROM schedule_activities WHERE id=$1`,[id])).rows[0];
+  if(!row?.event_id)return;
+  const eventStatus = row.status==='CANCELADA'?'CANCELADO':row.status==='CONCLUIDA'?'ENCERRADO':row.status==='EM_ANDAMENTO'?'ATIVO':'PLANEJADO';
+  await executor.query(`UPDATE events SET start_date=$1,end_date=$2,status=$3,updated_at=NOW() WHERE id=$4`,[row.activity_date,row.end_date||row.activity_date,eventStatus,row.event_id]);
+  await syncScheduleFromEvent(row.event_id,executor);
+}
+
 async function loadPortalSettings(){
   const r=await pool.query('SELECT key,value FROM portal_settings');
   portalSettings={...DEFAULT_PORTAL_SETTINGS};
@@ -950,6 +1030,8 @@ async function initDatabase() {
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS goals TEXT DEFAULT '';
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS achievements TEXT DEFAULT '';
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS kingdom TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS specialty TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS virtues TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_houses_kingdom ON houses(kingdom);
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ATIVA';
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1;
@@ -1228,6 +1310,46 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_players_nick ON players(nick);
     CREATE INDEX IF NOT EXISTS idx_yuls_history_player ON yuls_history(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_roles_role ON player_roles(role_id);
+
+ALTER TABLE missions ADD COLUMN IF NOT EXISTS mission_activity_id BIGINT REFERENCES mission_activities(id) ON DELETE SET NULL;
+ALTER TABLE missions ADD COLUMN IF NOT EXISTS mission_participant_id BIGINT;
+CREATE INDEX IF NOT EXISTS idx_missions_activity ON missions(mission_activity_id,id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_missions_participant ON missions(mission_participant_id) WHERE mission_participant_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS mission_participants (
+  id BIGSERIAL PRIMARY KEY,
+  mission_activity_id BIGINT NOT NULL REFERENCES mission_activities(id) ON DELETE CASCADE,
+  player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  result TEXT NOT NULL DEFAULT 'PARTICIPOU' CHECK (result IN ('CONCLUIU','FALHOU','PARTICIPOU','AUSENTE')),
+  notes TEXT DEFAULT '',
+  reward_yuls BIGINT NOT NULL DEFAULT 0 CHECK (reward_yuls>=0),
+  reward_exp BIGINT NOT NULL DEFAULT 0 CHECK (reward_exp>=0),
+  reward_applied INTEGER NOT NULL DEFAULT 0 CHECK (reward_applied IN (0,1)),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(mission_activity_id,player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_participants_player ON mission_participants(player_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mission_participants_activity ON mission_participants(mission_activity_id,result);
+
+CREATE TABLE IF NOT EXISTS mission_participant_cards (
+  participant_id BIGINT NOT NULL REFERENCES mission_participants(id) ON DELETE CASCADE,
+  card_id BIGINT NOT NULL REFERENCES cards(id) ON DELETE RESTRICT,
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity>0),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(participant_id,card_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_participant_cards_card ON mission_participant_cards(card_id);
+
+CREATE TABLE IF NOT EXISTS player_access_days (
+  player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  access_date DATE NOT NULL,
+  first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(player_id,access_date)
+);
+CREATE INDEX IF NOT EXISTS idx_player_access_days_month ON player_access_days(access_date,player_id);
+
     CREATE INDEX IF NOT EXISTS idx_missions_player ON missions(player_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_announcements_public ON announcements(published, featured, id DESC);
     CREATE INDEX IF NOT EXISTS idx_player_admin_history ON player_admin_history(player_id, id DESC);
@@ -1885,6 +2007,7 @@ app.post("/api/login", async (req, res) => {
       const valid = await bcrypt.compare(password, player.password_hash);
       if (!valid) return res.status(401).json({ error: "Login ou senha incorretos." });
       player.roles=await getPlayerRoles(player.id);
+      await touchPlayerAccess(player.id);
 
       res.cookie("spade_player", makePlayerToken(Number(player.id)), {
         httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 1000 * 60 * 60 * 24 * 7
@@ -1928,6 +2051,7 @@ app.get("/api/me", async (req, res) => {
     const result = await pool.query("SELECT * FROM players WHERE id=$1 AND active=1", [id]);
     const player = result.rows[0];
     if (!player) return res.status(401).json({ error: "Sessão inválida." });
+    await touchPlayerAccess(id);
     player.roles=await getPlayerRoles(id);
     res.json({ player: publicPlayer(player) });
   } catch (e) { console.error(e); res.status(500).json({ error: "Erro ao carregar perfil." }); }
@@ -1938,7 +2062,7 @@ app.get("/api/me/dashboard", async (req,res)=>{
   const isAlly=viewer.type==='ALLY', playerId=isAlly?null:viewer.id;
   try{
     const [playerR,cardsR,rankR,eventR,missionR,scheduleR,notesR,statusR]=await Promise.all([
-      isAlly?Promise.resolve({rows:[]}):pool.query(`SELECT id,nick,house,patent,grimoire,hp,mana,yuls,missions,achievements,exp,active,power FROM players WHERE id=$1 AND active=1 LIMIT 1`,[playerId]),
+      isAlly?Promise.resolve({rows:[]}):pool.query(`SELECT p.id,p.nick,p.house,p.patent,p.grimoire,p.hp,p.mana,p.yuls,COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,p.achievements,p.exp,p.active,p.power FROM players p WHERE p.id=$1 AND p.active=1 LIMIT 1`,[playerId]),
       isAlly?pool.query(`SELECT COUNT(*)::int AS count,COALESCE(SUM(c.power_value),0)::bigint AS power FROM ally_cards ac JOIN cards c ON c.id=ac.card_id WHERE ac.ally_id=$1`,[viewer.id]):pool.query(`SELECT COUNT(*)::int AS count,COALESCE(SUM(c.power_value),0)::bigint AS power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[playerId]),
       isAlly?Promise.resolve({rows:[{power_rank:0,sc_rank:0,vt_rank:0}]}):pool.query(`WITH powers AS (SELECT p.id,COALESCE(SUM(c.power_value),0)::bigint AS score FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.active=1 AND p.public_profile=1 GROUP BY p.id), sc AS (SELECT id,skill_sc AS score FROM players WHERE active=1 AND public_profile=1), vt AS (SELECT id,skill_vt AS score FROM players WHERE active=1 AND public_profile=1) SELECT (SELECT COUNT(*)+1 FROM powers WHERE score>(SELECT score FROM powers WHERE id=$1))::int AS power_rank,(SELECT COUNT(*)+1 FROM sc WHERE score>(SELECT score FROM sc WHERE id=$1))::int AS sc_rank,(SELECT COUNT(*)+1 FROM vt WHERE score>(SELECT score FROM vt WHERE id=$1))::int AS vt_rank`,[playerId]),
       pool.query(`SELECT id,title,event_type,description,start_date,end_date,status FROM events WHERE published=1 AND status NOT IN ('CANCELADO','CANCELADA') AND ${eventIsLiveSql('events')} ORDER BY end_date ASC NULLS LAST,id ASC LIMIT 8`),
@@ -2337,7 +2461,7 @@ async function emblemMetric(playerId,condition){
   switch(type){
     case 'CARDS_TOTAL': { const r=await pool.query(`SELECT COALESCE(SUM(quantity),0)::bigint AS value FROM player_cards WHERE player_id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Cards possuídos'; break; }
     case 'CARD_CATEGORIES': { const r=await pool.query(`SELECT COUNT(DISTINCT COALESCE(NULLIF(c.category,''),c.type))::int AS value FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Categorias de Cards'; break; }
-    case 'MISSIONS_TOTAL': { const r=await pool.query(`SELECT COALESCE(missions,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Missões registradas'; break; }
+    case 'MISSIONS_TOTAL': { const r=await pool.query(`SELECT COUNT(*)::bigint AS value FROM missions WHERE player_id=$1 AND lower(trim(status)) IN ('concluída','concluida','concluído','concluido')`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Missões registradas'; break; }
     case 'EVENTS_PARTICIPATED': { const r=await pool.query(`SELECT COUNT(*)::int AS value FROM event_participants WHERE player_id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Eventos participados'; break; }
     case 'TOURNAMENT_WINS': { const r=await pool.query(`SELECT COUNT(*)::int AS value FROM event_results er JOIN events e ON e.id=er.event_id WHERE er.player_id=$1 AND er.published=1 AND lower(e.event_type) LIKE '%torneio%'`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Vitórias em torneios'; break; }
     case 'POWER': { const r=await pool.query(`SELECT COALESCE(power,0)::bigint AS value FROM players WHERE id=$1`,[playerId]); current=Number(r.rows[0]?.value||0); label ||= 'Poder'; break; }
@@ -2747,8 +2871,10 @@ app.get("/api/editorial/overview", async (req,res)=>{
         (SELECT COUNT(*) FROM events WHERE published=1)::int AS events,
         (SELECT COUNT(*) FROM cards WHERE active=1)::int AS cards`),
       pool.query(`SELECT h.id,h.name,h.emblem,h.description,COUNT(p.id)::int AS members,
-                         COALESCE(SUM(p.missions),0)::int AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls
-                  FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name))
+                         COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido')) THEN 1 ELSE 0 END),0)::int AS missions,
+                         COALESCE(SUM(p.yuls),0)::bigint AS yuls
+                  FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.active=1 AND p.public_profile=1
+                  WHERE h.active=1 AND lower(trim(COALESCE(h.kingdom,'')))='spade'
                   GROUP BY h.id ORDER BY missions DESC,h.name ASC LIMIT 6`),
       pool.query(`SELECT ps.status_date,ps.message,p.nick,p.house,ps.updated_at
                   FROM player_statuses ps JOIN players p ON p.id=ps.player_id
@@ -2826,18 +2952,6 @@ function saoPauloTodaySql(){
   return `(NOW() AT TIME ZONE 'America/Sao_Paulo')::date`;
 }
 
-async function refreshMissionCounters(executor=pool){
-  await executor.query(`
-    UPDATE players p
-    SET missions = COALESCE((
-      SELECT COUNT(*)::int
-      FROM missions m
-      WHERE m.player_id=p.id
-        AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')
-    ),0),
-    updated_at=NOW()`);
-}
-
 function eventIsLiveSql(alias="events"){
   const a=alias;
   return `((${a}.status='ATIVO') OR (${a}.start_date IS NOT NULL AND ${a}.start_date <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (${a}.end_date IS NULL OR ${a}.end_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)))`;
@@ -2909,7 +3023,7 @@ app.get("/api/missions", async (req,res)=>{
   const viewer=await resolveViewer(req);
   if(!viewer) return res.status(401).json({error:"Faça login para visualizar as missões."});
   try{
-    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published FROM mission_activities WHERE published=1 ORDER BY start_at DESC,id DESC LIMIT 100`);
+    const r=await pool.query(`SELECT ma.id,ma.mission_type,ma.start_at,ma.end_at,ma.description,ma.instructions,ma.reward_yuls,ma.reward_exp,ma.reward_cards,ma.status,ma.published,COUNT(mp.id)::int AS participant_count FROM mission_activities ma LEFT JOIN mission_participants mp ON mp.mission_activity_id=ma.id WHERE ma.published=1 GROUP BY ma.id ORDER BY start_at DESC,id DESC LIMIT 100`);
     res.json({missions:r.rows.map(m=>({...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0),status:missionStatusFromDates(m.start_at,m.end_at,m.status)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar missões."});}
 });
@@ -2922,9 +3036,78 @@ app.get("/api/missions/active", async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao verificar missão ativa."});}
 });
 
+
+app.get("/api/admin/missions/:id/participants", requireAdmin, async (req,res)=>{
+  const missionId=Number(req.params.id); if(!Number.isInteger(missionId)||missionId<=0)return res.status(400).json({error:"Missão inválida."});
+  try{
+    const r=await pool.query(`SELECT mp.id,mp.mission_activity_id,mp.player_id,p.nick,p.number,p.house,mp.result,mp.notes,mp.reward_yuls,mp.reward_exp,mp.reward_applied,COALESCE(JSON_AGG(JSON_BUILD_OBJECT('card_id',mpc.card_id,'quantity',mpc.quantity,'name',c.name) ORDER BY c.name) FILTER (WHERE mpc.card_id IS NOT NULL),'[]'::json) AS cards FROM mission_participants mp JOIN players p ON p.id=mp.player_id LEFT JOIN mission_participant_cards mpc ON mpc.participant_id=mp.id LEFT JOIN cards c ON c.id=mpc.card_id WHERE mp.mission_activity_id=$1 GROUP BY mp.id,p.nick,p.number,p.house ORDER BY p.nick COLLATE "C"`,[missionId]);
+    res.json({participants:r.rows.map(x=>({...x,id:Number(x.id),mission_activity_id:Number(x.mission_activity_id),player_id:Number(x.player_id),reward_yuls:Number(x.reward_yuls||0),reward_exp:Number(x.reward_exp||0),reward_applied:Boolean(x.reward_applied),cards:Array.isArray(x.cards)?x.cards:[]}))});
+  }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar participantes da missão."});}
+});
+
+app.post("/api/admin/missions/:id/participants", requireAdmin, async (req,res)=>{
+  const missionId=Number(req.params.id),playerId=Number(req.body?.player_id); if(!Number.isInteger(missionId)||!Number.isInteger(playerId))return res.status(400).json({error:"Missão ou jogador inválido."});
+  const result=['CONCLUIU','FALHOU','PARTICIPOU','AUSENTE'].includes(String(req.body?.result||'PARTICIPOU').toUpperCase())?String(req.body.result).toUpperCase():'PARTICIPOU';
+  const rewardYuls=Math.max(0,Number(req.body?.reward_yuls||0)),rewardExp=Math.max(0,Number(req.body?.reward_exp||0));
+  const cards=Array.isArray(req.body?.cards)?req.body.cards.map(x=>({card_id:Number(x.card_id),quantity:Math.max(1,Number(x.quantity||1))})).filter(x=>Number.isInteger(x.card_id)&&x.card_id>0):[];
+  const applyRewards=req.body?.apply_rewards===true;
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const mission=(await client.query(`SELECT id,mission_type,description FROM mission_activities WHERE id=$1 FOR UPDATE`,[missionId])).rows[0];
+    if(mission) mission.title=String(mission.mission_type||'Missão').trim()||'Missão';
+    if(!mission){await client.query('ROLLBACK');return res.status(404).json({error:'Missão não encontrada.'});}
+    const player=(await client.query(`SELECT id,nick,yuls,exp FROM players WHERE id=$1 AND active=1 FOR UPDATE`,[playerId])).rows[0];
+    if(!player){await client.query('ROLLBACK');return res.status(404).json({error:'Jogador não encontrado.'});}
+    const currentParticipant=(await client.query(`SELECT id,reward_applied FROM mission_participants WHERE mission_activity_id=$1 AND player_id=$2 FOR UPDATE`,[missionId,playerId])).rows[0];
+    if(currentParticipant && Number(currentParticipant.reward_applied)===1){await client.query('ROLLBACK');return res.status(400).json({error:'Este participante já recebeu a recompensa. Preserve o histórico e não altere o registro aplicado.'});}
+    const up=(await client.query(`INSERT INTO mission_participants(mission_activity_id,player_id,result,notes,reward_yuls,reward_exp,reward_applied) VALUES($1,$2,$3,$4,$5,$6,0) ON CONFLICT(mission_activity_id,player_id) DO UPDATE SET result=EXCLUDED.result,notes=EXCLUDED.notes,reward_yuls=EXCLUDED.reward_yuls,reward_exp=EXCLUDED.reward_exp,updated_at=NOW() RETURNING id`,[missionId,playerId,result,String(req.body?.notes||''),rewardYuls,rewardExp]));
+    const participantId=Number(up.rows[0].id);
+    await client.query(`DELETE FROM mission_participant_cards WHERE participant_id=$1`,[participantId]);
+    for(const card of cards){
+      const exists=await client.query(`SELECT id FROM cards WHERE id=$1 AND active=1 LIMIT 1`,[card.card_id]);
+      if(!exists.rowCount){await client.query('ROLLBACK');return res.status(400).json({error:`Card #${card.card_id} não encontrado ou inativo.`});}
+      await client.query(`INSERT INTO mission_participant_cards(participant_id,card_id,quantity) VALUES($1,$2,$3)`,[participantId,card.card_id,card.quantity]);
+    }
+    let applied=false;
+    if(applyRewards && result==='CONCLUIU'){
+      const already=(await client.query(`SELECT reward_applied FROM mission_participants WHERE id=$1 FOR UPDATE`,[participantId])).rows[0];
+      if(Number(already.reward_applied)===1){await client.query('ROLLBACK');return res.status(400).json({error:'As recompensas deste participante já foram aplicadas.'});}
+      const newYuls=Number(player.yuls||0)+rewardYuls, newExp=Number(player.exp||0)+rewardExp;
+      await client.query(`UPDATE players SET yuls=$1,exp=$2,updated_at=NOW() WHERE id=$3`,[newYuls,newExp,playerId]);
+      if(rewardYuls>0)await client.query(`INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES($1,$2,$3,$4)`,[playerId,rewardYuls,`Recompensa da missão: ${mission.title}`,newYuls]);
+      if(rewardExp>0)await client.query(`INSERT INTO exp_history(player_id,amount,source_code,source_detail,reason,exp_before,exp_after,created_by_admin_id) VALUES($1,$2,'MISSAO',$3,$4,$5,$6,$7)`,[playerId,rewardExp,mission.id,`Recompensa da missão: ${mission.title}`,Number(player.exp||0),newExp,req.admin?.id||null]);
+      for(const card of cards){
+        const current=(await client.query(`SELECT quantity FROM player_cards WHERE player_id=$1 AND card_id=$2 FOR UPDATE`,[playerId,card.card_id])).rows[0];
+        const qty=(Number(current?.quantity||0)+card.quantity);
+        await client.query(`INSERT INTO player_cards(player_id,card_id,quantity,acquisition_type,acquisition_id,acquisition_name,updated_at) VALUES($1,$2,$3,'MISSAO',$4,$5,NOW()) ON CONFLICT(player_id,card_id) DO UPDATE SET quantity=player_cards.quantity+$3,acquisition_type='MISSAO',acquisition_id=$4,acquisition_name=$5,updated_at=NOW()`,[playerId,card.card_id,card.quantity,missionId,mission.title]);
+        await client.query(`INSERT INTO player_card_history(player_id,card_id,action,acquisition_type,acquisition_id,acquisition_name,notes) VALUES($1,$2,'ADQUIRIDO','MISSAO',$3,$4,$5)`,[playerId,card.card_id,missionId,mission.title,`Recompensa registrada para ${player.nick}.`]);
+      }
+      await client.query(`UPDATE mission_participants SET reward_applied=1,updated_at=NOW() WHERE id=$1`,[participantId]);
+      const existing=(await client.query(`SELECT id FROM missions WHERE mission_participant_id=$1 LIMIT 1`,[participantId])).rows[0];
+      if(!existing){
+        await client.query(`INSERT INTO missions(player_id,title,mission_type,status,reward_yuls,notes,completed_at,mission_activity_id,mission_participant_id) VALUES($1,$2,$3,'Concluída',$4,$5,(NOW() AT TIME ZONE 'America/Sao_Paulo')::date,$6,$7)`,[playerId,mission.title,mission.mission_type,rewardYuls,String(req.body?.notes||''),missionId,participantId]);
+      }
+      applied=true;
+    }
+    await refreshMissionCounters(client);
+    await client.query('COMMIT');
+    res.json({ok:true,participant_id:participantId,reward_applied:applied});
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(500).json({error:e.message||'Erro ao registrar participante.'});}
+  finally{client.release();}
+});
+
+app.delete("/api/admin/missions/:id/participants/:participantId", requireAdmin, async (req,res)=>{
+  const participantId=Number(req.params.participantId); if(!Number.isInteger(participantId))return res.status(400).json({error:'Participante inválido.'});
+  try{
+    const r=await pool.query(`SELECT reward_applied FROM mission_participants WHERE id=$1`,[participantId]); if(!r.rows[0])return res.status(404).json({error:'Participante não encontrado.'}); if(Number(r.rows[0].reward_applied)===1)return res.status(400).json({error:'Participante com recompensa aplicada não pode ser removido. Preserve o histórico.'});
+    const d=await pool.query(`DELETE FROM mission_participants WHERE id=$1 RETURNING id`,[participantId]); res.json({ok:Boolean(d.rowCount)});
+  }catch(e){console.error(e);res.status(500).json({error:'Erro ao remover participante.'});}
+});
+
 app.get("/api/admin/missions", requireAdmin, async (req,res)=>{
   try{
-    const r=await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_at,updated_at FROM mission_activities ORDER BY start_at DESC,id DESC LIMIT 300`);
+    const r=await pool.query(`SELECT ma.id,ma.mission_type,ma.start_at,ma.end_at,ma.description,ma.instructions,ma.reward_yuls,ma.reward_exp,ma.reward_cards,ma.status,ma.published,ma.created_at,ma.updated_at,COUNT(mp.id)::int AS participant_count FROM mission_activities ma LEFT JOIN mission_participants mp ON mp.mission_activity_id=ma.id GROUP BY ma.id ORDER BY ma.start_at DESC,ma.id DESC LIMIT 300`);
     res.json({types:MISSION_TYPES,statuses:MISSION_STATUSES,missions:r.rows.map(m=>({...m,id:Number(m.id),reward_yuls:Number(m.reward_yuls||0),reward_exp:Number(m.reward_exp||0),status:missionStatusFromDates(m.start_at,m.end_at,m.status)}))});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar missões administrativas."});}
 });
@@ -3220,7 +3403,7 @@ app.get("/api/search", async (req,res)=>{
 
     const base=[
       pool.query(`SELECT id,nick,number,identifier,house,patent FROM players WHERE active=1 AND ${isAdmin?'TRUE':'public_profile=1'} AND ${pq.where} ORDER BY lower(nick) ASC LIMIT 10`,pq.params),
-      pool.query(`SELECT id,name,emblem,description,motto FROM houses WHERE active=1 AND ${hq.where} ORDER BY lower(name) ASC LIMIT 8`,hq.params),
+      pool.query(`SELECT id,name,emblem,description,motto FROM houses WHERE active=1 AND ${isAdmin?'TRUE':"lower(trim(COALESCE(kingdom,'')))='spade'"} AND ${hq.where} ORDER BY lower(name) ASC LIMIT 8`,hq.params),
       pool.query(`SELECT id,title,event_type,status,start_date,end_date,description,rules FROM events WHERE published=1 AND ${eq.where} ORDER BY CASE status WHEN 'ATIVO' THEN 1 WHEN 'PLANEJADO' THEN 2 WHEN 'ENCERRADO' THEN 3 ELSE 4 END,start_date DESC,id DESC LIMIT 8`,eq.params),
       pool.query(`SELECT id,mission_type,start_at,end_at,status,description,instructions FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND ${mq.where} ORDER BY start_at DESC,id DESC LIMIT 8`,mq.params),
       pool.query(`SELECT id,title,activity_type,activity_date,end_date,start_time,end_time,status,description,location FROM schedule_activities WHERE published=1 AND ${sq.where} ORDER BY activity_date DESC,start_time DESC NULLS LAST,id DESC LIMIT 8`,sq.params),
@@ -3246,7 +3429,7 @@ app.get("/api/search", async (req,res)=>{
     if(exactId!==null){
       const exactQueries=[
         pool.query(`SELECT id,nick,number,identifier,house,patent FROM players WHERE active=1 AND ${isAdmin?'TRUE':'public_profile=1'} AND id=$1 LIMIT 1`,[exactId]),
-        pool.query(`SELECT id,name,emblem,description,motto FROM houses WHERE active=1 AND id=$1 LIMIT 1`,[exactId]),
+        pool.query(`SELECT id,name,emblem,description,motto FROM houses WHERE active=1 AND ${isAdmin?'TRUE':"lower(trim(COALESCE(kingdom,'')))='spade'"} AND id=$1 LIMIT 1`,[exactId]),
         pool.query(`SELECT id,title,event_type,status,start_date,end_date,description,rules FROM events WHERE published=1 AND id=$1 LIMIT 1`,[exactId]),
         pool.query(`SELECT id,mission_type,start_at,end_at,status,description,instructions FROM mission_activities WHERE published=1 AND status<>'CANCELADA' AND id=$1 LIMIT 1`,[exactId]),
         pool.query(`SELECT id,title,activity_type,activity_date,end_date,start_time,end_time,status,description,location FROM schedule_activities WHERE published=1 AND id=$1 LIMIT 1`,[exactId]),
@@ -3296,16 +3479,19 @@ app.get("/api/home", async (req, res) => {
         GROUP BY e.id
         ORDER BY e.id DESC LIMIT 6
       `),
-      pool.query(`SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.status,h.active,
+      pool.query(`SELECT h.id,h.name,h.kingdom,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.specialty,h.virtues,h.color,h.banner_url,h.status,h.active,
                          COUNT(p.id)::int AS count,
-                         COALESCE(SUM(p.missions),0)::bigint AS missions
+                         COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido')) THEN 1 ELSE 0 END),0)::bigint AS missions
                   FROM houses h
-                  LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name))
+                  LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.active=1 AND p.public_profile=1
+                  WHERE h.active=1 AND lower(trim(COALESCE(h.kingdom,'')))='spade'
                   GROUP BY h.id
-                  ORDER BY missions DESC, h.name ASC
+                  ORDER BY missions DESC,h.name ASC
                   LIMIT 20`),
-      pool.query(`SELECT nick,identifier,house,missions,ranking
-                  FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 10`),
+      pool.query(`SELECT p.nick,p.identifier,p.house,
+                         COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,
+                         p.ranking
+                  FROM players p WHERE p.ranking>0 AND p.active=1 AND p.public_profile=1 ORDER BY p.ranking ASC LIMIT 10`),
       pool.query(`SELECT id,title,category,priority,body,date,featured
                   FROM announcements
                   WHERE published=1
@@ -3334,15 +3520,16 @@ app.get("/api/home", async (req, res) => {
 app.get("/api/houses", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT h.id,h.name,h.kingdom,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.status,h.active,
+      `SELECT h.id,h.name,h.kingdom,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.specialty,h.virtues,h.color,h.banner_url,h.status,h.active,
               COUNT(p.id)::int AS count,
-              COALESCE(SUM(p.missions),0)::bigint AS missions,
+              COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido')) THEN p.id END)::int AS active_mission_members,
+              COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido')) THEN 1 ELSE 0 END),0)::bigint AS missions,
               COALESCE(SUM(p.yuls),0)::bigint AS yuls
        FROM houses h
-       LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1
-       WHERE COALESCE(h.active,1)=1
+       LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1 AND p.active=1
+       WHERE COALESCE(h.active,1)=1 AND lower(trim(COALESCE(h.kingdom,'')))='spade'
        GROUP BY h.id
-       ORDER BY missions DESC,h.name ASC`
+       ORDER BY active_mission_members DESC,h.name ASC`
     );
     res.json({
       houses: result.rows.map(h => ({
@@ -3354,7 +3541,8 @@ app.get("/api/houses", async (req, res) => {
         leader: h.leader || "",
         vice_leader: h.vice_leader || "",
         motto: h.motto || "", color: h.color || "", banner_url: h.banner_url || "", status: h.status || "ATIVA",
-        count: Number(h.count),
+        specialty: h.specialty||"", virtues: h.virtues||"",
+        count: Number(h.count), active_mission_members:Number(h.active_mission_members||0),
         missions: Number(h.missions),
         yuls: Number(h.yuls)
       }))
@@ -3373,14 +3561,17 @@ app.get("/api/houses/:id", async (req, res) => {
     const houseResult = await pool.query("SELECT * FROM houses WHERE id=$1", [id]);
     const house = houseResult.rows[0];
     if (!house) return res.status(404).json({ error: "Casa não encontrada." });
+    if(String(house.kingdom||"").trim().toLowerCase()!=="spade") return res.status(404).json({error:"Casa não encontrada no Reino Spade."});
 
     const historyResult = await pool.query(`SELECT id,event_type,title,description,event_date FROM house_history WHERE house_id=$1 ORDER BY event_date DESC,id DESC LIMIT 30`, [id]);
 
     const members = await pool.query(
-      `SELECT id,nick,number,identifier,patent,role,grimoire,missions,yuls,ranking
-       FROM players
-       WHERE public_profile=1 AND lower(trim(house))=lower(trim($1))
-       ORDER BY missions DESC,nick COLLATE "C" ASC`,
+      `SELECT p.id,p.nick,p.number,p.identifier,p.patent,p.role,p.grimoire,
+              COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,
+              p.yuls,p.ranking
+       FROM players p
+       WHERE p.public_profile=1 AND p.active=1 AND lower(trim(p.house))=lower(trim($1))
+       ORDER BY missions DESC,p.nick COLLATE "C" ASC`,
       [house.name]
     );
 
@@ -3398,7 +3589,7 @@ app.get("/api/houses/:id", async (req, res) => {
         description: house.description || "",
         leader: house.leader || "",
         vice_leader: house.vice_leader || "",
-        motto: house.motto || "", color: house.color || "", banner_url: house.banner_url || "",
+        kingdom: house.kingdom||"", motto: house.motto || "", specialty: house.specialty||"", virtues: house.virtues||"", color: house.color || "", banner_url: house.banner_url || "",
         history: house.history || "", goals: house.goals || "", achievements: house.achievements || "", status: house.status || "ATIVA",
         timeline: historyResult.rows.map(x=>({id:Number(x.id),event_type:x.event_type,title:x.title,description:x.description||"",event_date:x.event_date})),
         count: members.rows.length,
@@ -3452,22 +3643,50 @@ app.get("/api/hierarchy", async (req,res) => {
     });
   } catch(e){console.error(e);res.status(500).json({error:"Erro ao carregar hierarquia administrativa."});}
 });
+
 app.get("/api/rankings", async (req, res) => {
   try {
-    const [powerResult, scResult, vtResult, missionsResult, wealthResult, activityResult, houseResult] = await Promise.all([
-      pool.query(`SELECT p.id,p.nick,p.number,p.identifier,p.house,COALESCE(SUM(c.power_value),0)::bigint AS power,p.missions,p.achievements,p.yuls FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id WHERE p.public_profile=1 AND p.active=1 GROUP BY p.id ORDER BY power DESC, p.missions DESC, p.nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT id,nick,number,identifier,house,skill_sc AS score,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_sc DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT id,nick,number,identifier,house,skill_vt AS score,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_vt DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY missions DESC, achievements DESC, nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY yuls DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT id,nick,number,identifier,house,power,missions,achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY (missions + achievements * 3) DESC, missions DESC, achievements DESC, nick COLLATE "C" ASC LIMIT 75`),
-      pool.query(`SELECT h.id,h.name,h.emblem,h.leader,h.vice_leader,COUNT(p.id)::int AS members,COALESCE(SUM(p.missions),0)::bigint AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls,COALESCE(SUM(cp.card_power),0)::bigint AS power FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1 AND p.active=1 LEFT JOIN LATERAL (SELECT COALESCE(SUM(c.power_value),0)::bigint AS card_power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=p.id) cp ON TRUE WHERE h.active=1 GROUP BY h.id ORDER BY power DESC, missions DESC, members DESC, h.name ASC LIMIT 20`)
+    const [powerResult, scResult, vtResult, missionsResult, wealthResult, expResult, activityResult, houseResult] = await Promise.all([
+      pool.query(`SELECT p.id,p.nick,p.number,p.identifier,p.house,COALESCE(SUM(c.power_value),0)::bigint AS power,
+                         COALESCE((SELECT COUNT(*) FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0)::int AS missions,
+                         p.achievements,p.yuls
+                  FROM players p LEFT JOIN player_cards pc ON pc.player_id=p.id LEFT JOIN cards c ON c.id=pc.card_id
+                  WHERE p.public_profile=1 AND p.active=1 GROUP BY p.id ORDER BY power DESC, missions DESC, p.nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,skill_sc AS score,
+                         COALESCE((SELECT COUNT(*) FROM missions m WHERE m.player_id=players.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0)::int AS missions,
+                         achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_sc DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,skill_vt AS score,
+                         COALESCE((SELECT COUNT(*) FROM missions m WHERE m.player_id=players.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0)::int AS missions,
+                         achievements,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY skill_vt DESC, missions DESC, nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT p.id,p.nick,p.number,p.identifier,p.house,p.power,
+                         COALESCE((SELECT COUNT(*) FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0)::int AS missions,
+                         p.achievements,p.yuls FROM players p WHERE p.public_profile=1 AND p.active=1 ORDER BY missions DESC, achievements DESC, p.nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT p.id,p.nick,p.number,p.identifier,p.house,p.power,
+                         COALESCE((SELECT COUNT(*) FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0)::int AS missions,
+                         p.achievements,p.yuls FROM players p WHERE p.public_profile=1 AND p.active=1 ORDER BY yuls DESC, missions DESC, p.nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT id,nick,number,identifier,house,exp,power,yuls FROM players WHERE public_profile=1 AND active=1 ORDER BY exp DESC,nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`WITH base AS (
+          SELECT p.id,p.nick,p.number,p.identifier,p.house,p.power,p.achievements,p.yuls,
+            (SELECT COUNT(*)::int FROM players q WHERE q.active=1 AND q.created_at >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo') AND q.id=p.id) AS registrations_month,
+            (SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido') AND m.completed_at >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo'))::date) AS missions_month,
+            (SELECT COUNT(*)::int FROM player_access_days d WHERE d.player_id=p.id AND d.access_date >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo'))::date) AS access_days_month
+          FROM players p WHERE p.public_profile=1 AND p.active=1
+        ) SELECT *, (registrations_month+missions_month+access_days_month)::int AS activity_score FROM base ORDER BY activity_score DESC,missions_month DESC,access_days_month DESC,nick COLLATE "C" ASC LIMIT 75`),
+      pool.query(`SELECT h.id,h.name,h.kingdom,h.emblem,h.leader,h.vice_leader,
+                         COUNT(p.id)::int AS members,
+                         COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido') AND mm.completed_at >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo'))::date) THEN p.id END)::int AS active_mission_members,
+                         COALESCE(SUM(cp.card_power),0)::bigint AS power
+                  FROM houses h
+                  LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.public_profile=1 AND p.active=1
+                  LEFT JOIN LATERAL (SELECT COALESCE(SUM(c.power_value),0)::bigint AS card_power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=p.id) cp ON TRUE
+                  WHERE h.active=1 AND lower(trim(COALESCE(h.kingdom,'')))='spade'
+                  GROUP BY h.id ORDER BY active_mission_members DESC,power DESC,h.name ASC LIMIT 20`)
     ]);
-    const mapPlayer=p=>({id:Number(p.id),nick:p.nick,number:p.number,identifier:p.identifier,house:p.house||"",power:Number(p.power||0),score:Number(p.score||0),missions:Number(p.missions||0),achievements:Number(p.achievements||0),yuls:Number(p.yuls||0)});
+    const mapPlayer=p=>({id:Number(p.id),nick:p.nick,number:p.number,identifier:p.identifier,house:p.house||"",power:Number(p.power||0),score:Number(p.score||0),missions:Number(p.missions||0),achievements:Number(p.achievements||0),yuls:Number(p.yuls||0),exp:Number(p.exp||0),registrations_month:Number(p.registrations_month||0),missions_month:Number(p.missions_month||0),access_days_month:Number(p.access_days_month||0),activity_score:Number(p.activity_score||0)});
     res.json({
       force:powerResult.rows.map(mapPlayer), skill_sc:scResult.rows.map(mapPlayer), skill_vt:vtResult.rows.map(mapPlayer),
-      missions:missionsResult.rows.map(mapPlayer), wealth:wealthResult.rows.map(mapPlayer), activity:activityResult.rows.map(mapPlayer),
-      houses:houseResult.rows.map(h=>({id:Number(h.id),name:h.name,emblem:h.emblem||"♜",leader:h.leader||"",vice_leader:h.vice_leader||"",members:Number(h.members||0),missions:Number(h.missions||0),yuls:Number(h.yuls||0),power:Number(h.power||0)}))
+      missions:missionsResult.rows.map(mapPlayer), wealth:wealthResult.rows.map(mapPlayer), exp:expResult.rows.map(mapPlayer), activity:activityResult.rows.map(mapPlayer),
+      houses:houseResult.rows.map(h=>({id:Number(h.id),name:h.name,kingdom:h.kingdom||"Spade",emblem:h.emblem||"♜",leader:h.leader||"",vice_leader:h.vice_leader||"",members:Number(h.members||0),active_mission_members:Number(h.active_mission_members||0),power:Number(h.power||0)}))
     });
   } catch(e) { console.error("Erro em /api/rankings:",e); res.status(500).json({error:"Erro ao carregar rankings."}); }
 });
@@ -3533,8 +3752,10 @@ app.get("/api/ranking-history/:playerId", async(req,res)=>{const id=Number(req.p
 app.get("/api/ranking", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT nick,identifier,house,missions,yuls,ranking,power
-       FROM players WHERE ranking>0 ORDER BY ranking ASC LIMIT 75`
+      `SELECT p.nick,p.identifier,p.house,
+              COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,
+              p.yuls,p.ranking,p.power
+       FROM players p WHERE p.ranking>0 AND p.active=1 ORDER BY p.ranking ASC LIMIT 75`
     );
     res.json({
       ranking: result.rows.map(x => ({
@@ -3557,10 +3778,12 @@ app.get("/api/players/:id", async (req, res) => {
   try {
     const [playerResult, rolesResult, missionsResult, rankingResult] = await Promise.all([
       pool.query(
-        `SELECT id,nick,number,identifier,house,patent,role,grimoire,
-                hp,mana,yuls,missions,achievements,ranking,power,public_profile
-         FROM players
-         WHERE id=$1 AND public_profile=1 AND active=1`,
+        `SELECT p.id,p.nick,p.number,p.identifier,p.house,p.patent,p.role,p.grimoire,
+                p.hp,p.mana,p.yuls,
+                COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,
+                p.achievements,p.ranking,p.power,p.public_profile
+         FROM players p
+         WHERE p.id=$1 AND p.public_profile=1 AND p.active=1`,
         [id]
       ),
       pool.query(
@@ -3639,8 +3862,10 @@ app.get("/api/players/:id", async (req, res) => {
 app.get("/api/players", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id,nick,number,identifier,house,patent,role,grimoire,missions,achievements,ranking,power,yuls
-       FROM players WHERE public_profile=1 AND active=1 ORDER BY nick COLLATE "C" ASC`
+      `SELECT p.id,p.nick,p.number,p.identifier,p.house,p.patent,p.role,p.grimoire,
+              COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,
+              p.achievements,p.ranking,p.power,p.yuls
+       FROM players p WHERE p.public_profile=1 AND p.active=1 ORDER BY p.nick COLLATE "C" ASC`
     );
     res.json({ players: result.rows.map(publicPlayer) });
   } catch (e) {
@@ -4627,6 +4852,7 @@ app.put("/api/admin/events/:id", requireAdmin, async (req,res)=>{
     );
     if(!r.rows[0])return res.status(404).json({error:"Evento não encontrado."});
     if(Number(b.featured))await pool.query("UPDATE events SET featured=0 WHERE id<>$1",[id]);
+    await syncScheduleFromEvent(id);
     res.json({event:r.rows[0]});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar evento."});}
 });
@@ -4709,8 +4935,9 @@ app.get("/api/admin/events/:id/players", requireAdmin, async (req,res)=>{
   const id=Number(req.params.id);
   try{
     const r=await pool.query(`
-      SELECT p.id,p.nick,p.house,p.patent,p.yuls,p.missions,p.exp,
-             ep.joined_at,COALESCE(ept.points,0)::int AS points
+      SELECT p.id,p.nick,p.house,p.patent,p.yuls,
+             COALESCE((SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')),0) AS missions,
+             p.exp,ep.joined_at,COALESCE(ept.points,0)::int AS points
       FROM event_participants ep
       JOIN players p ON p.id=ep.player_id
       LEFT JOIN event_points ept ON ept.event_id=ep.event_id AND ept.player_id=ep.player_id
@@ -5021,14 +5248,20 @@ app.post("/api/admin/schedule", requireAdmin, async (req,res)=>{
   if(!title||!date)return res.status(400).json({error:"Título e data são obrigatórios."});
   try{
     const winnerId=b.winner_player_id?Number(b.winner_player_id):null;
+    let linkedEvent=null;
+    if(b.event_id){ linkedEvent=(await pool.query(`SELECT id,title,start_date,end_date,status FROM events WHERE id=$1`,[Number(b.event_id)])).rows[0]||null; if(!linkedEvent)return res.status(400).json({error:'Evento vinculado não encontrado.'}); }
+    const linkedTitle=linkedEvent?.title||title;
+    const linkedDate=linkedEvent?.start_date||date;
+    const linkedEnd=linkedEvent?.end_date||String(b.end_date||date).trim();
     const r=await pool.query(
       `INSERT INTO schedule_activities(title,activity_type,description,activity_date,end_date,start_time,end_time,location,link,event_id,mission_id,status,featured,published,result_text,winner_player_id,cycle_label,source_key)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
-      [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,String(b.end_date||date).trim(),b.start_time||null,b.end_time||null,
+      [linkedTitle,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),linkedDate,linkedEnd,b.start_time||null,b.end_time||null,
        String(b.location||"").trim(),String(b.link||"").trim(),b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,
        String(b.status||"AGENDADA").trim().toUpperCase(),Number(b.featured)?1:0,Number(b.published??1)?1:0,String(b.result_text||"").trim(),winnerId,String(b.cycle_label||"").trim(),null]
     );
     if(Number(b.featured))await pool.query("UPDATE schedule_activities SET featured=0 WHERE id<>$1",[r.rows[0].id]);
+    if(linkedEvent) await syncEventFromSchedule(r.rows[0].id);
     res.json({activity:r.rows[0]});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao criar atividade."});}
 });
@@ -5039,16 +5272,22 @@ app.put("/api/admin/schedule/:id", requireAdmin, async (req,res)=>{
   const title=String(b.title||"").trim(),date=String(b.activity_date||"").trim();
   if(!title||!date)return res.status(400).json({error:"Título e data são obrigatórios."});
   try{
+    let linkedEvent=null;
+    if(b.event_id){ linkedEvent=(await pool.query(`SELECT id FROM events WHERE id=$1`,[Number(b.event_id)])).rows[0]||null; if(!linkedEvent)return res.status(400).json({error:'Evento vinculado não encontrado.'}); }
+    const linkedTitle=linkedEvent ? (await pool.query(`SELECT title FROM events WHERE id=$1`,[Number(b.event_id)])).rows[0]?.title||title : title;
+    const linkedDate=linkedEvent ? (await pool.query(`SELECT start_date,end_date FROM events WHERE id=$1`,[Number(b.event_id)])).rows[0] : null;
+    const linkedEnd=linkedDate?.end_date||String(b.end_date||date).trim();
     const r=await pool.query(
       `UPDATE schedule_activities SET title=$1,activity_type=$2,description=$3,activity_date=$4,end_date=$5,start_time=$6,end_time=$7,
        location=$8,link=$9,event_id=$10,mission_id=$11,status=$12,featured=$13,published=$14,result_text=$15,winner_player_id=$16,cycle_label=$17,updated_at=NOW()
        WHERE id=$18 RETURNING *`,
-      [title,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),date,String(b.end_date||date).trim(),b.start_time||null,b.end_time||null,
+      [linkedTitle,String(b.activity_type||"ATIVIDADE").trim(),String(b.description||"").trim(),linkedDate,linkedEnd,b.start_time||null,b.end_time||null,
        String(b.location||"").trim(),String(b.link||"").trim(),b.event_id?Number(b.event_id):null,b.mission_id?Number(b.mission_id):null,
        String(b.status||"AGENDADA").trim().toUpperCase(),Number(b.featured)?1:0,Number(b.published??1)?1:0,String(b.result_text||"").trim(),b.winner_player_id?Number(b.winner_player_id):null,String(b.cycle_label||"").trim(),id]
     );
     if(!r.rows[0])return res.status(404).json({error:"Atividade não encontrada."});
     if(Number(b.featured))await pool.query("UPDATE schedule_activities SET featured=0 WHERE id<>$1",[id]);
+    if(linkedEvent) await syncEventFromSchedule(id);
     res.json({activity:r.rows[0]});
   }catch(e){console.error(e);res.status(500).json({error:"Erro ao atualizar atividade."});}
 });
@@ -5170,8 +5409,17 @@ app.get("/api/admin/reports", requireAdmin, async (req,res)=>{
       pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status='AGUARDANDO_ADMIN')::int AS pending, COUNT(*) FILTER (WHERE status='APROVADA')::int AS approved, COUNT(*) FILTER (WHERE status='REJEITADA')::int AS rejected FROM ranking_battles`),
       pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE created_at::date=CURRENT_DATE)::int AS today FROM player_statuses`),
       pool.query(`SELECT id,nick,house,COALESCE(power,0)::bigint AS power FROM players WHERE active=1 ORDER BY COALESCE(power,0) DESC,nick LIMIT 10`),
-      pool.query(`SELECT id,nick,house,missions,achievements,(missions+achievements*3)::bigint AS activity FROM players WHERE active=1 ORDER BY activity DESC,nick LIMIT 10`),
-      pool.query(`SELECT h.id,h.name,h.emblem,COUNT(p.id)::int AS members,COALESCE(SUM(p.missions),0)::bigint AS missions,COALESCE(SUM(p.yuls),0)::bigint AS yuls,COALESCE(SUM(p.power),0)::bigint AS power FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.active=1 GROUP BY h.id,h.name,h.emblem ORDER BY power DESC,name`)
+      pool.query(`WITH base AS (SELECT p.id,p.nick,p.house,
+        (SELECT COUNT(*)::int FROM players q WHERE q.active=1 AND q.created_at >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo') AND q.id=p.id) AS registrations_month,
+        (SELECT COUNT(*)::int FROM missions m WHERE m.player_id=p.id AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido') AND m.completed_at >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo'))::date) AS missions_month,
+        (SELECT COUNT(*)::int FROM player_access_days d WHERE d.player_id=p.id AND d.access_date >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo'))::date) AS access_days_month
+        FROM players p WHERE p.active=1) SELECT id,nick,house,registrations_month,missions_month,access_days_month,(registrations_month+missions_month+access_days_month)::bigint AS activity FROM base ORDER BY activity DESC,nick LIMIT 10`),
+      pool.query(`SELECT h.id,h.name,h.emblem,COUNT(p.id)::int AS members,
+        COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido') AND mm.completed_at >= (DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo'))::date) THEN p.id END)::int AS active_mission_members,
+        COALESCE(SUM(cp.card_power),0)::bigint AS power,COALESCE(SUM(p.yuls),0)::bigint AS yuls
+        FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.active=1
+        LEFT JOIN LATERAL (SELECT COALESCE(SUM(c.power_value),0)::bigint AS card_power FROM player_cards pc JOIN cards c ON c.id=pc.card_id WHERE pc.player_id=p.id) cp ON TRUE
+        WHERE h.active=1 AND lower(trim(COALESCE(h.kingdom,'')))='spade' GROUP BY h.id ORDER BY active_mission_members DESC,power DESC,h.name`)
     ]);
     res.json({players:players.rows[0],houses:houses.rows[0],cards:cards.rows[0],economy:economy.rows[0],missions:missions.rows[0],events:events.rows[0],battles:battles.rows[0],statuses:statuses.rows[0],topPower:topPower.rows,topActivity:topActivity.rows,houseStats:houseStats.rows});
   }catch(e){
@@ -5249,18 +5497,18 @@ app.delete("/api/admin/allies/:id/cards/:cardId", requireAdmin, async (req,res)=
 app.get("/api/admin/houses", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT h.id,h.name,h.kingdom,h.emblem,h.description,h.leader,h.vice_leader,
+      `SELECT h.id,h.name,h.kingdom,h.specialty,h.virtues,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.history,h.goals,h.achievements,h.status,h.active,
               COUNT(p.id)::int AS count,
-              COALESCE(SUM(p.missions),0)::bigint AS missions,
+              COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM missions mm WHERE mm.player_id=p.id AND lower(trim(mm.status)) IN ('concluída','concluida','concluído','concluido')) THEN 1 ELSE 0 END),0)::bigint AS missions,
               COALESCE(SUM(p.yuls),0)::bigint AS yuls
        FROM houses h
-       LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name))
+       LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) AND p.active=1
        GROUP BY h.id
        ORDER BY h.name COLLATE "C" ASC`
     );
     res.json({ houses: result.rows.map(h => ({
-      id:Number(h.id), name:h.name, kingdom:h.kingdom||"", emblem:h.emblem||"♜",
-      description:h.description||"", leader:h.leader||"", vice_leader:h.vice_leader||"",
+      id:Number(h.id), name:h.name, kingdom:h.kingdom||"", specialty:h.specialty||"", virtues:h.virtues||"", emblem:h.emblem||"♜",
+      description:h.description||"", leader:h.leader||"", vice_leader:h.vice_leader||"", motto:h.motto||"", color:h.color||"", banner_url:h.banner_url||"", history:h.history||"", goals:h.goals||"", achievements:h.achievements||"", status:h.status||"ATIVA", active:Number(h.active??1),
       count:Number(h.count), missions:Number(h.missions), yuls:Number(h.yuls)
     }))});
   } catch(e) {
@@ -5275,10 +5523,10 @@ app.post("/api/admin/houses", requireAdmin, async (req, res) => {
   if(!name) return res.status(400).json({error:"Nome da Casa é obrigatório."});
   try {
     const result=await pool.query(
-      `INSERT INTO houses(name,kingdom,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1) RETURNING *`,
-      [name,String(b.kingdom||"").trim(),String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
-       String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim()]
+      `INSERT INTO houses(name,kingdom,specialty,virtues,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [name,String(b.kingdom||"").trim(),String(b.specialty||"").trim(),String(b.virtues||"").trim(),String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
+       String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim(),b.active===false||String(b.active)==='0'?0:1]
     );
     res.json({house:result.rows[0]});
   } catch(e) {
@@ -5302,9 +5550,9 @@ app.put("/api/admin/houses/:id", requireAdmin, async (req,res) => {
       await client.query("BEGIN");
       const result=await client.query(
         `UPDATE houses
-         SET name=$1,kingdom=$2,emblem=$3,description=$4,leader=$5,vice_leader=$6,motto=$7,color=$8,banner_url=$9,history=$10,goals=$11,achievements=$12,status=$13,active=$14,updated_at=NOW()
-         WHERE id=$15 RETURNING *`,
-        [name,String(b.kingdom||"").trim(),String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
+         SET name=$1,kingdom=$2,specialty=$3,virtues=$4,emblem=$5,description=$6,leader=$7,vice_leader=$8,motto=$9,color=$10,banner_url=$11,history=$12,goals=$13,achievements=$14,status=$15,active=$16,updated_at=NOW()
+         WHERE id=$17 RETURNING *`,
+        [name,String(b.kingdom||"").trim(),String(b.specialty||"").trim(),String(b.virtues||"").trim(),String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
          String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim(),b.active===false||String(b.active)==='0'?0:1,id]
       );
       if((current.rows[0].leader||"") !== String(b.leader||"").trim() || (current.rows[0].vice_leader||"") !== String(b.vice_leader||"").trim()) {
@@ -5528,13 +5776,13 @@ async function validateHouseBulkSheet(buffer,filename){
   const {sheets}=parseBulkWorkbook(buffer,filename);
   const rows=sheets.Casas||sheets.Casa||[];
   if(!rows.length) return {rows:[],issues:[{section:'Casas',row:0,field:'arquivo',message:'A aba Casas está vazia ou não existe.'}]};
-  const existing=(await pool.query(`SELECT id,name,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active FROM houses ORDER BY id`)).rows;
+  const existing=(await pool.query(`SELECT id,name,kingdom,specialty,virtues,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active FROM houses ORDER BY id`)).rows;
   const byId=new Map(existing.map(x=>[String(x.id),x]));
   const nameMap=new Map(existing.map(x=>[normalizeImportHeader(x.name),Number(x.id)]));
   const seen=new Set(),clean=[],issues=[];
-  const fields=[['name','Nome'],['emblem','Emblema'],['description','Descrição'],['leader','Líder'],['vice_leader','Vice-líder'],['motto','Lema'],['color','Cor'],['banner_url','Banner URL'],['history','História'],['goals','Metas'],['achievements','Conquistas'],['status','Status'],['active','Ativa']];
+  const fields=[['name','Nome'],['kingdom','Reino'],['specialty','Especialidade'],['virtues','Virtudes'],['emblem','Emblema'],['description','Descrição'],['leader','Líder'],['vice_leader','Vice-líder'],['motto','Lema'],['color','Cor'],['banner_url','Banner URL'],['history','História'],['goals','Metas'],['achievements','Conquistas'],['status','Status'],['active','Ativa']];
   for(const r of rows){
-    const out={row:r.row,id:null,name:'',emblem:'♜',description:'',leader:'',vice_leader:'',motto:'',color:'',banner_url:'',history:'',goals:'',achievements:'',status:'ATIVA',active:1,errors:[],changes:[],isNew:false};
+    const out={row:r.row,id:null,name:'',kingdom:'',specialty:'',virtues:'',emblem:'♜',description:'',leader:'',vice_leader:'',motto:'',color:'',banner_url:'',history:'',goals:'',achievements:'',status:'ATIVA',active:1,errors:[],changes:[],isNew:false};
     const add=(field,message)=>{out.errors.push({field,message});issues.push({section:'Casas',row:r.row,field,message})};
     const rawId=bulkGet(r,'id','ID');
     if(rawId && !/^\d+$/.test(rawId)) add('ID','ID deve ser numérico.');
@@ -5614,15 +5862,15 @@ async function validateMissionBulkSheet(buffer,filename){
 }
 
 // Exports --------------------------------------------------------------------
-app.get('/api/admin/houses/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT h.*,COUNT(p.id)::int AS members FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) GROUP BY h.id ORDER BY h.name COLLATE "C"`)).rows;const data=rows.map(h=>({'ID':Number(h.id),'Nome':h.name||'','Emblema':h.emblem||'♜','Descrição':h.description||'','Líder':h.leader||'','Vice-líder':h.vice_leader||'','Lema':h.motto||'','Cor':h.color||'','Banner URL':h.banner_url||'','História':h.history||'','Metas':h.goals||'','Conquistas':h.achievements||'','Status':h.status||'ATIVA','Ativa':Number(h.active??1),'Membros':Number(h.members||0)}));const wb=XLSX.utils.book_new();const ws=XLSX.utils.json_to_sheet(data);ws['!cols']=[{wch:8},{wch:26},{wch:12},{wch:42},{wch:24},{wch:24},{wch:28},{wch:16},{wch:38},{wch:45},{wch:45},{wch:35},{wch:35},{wch:9},{wch:10}];XLSX.utils.book_append_sheet(wb,ws,'Casas');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — CASAS'],['ID preenchido = atualizar. ID vazio = criar uma nova Casa.'],['Membros é informativo e ignorado na importação.'],['Para retirar uma Casa da estrutura, use Ativa=0/Status=ARQUIVADA; o histórico é preservado.']]),'Instruções');xlsxSend(res,wb,'casas-spade-atualizacao.xlsx')}catch(e){console.error(e);res.status(500).json({error:'Não foi possível gerar a planilha de Casas.'})}});
+app.get('/api/admin/houses/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT h.*,COUNT(p.id)::int AS members FROM houses h LEFT JOIN players p ON lower(trim(p.house))=lower(trim(h.name)) GROUP BY h.id ORDER BY h.name COLLATE "C"`)).rows;const data=rows.map(h=>({'ID':Number(h.id),'Nome':h.name||'','Reino':h.kingdom||'','Especialidade':h.specialty||'','Virtudes':h.virtues||'','Emblema':h.emblem||'♜','Descrição':h.description||'','Líder':h.leader||'','Vice-líder':h.vice_leader||'','Lema':h.motto||'','Cor':h.color||'','Banner URL':h.banner_url||'','História':h.history||'','Metas':h.goals||'','Conquistas':h.achievements||'','Status':h.status||'ATIVA','Ativa':Number(h.active??1),'Membros':Number(h.members||0)}));const wb=XLSX.utils.book_new();const ws=XLSX.utils.json_to_sheet(data);ws['!cols']=[{wch:8},{wch:26},{wch:12},{wch:42},{wch:24},{wch:24},{wch:28},{wch:16},{wch:38},{wch:45},{wch:45},{wch:35},{wch:35},{wch:9},{wch:10}];XLSX.utils.book_append_sheet(wb,ws,'Casas');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — CASAS'],['ID preenchido = atualizar. ID vazio = criar uma nova Casa.'],['Membros é informativo e ignorado na importação.'],['Para retirar uma Casa da estrutura, use Ativa=0/Status=ARQUIVADA; o histórico é preservado.']]),'Instruções');xlsxSend(res,wb,'casas-spade-atualizacao.xlsx')}catch(e){console.error(e);res.status(500).json({error:'Não foi possível gerar a planilha de Casas.'})}});
 app.post('/api/admin/houses/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const checked=await validateHouseBulkSheet(req.file.buffer,req.file.originalname);const valid=checked.rows.filter(r=>!r.errors.length);res.json({filename:req.file.originalname,total:checked.rows.length,invalid:checked.issues.length,valid:valid.length,changes:valid.filter(r=>r.isNew||r.changes.length).length,issues:checked.issues,rows:checked.rows})}catch(e){res.status(400).json({error:e.message||'Não foi possível processar a planilha.'})}});
-app.post('/api/admin/houses/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const checked=await validateHouseBulkSheet(req.file.buffer,req.file.originalname);if(checked.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:checked.issues});let created=0,updated=0;await client.query('BEGIN');for(const r of checked.rows){if(r.isNew){const q=await client.query(`INSERT INTO houses(name,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW()) RETURNING id`,[r.name,r.emblem,r.description,r.leader,r.vice_leader,r.motto,r.color,r.banner_url,r.history,r.goals,r.achievements,r.status,r.active]);created++;await client.query(`INSERT INTO house_history(house_id,event_type,title,description,created_by_admin_id) VALUES($1,'ADMIN','Casa criada por planilha','Cadastro criado pela Gestão em Massa 2.0.',$2)`,[q.rows[0].id,req.admin?.id||null])}else{await client.query(`UPDATE houses SET name=$1,emblem=$2,description=$3,leader=$4,vice_leader=$5,motto=$6,color=$7,banner_url=$8,history=$9,goals=$10,achievements=$11,status=$12,active=$13,updated_at=NOW() WHERE id=$14`,[r.name,r.emblem,r.description,r.leader,r.vice_leader,r.motto,r.color,r.banner_url,r.history,r.goals,r.achievements,r.status,r.active,r.id]);updated++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'casas','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA CASAS','/api/admin/houses/bulk-sheet',`Planilha ${req.file.originalname}: ${created} criada(s), ${updated} atualizada(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,created,updated,total:checked.rows.length})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Casas. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
+app.post('/api/admin/houses/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const checked=await validateHouseBulkSheet(req.file.buffer,req.file.originalname);if(checked.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:checked.issues});let created=0,updated=0;await client.query('BEGIN');for(const r of checked.rows){if(r.isNew){const q=await client.query(`INSERT INTO houses(name,kingdom,specialty,virtues,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW()) RETURNING id`,[r.name,r.kingdom||'',r.specialty||'',r.virtues||'',r.emblem,r.description,r.leader,r.vice_leader,r.motto,r.color,r.banner_url,r.history,r.goals,r.achievements,r.status,r.active]);created++;await client.query(`INSERT INTO house_history(house_id,event_type,title,description,created_by_admin_id) VALUES($1,'ADMIN','Casa criada por planilha','Cadastro criado pela Gestão em Massa 2.0.',$2)`,[q.rows[0].id,req.admin?.id||null])}else{await client.query(`UPDATE houses SET name=$1,kingdom=$2,specialty=$3,virtues=$4,emblem=$5,description=$6,leader=$7,vice_leader=$8,motto=$9,color=$10,banner_url=$11,history=$12,goals=$13,achievements=$14,status=$15,active=$16,updated_at=NOW() WHERE id=$17`,[r.name,r.kingdom||'',r.specialty||'',r.virtues||'',r.emblem,r.description,r.leader,r.vice_leader,r.motto,r.color,r.banner_url,r.history,r.goals,r.achievements,r.status,r.active,r.id]);updated++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'casas','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA CASAS','/api/admin/houses/bulk-sheet',`Planilha ${req.file.originalname}: ${created} criada(s), ${updated} atualizada(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,created,updated,total:checked.rows.length})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Casas. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
 
 app.get('/api/admin/hierarchy/export.xlsx', requireAdmin, async (req,res)=>{try{const [p,r]=await Promise.all([pool.query(`SELECT p.*,COUNT(pl.id)::int AS occupant_count FROM patents p LEFT JOIN players pl ON lower(trim(pl.patent))=lower(trim(p.name)) GROUP BY p.id ORDER BY p.sort_order,p.name COLLATE "C"`),pool.query(`SELECT r.*,COUNT(pr.player_id)::int AS occupant_count FROM roles r LEFT JOIN player_roles pr ON pr.role_id=r.id GROUP BY r.id ORDER BY CASE r.rank_code WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 WHEN 'V' THEN 5 ELSE 99 END,r.sort_order,r.name COLLATE "C"`)]);const wb=XLSX.utils.book_new();const pw=p.rows.map(x=>({'ID':Number(x.id),'Nome':x.name||'','Descrição':x.description||'','Ordem':Number(x.sort_order||0),'Ocupantes':Number(x.occupant_count||0)}));const rw=r.rows.map(x=>({'ID':Number(x.id),'Nome':x.name||'','Descrição':x.description||'','Salário':Number(x.salary||0),'Ordem':Number(x.sort_order||0),'Rank':x.rank_code||'V','Vagas':x.vacancies||'','Modalidade':x.payment_mode||'','Detalhe remuneração':x.remuneration_detail||'','Requisitos':x.requirements||'','Benefícios':x.benefits||'','Escopo':x.scope||'','Ativo':Number(x.active??1),'Ocupantes':Number(x.occupant_count||0)}));XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(pw),'Patentes');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rw),'Cargos');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — HIERARQUIA'],['ID preenchido = atualizar. ID vazio = criar.'],['Ocupantes é informativo e ignorado.'],['Para cargos, use Rank I, II, III, IV ou V.'],['Não há exclusão em massa: desative cargos com Ativo=0.']]),'Instruções');xlsxSend(res,wb,'hierarquia-spade-atualizacao.xlsx')}catch(e){res.status(500).json({error:'Não foi possível gerar a planilha de Hierarquia.'})}});
 app.post('/api/admin/hierarchy/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateHierarchyBulkSheet(req.file.buffer,req.file.originalname);res.json({filename:req.file.originalname,patents:{total:c.patents.length,valid:c.patents.filter(r=>!r.errors.length).length,invalid:c.patents.filter(r=>r.errors.length).length,changes:c.patents.filter(r=>r.errors.length===0&&(r.isNew||r.changes.length)).length,rows:c.patents},roles:{total:c.roles.length,valid:c.roles.filter(r=>!r.errors.length).length,invalid:c.roles.filter(r=>r.errors.length).length,changes:c.roles.filter(r=>r.errors.length===0&&(r.isNew||r.changes.length)).length,rows:c.roles},issues:c.issues})}catch(e){res.status(400).json({error:e.message||'Não foi possível processar a planilha.'})}});
 app.post('/api/admin/hierarchy/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateHierarchyBulkSheet(req.file.buffer,req.file.originalname);if(c.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:c.issues});let createdPatents=0,updatedPatents=0,createdRoles=0,updatedRoles=0;await client.query('BEGIN');for(const x of c.patents){if(x.isNew){await client.query(`INSERT INTO patents(name,description,sort_order) VALUES($1,$2,$3)`,[x.name,x.description,x.sort_order]);createdPatents++}else{await client.query(`UPDATE patents SET name=$1,description=$2,sort_order=$3,updated_at=NOW() WHERE id=$4`,[x.name,x.description,x.sort_order,x.id]);updatedPatents++}}for(const x of c.roles){if(x.isNew){await client.query(`INSERT INTO roles(name,description,salary,sort_order,rank_code,vacancies,payment_mode,remuneration_detail,requirements,benefits,scope,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,[x.name,x.description,x.salary,x.sort_order,x.rank_code,x.vacancies,x.payment_mode,x.remuneration_detail,x.requirements,x.benefits,x.scope,x.active]);createdRoles++}else{await client.query(`UPDATE roles SET name=$1,description=$2,salary=$3,sort_order=$4,rank_code=$5,vacancies=$6,payment_mode=$7,remuneration_detail=$8,requirements=$9,benefits=$10,scope=$11,active=$12,updated_at=NOW() WHERE id=$13`,[x.name,x.description,x.salary,x.sort_order,x.rank_code,x.vacancies,x.payment_mode,x.remuneration_detail,x.requirements,x.benefits,x.scope,x.active,x.id]);updatedRoles++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'hierarquia','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA HIERARQUIA','/api/admin/hierarchy/bulk-sheet',`Planilha ${req.file.originalname}: patentes ${createdPatents} criada(s)/${updatedPatents} atualizada(s), cargos ${createdRoles} criado(s)/${updatedRoles} atualizado(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,createdPatents,updatedPatents,createdRoles,updatedRoles})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Hierarquia. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
 
-app.get('/api/admin/missions/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT id,mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_at,updated_at FROM mission_activities ORDER BY start_at DESC,id DESC`)).rows;const data=rows.map(m=>({'ID':Number(m.id),'Tipo':m.mission_type||'','Início':m.start_at?new Date(m.start_at).toISOString():'','Fim':m.end_at?new Date(m.end_at).toISOString():'','Descrição':m.description||'','Instruções':m.instructions||'','Recompensa Yuls':Number(m.reward_yuls||0),'Recompensa EXP':Number(m.reward_exp||0),'Cards recompensa':m.reward_cards||'','Status':m.status||'AGENDADA','Publicado':Number(m.published??1)}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Missões');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — MISSÕES'],['ID preenchido = atualizar. ID vazio = criar.'],['Início/Fim aceitam ISO (recomendado) ou DD/MM/AAAA HH:MM.'],['Status: AGENDADA, EM_ANDAMENTO, CONCLUIDA ou CANCELADA.'],['Não há exclusão em massa: para arquivar, use CANCELADA e/ou Publicado=0.']]),'Instruções');xlsxSend(res,wb,'missoes-spade-atualizacao.xlsx')}catch(e){res.status(500).json({error:'Não foi possível gerar a planilha de Missões.'})}});
+app.get('/api/admin/missions/export.xlsx', requireAdmin, async (req,res)=>{try{const rows=(await pool.query(`SELECT ma.id,ma.mission_type,ma.start_at,ma.end_at,ma.description,ma.instructions,ma.reward_yuls,ma.reward_exp,ma.reward_cards,ma.status,ma.published,ma.created_at,ma.updated_at,(SELECT COUNT(*) FROM mission_participants mp WHERE mp.mission_activity_id=ma.id)::int AS participant_count FROM mission_activities ma ORDER BY ma.start_at DESC,ma.id DESC`)).rows;const data=rows.map(m=>({'ID':Number(m.id),'Tipo':m.mission_type||'','Início':m.start_at?new Date(m.start_at).toISOString():'','Fim':m.end_at?new Date(m.end_at).toISOString():'','Descrição':m.description||'','Instruções':m.instructions||'','Recompensa Yuls':Number(m.reward_yuls||0),'Recompensa EXP':Number(m.reward_exp||0),'Cards recompensa':m.reward_cards||'','Status':m.status||'AGENDADA','Publicado':Number(m.published??1)}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Missões');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PORTAL SPADE — MISSÕES'],['ID preenchido = atualizar. ID vazio = criar.'],['Início/Fim aceitam ISO (recomendado) ou DD/MM/AAAA HH:MM.'],['Status: AGENDADA, EM_ANDAMENTO, CONCLUIDA ou CANCELADA.'],['Não há exclusão em massa: para arquivar, use CANCELADA e/ou Publicado=0.']]),'Instruções');xlsxSend(res,wb,'missoes-spade-atualizacao.xlsx')}catch(e){res.status(500).json({error:'Não foi possível gerar a planilha de Missões.'})}});
 app.post('/api/admin/missions/bulk-sheet/preview', requireAdmin, importUpload.single('file'), async (req,res)=>{try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateMissionBulkSheet(req.file.buffer,req.file.originalname);res.json({filename:req.file.originalname,total:c.rows.length,valid:c.rows.filter(r=>!r.errors.length).length,invalid:c.rows.filter(r=>r.errors.length).length,changes:c.rows.filter(r=>r.errors.length===0&&(r.isNew||r.changes.length)).length,issues:c.issues,rows:c.rows})}catch(e){res.status(400).json({error:e.message||'Não foi possível processar a planilha.'})}});
 app.post('/api/admin/missions/bulk-sheet', requireAdmin, importUpload.single('file'), async (req,res)=>{const client=await pool.connect();try{if(!req.file)return res.status(400).json({error:'Selecione uma planilha.'});const c=await validateMissionBulkSheet(req.file.buffer,req.file.originalname);if(c.issues.length)return res.status(400).json({error:'A atualização foi bloqueada porque existem dados inválidos.',issues:c.issues});let created=0,updated=0;await client.query('BEGIN');for(const x of c.rows){if(x.isNew){await client.query(`INSERT INTO mission_activities(mission_type,start_at,end_at,description,instructions,reward_yuls,reward_exp,reward_cards,status,published,created_by_admin_id,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())`,[x.mission_type,x.start_at,x.end_at,x.description,x.instructions,x.reward_yuls,x.reward_exp,x.reward_cards,x.status,x.published,req.admin?.id||null]);created++}else{await client.query(`UPDATE mission_activities SET mission_type=$1,start_at=$2,end_at=$3,description=$4,instructions=$5,reward_yuls=$6,reward_exp=$7,reward_cards=$8,status=$9,published=$10,updated_at=NOW() WHERE id=$11`,[x.mission_type,x.start_at,x.end_at,x.description,x.instructions,x.reward_yuls,x.reward_exp,x.reward_cards,x.status,x.published,x.id]);updated++}}await client.query('COMMIT');try{await pool.query(`INSERT INTO audit_log(admin_id,action,method,route,entity_type,entity_id,status_code,detail,ip_address,user_agent) VALUES($1,$2,'POST',$3,'missoes','',200,$4,$5,$6)`,[req.admin?.legacy?null:req.admin?.id||null,'PLANILHA MISSÕES','/api/admin/missions/bulk-sheet',`Planilha ${req.file.originalname}: ${created} criada(s), ${updated} atualizada(s).`,req.ip||'',String(req.headers['user-agent']||'').slice(0,500)])}catch(_){}res.json({ok:true,created,updated,total:c.rows.length})}catch(e){await client.query('ROLLBACK').catch(()=>{});console.error(e);res.status(e.statusCode||500).json({error:e.message||'Erro ao importar Missões. Nenhuma alteração foi aplicada.'})}finally{client.release()}});
 
@@ -6825,6 +7073,7 @@ app.delete("/api/admin/players/:playerId/missions/:missionId", requireAdmin, asy
     const mr=await client.query('SELECT * FROM missions WHERE id=$1 AND player_id=$2 FOR UPDATE',[missionId,playerId]);
     const mission=mr.rows[0];
     if(!mission){await client.query('ROLLBACK');return res.status(404).json({error:'Missão não encontrada para este jogador.'});}
+    if(mission.mission_participant_id){await client.query('ROLLBACK');return res.status(400).json({error:'Esta missão veio de uma participação com recompensa vinculada. Preserve o histórico no registro da missão.'});}
     if(mission.status==='Concluída'){
       const pr=await client.query('SELECT * FROM players WHERE id=$1 FOR UPDATE',[mission.player_id]);
       const player=pr.rows[0];
@@ -7482,6 +7731,8 @@ process.on('SIGINT',()=>shutdown('SIGINT'));
 initDatabase()
   .then(async () => {
     await refreshMissionCounters();
+    await reconcileOfficialHouseKingdoms();
+    await reconcileScheduleEventLinks();
     await seedOfficialLibrary();
     await seedOfficialCronograma();
     await seedSimulatorTrainings();
