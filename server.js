@@ -914,6 +914,7 @@ async function initDatabase() {
     CREATE TABLE IF NOT EXISTS houses (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
+      kingdom TEXT DEFAULT '',
       emblem TEXT DEFAULT '♜',
       description TEXT DEFAULT '',
       leader TEXT DEFAULT '',
@@ -948,6 +949,8 @@ async function initDatabase() {
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS history TEXT DEFAULT '';
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS goals TEXT DEFAULT '';
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS achievements TEXT DEFAULT '';
+    ALTER TABLE houses ADD COLUMN IF NOT EXISTS kingdom TEXT DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_houses_kingdom ON houses(kingdom);
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ATIVA';
     ALTER TABLE houses ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1;
 
@@ -2022,8 +2025,7 @@ app.post("/api/me/status", async (req,res)=>{
 
 app.get("/api/status-board", async (req,res)=>{
   const viewer=await resolveViewer(req);
-  if(!viewer)return res.status(401).json({error:"Faça login para visualizar o quadro de status."});
-  const viewerId=viewer.type==="PLAYER"?viewer.id:null;
+  const viewerId=viewer?.type==="PLAYER"?viewer.id:null;
   try{
     const days=Math.min(14,Math.max(1,Number(req.query?.days||7)));
     const r=await pool.query(`
@@ -2034,7 +2036,9 @@ app.get("/api/status-board", async (req,res)=>{
              EXISTS(SELECT 1 FROM status_reactions sr2 WHERE sr2.status_id=ps.id AND sr2.player_id=$2 AND sr2.reaction='❤️') AS reacted
       FROM player_statuses ps
       JOIN players p ON p.id=ps.player_id
-      WHERE ps.status_date >= (${saoPauloTodaySql()} - $1::int) AND COALESCE(p.active,1)=1
+      WHERE ps.status_date >= (${saoPauloTodaySql()} - $1::int)
+        AND COALESCE(p.active,1)=1
+        AND COALESCE(p.public_profile,1)=1
       ORDER BY ps.status_date DESC,ps.updated_at DESC,ps.id DESC
       LIMIT 500`,[days-1,viewerId]);
     res.json({statuses:r.rows.map(x=>({
@@ -2132,7 +2136,7 @@ app.post("/api/admin/economy/transactions", requireAdmin, async (req,res)=>{
   if(!Number.isInteger(amount)||amount===0)return res.status(400).json({error:'O valor não pode ser zero.'});
   if(!reason)return res.status(400).json({error:'Informe o motivo da transação.'});
   try{
-    const r=await pool.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,source_id,status,activity_date,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,'AGUARDANDO_APROVACAO',$7,$8) RETURNING *`,[playerId,currency,amount,reason,String(b.source_type||'ADMINISTRATIVO'),b.source_id?Number(b.source_id):null,b.activity_date||new Date().toISOString().slice(0,10),req.admin.id]);
+    const r=await pool.query(`INSERT INTO economy_transactions(player_id,currency,amount,reason,source_type,source_id,status,activity_date,created_by_admin_id) VALUES($1,$2,$3,$4,$5,$6,'AGUARDANDO_APROVACAO',$7,$8) RETURNING *`,[playerId,currency,amount,reason,String(b.source_type||'ADMINISTRATIVO'),b.source_id?Number(b.source_id):null,b.activity_date||spadeToday(),req.admin.id]);
     res.json({ok:true,transaction:r.rows[0]});
   }catch(e){console.error(e);res.status(500).json({error:'Erro ao criar transação.'});}
 });
@@ -2818,6 +2822,22 @@ function spadeToday(){
   return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo"}).format(new Date());
 }
 
+function saoPauloTodaySql(){
+  return `(NOW() AT TIME ZONE 'America/Sao_Paulo')::date`;
+}
+
+async function refreshMissionCounters(executor=pool){
+  await executor.query(`
+    UPDATE players p
+    SET missions = COALESCE((
+      SELECT COUNT(*)::int
+      FROM missions m
+      WHERE m.player_id=p.id
+        AND lower(trim(m.status)) IN ('concluída','concluida','concluído','concluido')
+    ),0),
+    updated_at=NOW()`);
+}
+
 function eventIsLiveSql(alias="events"){
   const a=alias;
   return `((${a}.status='ATIVO') OR (${a}.start_date IS NOT NULL AND ${a}.start_date <= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AND (${a}.end_date IS NULL OR ${a}.end_date >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)))`;
@@ -3314,7 +3334,7 @@ app.get("/api/home", async (req, res) => {
 app.get("/api/houses", async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.status,h.active,
+      `SELECT h.id,h.name,h.kingdom,h.emblem,h.description,h.leader,h.vice_leader,h.motto,h.color,h.banner_url,h.status,h.active,
               COUNT(p.id)::int AS count,
               COALESCE(SUM(p.missions),0)::bigint AS missions,
               COALESCE(SUM(p.yuls),0)::bigint AS yuls
@@ -3328,6 +3348,7 @@ app.get("/api/houses", async (req, res) => {
       houses: result.rows.map(h => ({
         id: Number(h.id),
         name: h.name,
+        kingdom: h.kingdom || "",
         emblem: h.emblem || "♜",
         description: h.description || "",
         leader: h.leader || "",
@@ -3681,7 +3702,7 @@ app.post("/api/admin/articles", requireAdmin, async (req,res)=>{
         title,String(b.subtitle||"").trim(),String(b.author||"").trim(),
         String(b.category||"RPG").trim()||"RPG",String(b.excerpt||"").trim(),
         String(b.body||""),String(b.image_url||"").trim(),
-        String(b.date||new Date().toISOString().slice(0,10)).trim(),
+        String(b.date||spadeToday()).trim(),
         Number(b.published??1)?1:0
       ]
     );
@@ -3706,7 +3727,7 @@ app.put("/api/admin/articles/:id", requireAdmin, async (req,res)=>{
         title,String(b.subtitle||"").trim(),String(b.author||"").trim(),
         String(b.category||"RPG").trim()||"RPG",String(b.excerpt||"").trim(),
         String(b.body||""),String(b.image_url||"").trim(),
-        String(b.date||new Date().toISOString().slice(0,10)).trim(),
+        String(b.date||spadeToday()).trim(),
         Number(b.published??1)?1:0,id
       ]
     );
@@ -3834,7 +3855,7 @@ app.put("/api/admin/news/:id", requireAdmin, async (req,res)=>{
        SET title=$1,category=$2,excerpt=$3,body=$4,image_url=$5,date=$6,published=$7
        WHERE id=$8 RETURNING *`,
       [String(b.title).trim(),String(b.category||"RPG").trim(),String(b.excerpt||"").trim(),
-       String(b.body||""),String(b.image_url||"").trim(),String(b.date||new Date().toISOString().slice(0,10)),
+       String(b.body||""),String(b.image_url||"").trim(),String(b.date||spadeToday()),
        Number(b.published??1)?1:0,id]
     );
     if(!r.rows[0])return res.status(404).json({error:"Notícia não encontrada."});
@@ -3873,7 +3894,7 @@ app.put("/api/admin/editions/:id", requireAdmin, async (req,res)=>{
        WHERE id=$8 RETURNING *`,
       [String(b.title).trim(),String(b.edition||"").trim(),String(b.description||"").trim(),
        String(b.pdf_url||"").trim(),String(b.cover_url||"").trim(),
-       String(b.date||new Date().toISOString().slice(0,10)),Number(b.published??1)?1:0,id]
+       String(b.date||spadeToday()),Number(b.published??1)?1:0,id]
     );
     if(!r.rows[0])return res.status(404).json({error:"Edição não encontrada."});
     res.json({edition:r.rows[0]});
@@ -3909,7 +3930,7 @@ app.post("/api/admin/announcements", requireAdmin, async (req,res)=>{
   const category=String(b.category||"INFORMATIVO").trim()||"INFORMATIVO";
   const priority=String(b.priority||"INFORMATIVO").trim()||"INFORMATIVO";
   const body=String(b.body||"").trim();
-  const date=String(b.date||new Date().toISOString().slice(0,10)).trim();
+  const date=String(b.date||spadeToday()).trim();
   const featured=Number(b.featured)?1:0;
   const published=Number(b.published??1)?1:0;
 
@@ -3940,7 +3961,7 @@ app.put("/api/admin/announcements/:id", requireAdmin, async (req,res)=>{
   const category=String(b.category||"INFORMATIVO").trim()||"INFORMATIVO";
   const priority=String(b.priority||"INFORMATIVO").trim()||"INFORMATIVO";
   const body=String(b.body||"").trim();
-  const date=String(b.date||new Date().toISOString().slice(0,10)).trim();
+  const date=String(b.date||spadeToday()).trim();
   const featured=Number(b.featured)?1:0;
   const published=Number(b.published??1)?1:0;
 
@@ -5228,7 +5249,7 @@ app.delete("/api/admin/allies/:id/cards/:cardId", requireAdmin, async (req,res)=
 app.get("/api/admin/houses", requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT h.id,h.name,h.emblem,h.description,h.leader,h.vice_leader,
+      `SELECT h.id,h.name,h.kingdom,h.emblem,h.description,h.leader,h.vice_leader,
               COUNT(p.id)::int AS count,
               COALESCE(SUM(p.missions),0)::bigint AS missions,
               COALESCE(SUM(p.yuls),0)::bigint AS yuls
@@ -5238,7 +5259,7 @@ app.get("/api/admin/houses", requireAdmin, async (req, res) => {
        ORDER BY h.name COLLATE "C" ASC`
     );
     res.json({ houses: result.rows.map(h => ({
-      id:Number(h.id), name:h.name, emblem:h.emblem||"♜",
+      id:Number(h.id), name:h.name, kingdom:h.kingdom||"", emblem:h.emblem||"♜",
       description:h.description||"", leader:h.leader||"", vice_leader:h.vice_leader||"",
       count:Number(h.count), missions:Number(h.missions), yuls:Number(h.yuls)
     }))});
@@ -5254,9 +5275,9 @@ app.post("/api/admin/houses", requireAdmin, async (req, res) => {
   if(!name) return res.status(400).json({error:"Nome da Casa é obrigatório."});
   try {
     const result=await pool.query(
-      `INSERT INTO houses(name,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1) RETURNING *`,
-      [name,String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
+      `INSERT INTO houses(name,kingdom,emblem,description,leader,vice_leader,motto,color,banner_url,history,goals,achievements,status,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1) RETURNING *`,
+      [name,String(b.kingdom||"").trim(),String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
        String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim()]
     );
     res.json({house:result.rows[0]});
@@ -5281,9 +5302,9 @@ app.put("/api/admin/houses/:id", requireAdmin, async (req,res) => {
       await client.query("BEGIN");
       const result=await client.query(
         `UPDATE houses
-         SET name=$1,emblem=$2,description=$3,leader=$4,vice_leader=$5,motto=$6,color=$7,banner_url=$8,history=$9,goals=$10,achievements=$11,status=$12,active=$13,updated_at=NOW()
-         WHERE id=$14 RETURNING *`,
-        [name,String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
+         SET name=$1,kingdom=$2,emblem=$3,description=$4,leader=$5,vice_leader=$6,motto=$7,color=$8,banner_url=$9,history=$10,goals=$11,achievements=$12,status=$13,active=$14,updated_at=NOW()
+         WHERE id=$15 RETURNING *`,
+        [name,String(b.kingdom||"").trim(),String(b.emblem||"♜").trim()||"♜",String(b.description||"").trim(),
          String(b.leader||"").trim(),String(b.vice_leader||"").trim(),String(b.motto||"").trim(),String(b.color||"").trim(),String(b.banner_url||"").trim(),String(b.history||"").trim(),String(b.goals||"").trim(),String(b.achievements||"").trim(),String(b.status||"ATIVA").trim(),b.active===false||String(b.active)==='0'?0:1,id]
       );
       if((current.rows[0].leader||"") !== String(b.leader||"").trim() || (current.rows[0].vice_leader||"") !== String(b.vice_leader||"").trim()) {
@@ -5326,7 +5347,7 @@ app.post("/api/admin/houses/:id/history", requireAdmin, async (req,res)=>{
   const title=String(b.title||"").trim();
   if(!title) return res.status(400).json({error:"Título do registro é obrigatório."});
   try {
-    const r=await pool.query(`INSERT INTO house_history(house_id,event_type,title,description,event_date,created_by_admin_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,[id,String(b.event_type||"REGISTRO").trim(),title,String(b.description||"").trim(),String(b.event_date||new Date().toISOString().slice(0,10)),req.admin?.id||null]);
+    const r=await pool.query(`INSERT INTO house_history(house_id,event_type,title,description,event_date,created_by_admin_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,[id,String(b.event_type||"REGISTRO").trim(),title,String(b.description||"").trim(),String(b.event_date||spadeToday()),req.admin?.id||null]);
     res.json({history:r.rows[0]});
   } catch(e){ console.error(e); res.status(500).json({error:"Erro ao registrar histórico da Casa."}); }
 });
@@ -6753,7 +6774,7 @@ app.post("/api/admin/players/:id/missions", requireAdmin, async (req, res) => {
   const status = String(b.status||"Concluída").trim();
   const rewardYuls = Math.max(0, Math.round(Number(b.reward_yuls||0)));
   const notes = String(b.notes||"").trim();
-  const completedAt = String(b.completed_at || new Date().toISOString().slice(0,10)).trim();
+  const completedAt = String(b.completed_at || spadeToday()).trim();
 
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({error:"Jogador inválido."});
   if (!title) return res.status(400).json({error:"Informe o nome da missão."});
@@ -6773,12 +6794,10 @@ app.post("/api/admin/players/:id/missions", requireAdmin, async (req, res) => {
       [id,title,missionType,missionRank,status,rewardYuls,notes,completedAt]
     );
 
-    let newMissionCount=Number(player.missions||0);
     let newYuls=Number(player.yuls||0);
     if(status==='Concluída'){
-      newMissionCount+=1;
       newYuls+=rewardYuls;
-      await client.query('UPDATE players SET missions=$1,yuls=$2,updated_at=NOW() WHERE id=$3',[newMissionCount,newYuls,id]);
+      await client.query('UPDATE players SET yuls=$1,updated_at=NOW() WHERE id=$2',[newYuls,id]);
       if(rewardYuls>0){
         await client.query(
           `INSERT INTO yuls_history(player_id,amount,reason,balance_after) VALUES ($1,$2,$3,$4)`,
@@ -6786,6 +6805,7 @@ app.post("/api/admin/players/:id/missions", requireAdmin, async (req, res) => {
         );
       }
     }
+    await refreshMissionCounters(client);
 
     await client.query('COMMIT');
     const updated=await pool.query('SELECT * FROM players WHERE id=$1',[id]);
@@ -6809,12 +6829,12 @@ app.delete("/api/admin/players/:playerId/missions/:missionId", requireAdmin, asy
       const pr=await client.query('SELECT * FROM players WHERE id=$1 FOR UPDATE',[mission.player_id]);
       const player=pr.rows[0];
       if(player){
-        const newMissionCount=Math.max(0,Number(player.missions||0)-1);
         const newYuls=Math.max(0,Number(player.yuls||0)-Number(mission.reward_yuls||0));
-        await client.query('UPDATE players SET missions=$1,yuls=$2,updated_at=NOW() WHERE id=$3',[newMissionCount,newYuls,mission.player_id]);
+        await client.query('UPDATE players SET yuls=$1,updated_at=NOW() WHERE id=$2',[newYuls,mission.player_id]);
       }
     }
     await client.query('DELETE FROM missions WHERE id=$1 AND player_id=$2',[missionId,playerId]);
+    await refreshMissionCounters(client);
     await client.query('COMMIT');
     res.json({ok:true});
   } catch(e) {
@@ -7086,7 +7106,7 @@ app.post("/api/admin/players/:id/yuls", requireAdmin, async (req, res) => {
 app.post("/api/admin/players/:id/yuls/reset", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const reason = String(req.body?.reason || "Acerto de saldo para transferência").trim();
-  const activityDate = String(req.body?.activity_date || new Date().toISOString().slice(0,10));
+  const activityDate = String(req.body?.activity_date || spadeToday());
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Jogador inválido." });
 
   const client = await pool.connect();
@@ -7461,6 +7481,7 @@ process.on('SIGINT',()=>shutdown('SIGINT'));
 
 initDatabase()
   .then(async () => {
+    await refreshMissionCounters();
     await seedOfficialLibrary();
     await seedOfficialCronograma();
     await seedSimulatorTrainings();
