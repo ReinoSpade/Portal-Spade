@@ -8,6 +8,7 @@ const qs=s=>document.querySelector(s);
 const qsa=s=>[...document.querySelectorAll(s)];
 const escapeHtml=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const money=v=>Number(v||0).toLocaleString("pt-BR");
+function localDateKey(d){const x=new Date(d);return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;}
 
 const AMBIENT_TRACKS={
   home:"/assets/audio/spade-home.ogg",
@@ -549,6 +550,12 @@ function eventTypeLabel(t){return {JOGO:"Evento de Jogo",ESPECIAL:"Evento Especi
 function eventStatusClass(s){return s==="ATIVO"?"active":s==="PLANEJADO"?"plan":s==="ENCERRADO"?"closed":""}
 function eventStatusLabel(s){return {ATIVO:"ATIVO",PLANEJADO:"PRÓXIMO",ENCERRADO:"ENCERRADO",CANCELADO:"CANCELADO"}[s]||s}
 
+function spadeTodayClient(){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+  const get=k=>parts.find(p=>p.type===k)?.value||"";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 function statusDateLabel(value){
   const str=String(value||"").slice(0,10);
   const [y,m,d]=str.split("-");
@@ -636,15 +643,15 @@ async function toggleStatusComments(id){
   try{const d=await api(`/api/status/${id}/comments`);const comments=(d.comments||[]).map(c=>`<div class="status-comment"><b>${escapeHtml(c.nick)}</b><span>${escapeHtml(c.message)}</span></div>`).join("");const form=state.me?.account_type==="ALLY"?`<div class="status-readonly-note">👁️ Você está acompanhando este mural em modo observador.</div>`:`<form class="status-comment-form" data-comment-form="${id}"><input maxlength="280" placeholder="Comente neste status..."><button class="gold small" type="submit">Enviar</button></form>`;box.innerHTML=comments+form;
   }catch(e){box.innerHTML=`<div class="comments-loading">${escapeHtml(e.message)}</div>`}
 }
-let scheduleMonth = new Date().toISOString().slice(0,7);
-let scheduleSelectedDate = new Date().toISOString().slice(0,10);
+let scheduleMonth = spadeTodayClient().slice(0,7);
+let scheduleSelectedDate = spadeTodayClient();
 
 async function loadSchedule(){
   try{
     const d=await api("/api/schedule");
     state.schedule=d.activities||[];
     populateScheduleTypeFilter(state.schedule);
-    const nowKey=new Date().toISOString().slice(0,10),nowMonth=nowKey.slice(0,7);
+    const nowKey=spadeTodayClient(),nowMonth=nowKey.slice(0,7);
     const availableMonths=[...new Set(state.schedule.map(x=>String(x.activity_date||'').slice(0,7)).filter(Boolean))];
     if(!availableMonths.includes(scheduleMonth)) scheduleMonth=availableMonths.includes(nowMonth)?nowMonth:(availableMonths[availableMonths.length-1]||scheduleMonth);
     scheduleSelectedDate = scheduleMonth===nowMonth?nowKey:scheduleMonth+'-01';
@@ -667,7 +674,7 @@ function scheduleTypeLabel(type){
 }
 function scheduleStatusLabel(a, dayKey=null){
   const s=String(a.status||'').toUpperCase();
-  const todayKey=new Date().toISOString().slice(0,10);
+  const todayKey=spadeTodayClient();
   const end=String(a.end_date||a.activity_date||'').slice(0,10),start=String(a.activity_date||'').slice(0,10);
   if(s==='CANCELADA') return 'Cancelada';
   if(todayKey<start) return 'Agendada';
@@ -704,15 +711,15 @@ function renderSchedule(items){
   const visible=filteredScheduleItems();
   const cells=scheduleMonthDateKeys(year,monthIndex);
   const dayNames=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
-  const todayKey=new Date().toISOString().slice(0,10);
+  const todayKey=spadeTodayClient();
   const counts={};
   visible.forEach(a=>{
     const start=new Date(String(a.activity_date).slice(0,10)+'T00:00:00'),end=new Date(String(a.end_date||a.activity_date).slice(0,10)+'T00:00:00');
-    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){const k=d.toISOString().slice(0,10);counts[k]=(counts[k]||0)+1;}
+    for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){const k=localDateKey(d);counts[k]=(counts[k]||0)+1;}
   });
   calendar.innerHTML=`<div class="schedule-calendar-head">${dayNames.map(x=>`<span>${x}</span>`).join('')}</div><div class="schedule-calendar-grid">${cells.map(d=>{
     if(!d)return `<div class="schedule-day empty"></div>`;
-    const key=d.toISOString().slice(0,10),inMonth=key.slice(0,7)===scheduleMonth,dayItems=visible.filter(a=>activityTouchesDay(a,key));
+    const key=localDateKey(d),inMonth=key.slice(0,7)===scheduleMonth,dayItems=visible.filter(a=>activityTouchesDay(a,key));
     return `<button class="schedule-day ${key===todayKey?'today':''} ${key===scheduleSelectedDate?'selected':''}" type="button" data-schedule-day="${key}">
       <span class="schedule-day-number">${d.getDate()}</span>
       <div class="schedule-day-items">${dayItems.slice(0,4).map(a=>`<span class="schedule-day-dot type-${String(a.activity_type||'').replace(/[^A-Za-z0-9]/g,'')}">${scheduleTypeIcon(a.activity_type)} <b>${escapeHtml(a.title)}</b></span>`).join('')}${dayItems.length>4?`<small>+${dayItems.length-4} atividades</small>`:''}</div>
@@ -735,7 +742,7 @@ function renderScheduleDay(items){
 }
 function renderScheduleNow(items){
   const box=qs('#scheduleNowSummary');if(!box)return;
-  const today=new Date().toISOString().slice(0,10),active=(items||[]).filter(a=>activityTouchesDay(a,today)&&['Hoje','Em andamento'].includes(scheduleStatusLabel(a)));
+  const today=spadeTodayClient(),active=(items||[]).filter(a=>activityTouchesDay(a,today)&&['Hoje','Em andamento'].includes(scheduleStatusLabel(a)));
   const monthTotal=(items||[]).filter(a=>String(a.activity_date).slice(0,7)===scheduleMonth||String(a.end_date||a.activity_date).slice(0,7)===scheduleMonth).length;
   box.innerHTML=`<p class="eyebrow">VISÃO DO MÊS</p><h3>${monthTotal} atividades registradas</h3><p>${active.length?`Hoje o Reino tem <b>${active.length}</b> atividade(s) em sua agenda.`:'A agenda de hoje não possui atividades marcadas em andamento.'}</p>`;
 }
@@ -938,6 +945,7 @@ function renderHouses(houses){
     ? houses.map(h=>`<button type="button" class="house-public-card" data-house-id="${h.id}">
         <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
         <h3>${escapeHtml(h.name)}</h3>
+        ${h.kingdom?`<small class="house-kingdom-label">${escapeHtml(h.kingdom)}</small>`:""}
         <p>${escapeHtml(h.description||"Casa do Reino Spade.")}</p>
         ${h.motto?`<div class="house-motto">“${escapeHtml(h.motto)}”</div>`:""}
         <div class="house-meta"><span>${h.count} membros</span><span>${h.missions} missões</span><span>🪙 ${money(h.yuls)}</span></div>
@@ -959,7 +967,7 @@ async function openHouse(id){
       <div class="house-detail-head">
         <div class="house-detail-ident">
           <div class="house-emblem">${escapeHtml(h.emblem||"♜")}</div>
-          <div><p class="eyebrow">CASA</p><h2>${escapeHtml(h.name)}</h2><p class="lead-house">${escapeHtml(h.description||"")}</p></div>
+          <div><p class="eyebrow">CASA ${h.kingdom?`• ${escapeHtml(h.kingdom)}`:""}</p><h2>${escapeHtml(h.name)}</h2><p class="lead-house">${escapeHtml(h.description||"")}</p></div>
         </div>
         <div style="text-align:right"><small style="color:#777;font-size:8px;letter-spacing:.12em;text-transform:uppercase">Liderança</small><div style="font-size:11px;margin-top:6px">${escapeHtml(h.leader||"Não definida")}</div><div style="color:#888;font-size:10px;margin-top:3px">${h.vice_leader?`Vice: ${escapeHtml(h.vice_leader)}`:"Vice-liderança não definida"}</div></div>
       </div>
@@ -1827,7 +1835,7 @@ async function loadAdminHouses(){
     const list=qs("#adminHouseList");
     if(!list)return;
     list.innerHTML=state.adminHouses.map(h=>`<div class="admin-house-item">
-      <div><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><small>${h.count} membros • ${h.missions} missões • 🪙 ${money(h.yuls)}${h.leader?` • Líder: ${escapeHtml(h.leader)}`:""} • ${escapeHtml(h.status||"ATIVA")}</small></div>
+      <div><b>${escapeHtml(h.emblem||"♜")} ${escapeHtml(h.name)}</b><small>${h.kingdom?`${escapeHtml(h.kingdom)} • `:""}${h.count} membros • ${h.missions} missões • 🪙 ${money(h.yuls)}${h.leader?` • Líder: ${escapeHtml(h.leader)}`:""} • ${escapeHtml(h.status||"ATIVA")}</small></div>
       <div class="admin-house-item-actions"><button type="button" data-house-edit="${h.id}" title="Editar">✎</button><button type="button" class="delete" data-house-delete="${h.id}" title="Excluir">×</button></div>
     </div>`).join("")||`<div style="color:#888;font-size:10px;padding:10px">Nenhuma Casa.</div>`;
     qsa("[data-house-edit]").forEach(b=>b.addEventListener("click",()=>editHouseForm(Number(b.dataset.houseEdit))));
@@ -1843,7 +1851,7 @@ function resetHouseForm(){
 }
 function editHouseForm(id){
   const h=state.adminHouses.find(x=>Number(x.id)===id);if(!h)return;
-  qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseEmblem").value=h.emblem||"♜";
+  qs("#houseId").value=h.id;qs("#houseName").value=h.name;qs("#houseKingdom").value=h.kingdom||"";qs("#houseEmblem").value=h.emblem||"♜";
   qs("#houseLeader").value=h.leader||"";qs("#houseVice").value=h.vice_leader||"";qs("#houseMotto").value=h.motto||"";qs("#houseColor").value=h.color||"";qs("#houseBanner").value=h.banner_url||"";qs("#houseStatus").value=h.status||"ATIVA";qs("#houseDescription").value=h.description||"";qs("#houseHistory").value=h.history||"";qs("#houseGoals").value=h.goals||"";qs("#houseAchievements").value=h.achievements||"";
   qs("#houseSaveBtn").textContent="Salvar Casa";qs("#houseError").textContent="";
   qs("#houseName").focus();
@@ -2512,7 +2520,7 @@ function renderEconomyPanel(p){
 
 function renderMissionsPanel(p){
   const list=(p.missions||[]).map(m=>`<div class="admin-mission-row"><span><b>${escapeHtml(m.title)}</b><small>${escapeHtml(m.status)}${m.mission_rank?` • ${escapeHtml(m.mission_rank)}`:""}${m.reward_yuls?` • 🪙 ${money(m.reward_yuls)}`:""} • ${escapeHtml(String(m.completed_at||""))}</small></span><button type="button" data-mission-delete="${m.id}">Excluir</button></div>`).join("")||"<div class='admin-history-empty'>Nenhuma missão registrada.</div>";
-  return `<div class="admin-mission-box"><h4>⚔️ Registrar missão</h4><div class="mission-form-grid"><input id="missionTitle" class="wide" placeholder="Nome da missão"><input id="missionType" placeholder="Tipo (Missão, Evento...)"><input id="missionRank" placeholder="Rank"><select id="missionStatus"><option>Concluída</option><option>Falha</option><option>Cancelada</option><option>Em andamento</option></select><input id="missionReward" type="number" min="0" step="1" placeholder="Recompensa em Yuls"><input id="missionDate" type="date" value="${new Date().toISOString().slice(0,10)}"><textarea id="missionNotes" class="wide" placeholder="Observações (opcional)"></textarea></div><div class="mission-form-actions"><button class="gold" id="missionBtn" type="button">Registrar missão</button></div><div class="history" style="margin-top:16px"><div class="eyebrow">HISTÓRICO DE MISSÕES</div><div class="admin-mission-history">${list}</div></div></div>`;
+  return `<div class="admin-mission-box"><h4>⚔️ Registrar missão</h4><div class="mission-form-grid"><input id="missionTitle" class="wide" placeholder="Nome da missão"><input id="missionType" placeholder="Tipo (Missão, Evento...)"><input id="missionRank" placeholder="Rank"><select id="missionStatus"><option>Concluída</option><option>Falha</option><option>Cancelada</option><option>Em andamento</option></select><input id="missionReward" type="number" min="0" step="1" placeholder="Recompensa em Yuls"><input id="missionDate" type="date" value="${spadeTodayClient()}"><textarea id="missionNotes" class="wide" placeholder="Observações (opcional)"></textarea></div><div class="mission-form-actions"><button class="gold" id="missionBtn" type="button">Registrar missão</button></div><div class="history" style="margin-top:16px"><div class="eyebrow">HISTÓRICO DE MISSÕES</div><div class="admin-mission-history">${list}</div></div></div>`;
 }
 
 function renderAdminPlayerCardsPanel(p){
@@ -3354,7 +3362,7 @@ function resetArticleForm(){
   f.reset();
   qs("#articleId").value="";
   qs("#articleCategory").value="RPG";
-  qs("#articleDate").value=new Date().toISOString().slice(0,10);
+  qs("#articleDate").value=spadeTodayClient();
   if(qs("#articleImageFile"))qs("#articleImageFile").value="";refreshMediaPreview("articleImage","articleImagePreview");
   qs("#articlePublished").checked=true;
   qs("#articleSaveBtn").textContent="Criar matéria";
@@ -3477,7 +3485,7 @@ function resetAnnouncementForm(){
   qs("#announcementId").value="";
   qs("#announcementCategory").value="INFORMATIVO";
   qs("#announcementPriority").value="INFORMATIVO";
-  qs("#announcementDate").value=new Date().toISOString().slice(0,10);
+  qs("#announcementDate").value=spadeTodayClient();
   qs("#announcementFeatured").checked=false;
   qs("#announcementPublished").checked=true;
   qs("#announcementSaveBtn").textContent="Publicar comunicado";
@@ -3594,7 +3602,7 @@ qs('#scheduleSearch')?.addEventListener('input',()=>{renderSchedule(state.schedu
 qs('#scheduleTypeFilter')?.addEventListener('change',()=>{renderSchedule(state.schedule);});
 qs('#schedulePrevMonth')?.addEventListener('click',()=>{const d=new Date(scheduleMonth+'-01T12:00:00');d.setMonth(d.getMonth()-1);scheduleMonth=d.toISOString().slice(0,7);scheduleSelectedDate=scheduleMonth+'-01';renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
 qs('#scheduleNextMonth')?.addEventListener('click',()=>{const d=new Date(scheduleMonth+'-01T12:00:00');d.setMonth(d.getMonth()+1);scheduleMonth=d.toISOString().slice(0,7);scheduleSelectedDate=scheduleMonth+'-01';renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
-qs('#scheduleTodayBtn')?.addEventListener('click',()=>{scheduleMonth=new Date().toISOString().slice(0,7);scheduleSelectedDate=new Date().toISOString().slice(0,10);renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
+qs('#scheduleTodayBtn')?.addEventListener('click',()=>{scheduleMonth=spadeTodayClient().slice(0,7);scheduleSelectedDate=spadeTodayClient();renderSchedule(state.schedule);loadScheduleChampions(scheduleMonth);});
 qs('#scheduleForm')?.addEventListener('submit',async e=>{e.preventDefault();const err=qs('#scheduleError');err.textContent='';const body={title:qs('#scheduleTitle').value,activity_type:qs('#scheduleType').value,status:qs('#scheduleStatus').value,activity_date:qs('#scheduleDate').value,end_date:qs('#scheduleEndDate').value||qs('#scheduleDate').value,start_time:qs('#scheduleStart').value,end_time:qs('#scheduleEnd').value,cycle_label:qs('#scheduleCycle').value,location:qs('#scheduleLocation').value,link:qs('#scheduleLink').value,event_id:qs('#scheduleEvent').value||null,mission_id:qs('#scheduleMission').value||null,winner_player_id:qs('#scheduleWinner').value||null,result_text:qs('#scheduleResult').value,description:qs('#scheduleDescription').value,featured:qs('#scheduleFeatured').checked?1:0,published:qs('#schedulePublished').checked?1:0};const id=qs('#scheduleId').value;try{await adminApi(id?`/api/admin/schedule/${id}`:'/api/admin/schedule',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});resetScheduleForm();await loadAdminSchedule();await loadSchedule();alert(id?'Atividade atualizada.':'Atividade criada.');}catch(ex){err.textContent=ex.message}});
 qs('#scheduleCancelBtn')?.addEventListener('click',resetScheduleForm);
 qs('#scheduleChampionForm')?.addEventListener('submit',async e=>{e.preventDefault();const err=qs('#scheduleChampionError');err.textContent='';const body={period_key:qs('#scheduleChampionPeriod').value,category:qs('#scheduleChampionCategory').value,title:qs('#scheduleChampionTitle').value,winner_nick:qs('#scheduleChampionWinner').value,note:qs('#scheduleChampionNote').value};const id=qs('#scheduleChampionId').value;try{await adminApi(id?`/api/admin/schedule-champions/${id}`:'/api/admin/schedule-champions',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const period=body.period_key;resetScheduleChampionForm();await loadAdminScheduleChampions(period);await loadScheduleChampions(period);alert(id?'Campeão atualizado.':'Campeão adicionado.');}catch(ex){err.textContent=ex.message}});
@@ -3669,7 +3677,7 @@ function updateEditionEditorHeader(editing=false){
 }
 function resetEditionForm(){
   const f=qs("#editionForm");if(!f)return;f.reset();
-  qs("#editionId").value="";qs("#editionDate").value=new Date().toISOString().slice(0,10);if(qs("#editionCoverFile"))qs("#editionCoverFile").value="";refreshMediaPreview("editionCover","editionCoverPreview");
+  qs("#editionId").value="";qs("#editionDate").value=spadeTodayClient();if(qs("#editionCoverFile"))qs("#editionCoverFile").value="";refreshMediaPreview("editionCover","editionCoverPreview");
   qs("#editionPublished").checked=false;qs("#editionError").textContent="";
   const sel=qs("#editorEditionSelect");if(sel&&state.adminEditions?.[0])sel.value=String(state.adminEditions[0].id);
   updateEditionEditorHeader(false);
